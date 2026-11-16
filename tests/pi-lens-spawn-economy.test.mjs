@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {parseExpressionAt} from 'acorn';
 
 // The pi-lens bundle is shipped as one file, so these tests evaluate the shipped
@@ -80,4 +82,95 @@ test('global bin directories are looked up once per manager, concurrently, and a
     assert.equal(await api.findGlobalBinary('biome'),path.join(managed,'biome'));
     assert.equal(calls.length,before,'no manager was spawned for a managed binary');
   } finally { fs.rmSync(home,{recursive:true,force:true}); }
+});
+
+test('opaque changes are resolved against the Git root when Bash runs in a nested directory', async t => {
+  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'lens-nested-git-'));
+  t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const nested=path.join(dir,'app'), edited=path.join(nested,'value.js');
+  const git=(cwd,...args)=>execFileSync('git',['-C',cwd,...args],{encoding:'utf8'});
+  git(dir,'init','-q');
+  fs.mkdirSync(nested);
+  fs.writeFileSync(edited,'const value=1;\n');
+  git(dir,'add','app/value.js');
+  git(dir,'-c','user.name=Fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture');
+  const startedAt=Date.now();
+  fs.writeFileSync(edited,'const value=2;\n');
+  const api=load(['resolveGitToplevel','recoverOpaqueChangesViaGit'],{
+    path159:path,fs109:fs,normalizeMapKey:f=>f,
+    safeSpawnAsync:async(_cmd,args,{cwd})=>({stdout:git(cwd,...args),status:0}),
+    truncatedByOutputCap:()=>false,isStructurallyValidStatus:()=>true,isKnownPorcelainStatus:()=>true,isUnmergedStatus:()=>false,
+    freshnessFromMtime:({mtimeMs,referenceMs})=>({verdict:mtimeMs>=referenceMs?'stale':'fresh'}),
+  },'var gitToplevelMemo=new Map(),OPAQUE_MTIME_TOLERANCE_MS=150,MAX_GIT_STATUS_OUTPUT_BYTES=16777216;');
+  const result=await api.recoverOpaqueChangesViaGit(nested,startedAt);
+  assert.equal(result.verdict,'recovered');
+  assert.deepEqual([...result.paths],[edited]);
+});
+
+test('opaque baselines belong to the individual Bash call and survive out-of-order results', async () => {
+  const marker='var OpaqueBaselineStore = class';
+  const offset=bundle.indexOf(marker)+'var OpaqueBaselineStore = '.length;
+  const source=bundle.slice(offset,parseExpressionAt(bundle,offset,{ecmaVersion:'latest'}).end);
+  const Store=vm.runInNewContext(`(${source})`);
+  const store=new Store();
+  let clock=10;
+  const recovered=[],logs=[];
+  const api=load(['opaqueBaselineKey','handleToolCallImpl','handleToolResult'],{
+    path159:path,Date:{now:()=>clock},normalizeMapKey:f=>f,resolveToolCallCorrelationId:e=>e.toolCallId,
+    getReadGuardCorrelationId:e=>e.toolCallId,getStableSessionId:ctx=>ctx.sessionManager.getSessionId(),
+    getOpaqueBaselineStore:()=>store,logLatency:e=>logs.push(e),
+    isGitWorktree:async()=>true,captureFileStats:async()=>assert.fail('Git worktree should not need a full file snapshot'),
+    getToolCallRawFilePath:()=>undefined,resolveToolCallFilePath:()=>undefined,
+    extractWrittenPathsFromCommand:()=>[],extractReadPathsFromCommand:()=>[],isFailedGitIntegrationCommand:()=>false,
+    recoverOpaqueChangesViaGit:async(root,start)=>{recovered.push([root,start]);return {verdict:'recovered',paths:[]};},
+    AUTHORITATIVE_CONTENT_MAX_BYTES:1024,process,
+  });
+  const key=id=>api.opaqueBaselineKey('/fixture','session',1,{toolCallId:id});
+  const ctx={cwd:'/fixture',sessionManager:{getSessionId:()=> 'session'}};
+  const runtime={projectRoot:'/fixture',sessionGeneration:1,takeToolCallAttribution(){}};
+  let disabled=false;
+  const getFlag=name=>name==='no-lsp'||(name==='no-read-guard'&&disabled);
+  const event=toolCallId=>({toolCallId,toolName:'bash',input:{command:'fixture command'},content:[]});
+  const call=id=>api.handleToolCallImpl({event:event(id),ctx,runtime,lensEnabled:true,getFlag,getTreeSitterClient(){}});
+  const result=id=>api.handleToolResult({event:event(id),runtime,getFlag,ctxCwd:ctx.cwd,sessionId:'session',dbg(){},agentBehaviorRecord:()=>[]});
+  await call('first');clock++;
+  await call('second');clock++;
+  await result('second');
+  await result('first');
+  assert.deepEqual(recovered,[['/fixture',11],['/fixture',10]]);
+  disabled=true;
+  await call('disabled');
+  assert.equal(store.take(key('disabled')),undefined);
+  assert.equal(logs.filter(e=>e.phase==='opaque_mutation_prescan').length,2);
+  assert.notEqual(key('first'),api.opaqueBaselineKey('/fixture','different',1,{toolCallId:'first'}));
+  for(let i=0;i<256;i++) store.record(key(String(i)),{startedAt:i});
+  assert.ok(store.evictionCount>0);
+  assert.equal(store.take(key('0')),undefined);
+  assert.equal(store.take(key('255')).startedAt,255);
+});
+
+test('opaque file snapshots bound concurrent I/O and preserve byte budget and walk order', async () => {
+  const files=['a','b','c','d','directory'].map(file=>path.resolve('/fixture',file));
+  const data=Buffer.from('xx');
+  let pending=0,peak=0,reads=0;
+  const io=(fn)=>async file=>{
+    peak=Math.max(peak,++pending);
+    await new Promise(resolve=>setImmediate(resolve));
+    pending--;
+    return fn(file);
+  };
+  const api=load(['captureFileStats'],{
+    path159:path,createHash16:createHash,normalizeMapKey:f=>f,
+    collectSourceFilesWithBudgetAsync:async()=>({files}),
+    fs109:{promises:{
+      stat:io(file=>({size:data.length,mtimeMs:16,isFile:()=>file!==files.at(-1)})),
+      readFile:io(()=>{reads++;return data;}),
+    }},
+  },'var OPAQUE_HASH_BUDGET_BYTES=4,OPAQUE_SCAN_MAX_FILES=2000,OPAQUE_SCAN_BATCH_SIZE=3;');
+  const result=await api.captureFileStats('/fixture',{withHashes:true});
+  const expected=createHash('sha256').update(data).digest('hex');
+  assert.deepEqual([...result.snapshot.keys()],files.slice(0,4));
+  assert.deepEqual([...result.snapshot.values()].map(item=>item.hash),[expected,expected,undefined,undefined]);
+  assert.equal(reads,2);
+  assert.equal(peak,3);
 });

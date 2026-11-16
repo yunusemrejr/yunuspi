@@ -1,6 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 import { matchesDomainFilters, normalizeDomainFilters } from "./duckduckgo.ts";
 import { researchPassages, sourceDigest } from "../lib/research-evidence.ts";
+import type { WebUsageSink } from "./web-usage.ts";
 
 /** Registrable-ish domain: the last two labels, three for common two-part
  * public suffixes (example.co.uk). Good enough for diversity accounting. */
@@ -76,6 +77,7 @@ export async function runResearchWork(
   ctx: any,
   runSearch: any,
   readSource: any,
+  onUsage?: WebUsageSink,
 ) {
   const signal = job.controller.signal;
   const filters = normalizeDomainFilters(p.domainFilter);
@@ -109,6 +111,7 @@ export async function runResearchWork(
     numResults: 5,
     signal,
     extensionContext: ctx,
+    onUsage,
   };
   const boundedFailures = (failures: any[] = []) =>
     failures.slice(0, 3).map((f) => ({

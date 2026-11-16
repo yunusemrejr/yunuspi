@@ -1,4 +1,4 @@
-import { addUsageCost, addAuxiliaryUsage } from "../../shared/cost-accounting.ts";
+import { addUsageCost, addAuxiliaryUsage, finalizeChildUsage } from "../../shared/cost-accounting.ts";
 import { captureFileVerification, hasFailedFileVerification } from "../shared/file-verification.ts";
 import { shadowAssistanceLaunch } from "../shared/assistance-shadow.ts";
 import { createProgressEvidence, observeProgressEvidence } from "../../shared/progress-evidence.ts";
@@ -459,6 +459,7 @@ function usageFromAttempts(attempts: ModelAttempt[] | undefined): Usage | undefi
 		usage.turns += attempt.usage.turns;
 	}
 	return usage.input !== 0 || usage.output !== 0 || usage.cacheRead !== 0 || usage.cacheWrite !== 0 || usage.cost !== 0 || usage.turns !== 0
+		|| usage.costDetails?.seen || usage.costDetails?.unknown || usage.costDetails?.subscription
 		? usage
 		: undefined;
 }
@@ -1169,6 +1170,7 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 			clearStdioGuard();
 			stdoutReader.end();
 			stderrReader.end();
+			finalizeChildUsage(usage);
 			outputStream.end();
 			const stderr = stderrTail.text();
 			const finalOutput = getFinalOutput(messages) || rawStdoutTail.text().trim();
@@ -1231,6 +1233,7 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 			clearStdioGuard();
 			stdoutReader.end();
 			stderrReader.end();
+			finalizeChildUsage(usage);
 			outputStream.end();
 			const stderr = stderrTail.text();
 			const finalOutput = getFinalOutput(messages) || rawStdoutTail.text().trim();

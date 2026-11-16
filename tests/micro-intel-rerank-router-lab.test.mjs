@@ -60,6 +60,25 @@ test('remote rerank rejects malformed provider indices and scores', async () => 
   }
 });
 
+test('Voyage transport removes credentials from query and documents before submission', async () => {
+  const credential = 'synthetic-voyage-value';
+  const transport = rerankMod.voyageRerankTransport({
+    key: () => credential,
+    env: {},
+    fetchImpl: async (_url, init) => {
+      const body = JSON.parse(init.body);
+      assert.equal(init.redirect, 'error');
+      assert.equal(body.query, 'Find [redacted]');
+      assert.deepEqual(body.documents, ['A [redacted]', 'B']);
+      return Response.json({ data: [{ index: 1, relevance_score: 1 }, { index: 0, relevance_score: 0.5 }] });
+    },
+  });
+  assert.deepEqual(await transport({
+    url: rerankMod.RERANK_DEFAULT_URL, model: 'fixture', query: `Find ${credential}`,
+    documents: [`A ${credential}`, 'B'], topK: 2, timeoutMs: 100,
+  }), { order: [1, 0] });
+});
+
 test('remote rerank snapshots candidate IDs and rejects invalid or cancelled injected results', async () => {
   const candidates = [{ id: 'a', text: 'first' }, { id: 'b', text: 'second' }, { id: 'c', text: 'third' }];
   const env = { PI_RERANK: 'on' };

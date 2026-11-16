@@ -5,6 +5,7 @@ import { activityMonitor } from "./activity.ts";
 import type { SearchOptions, SearchResponse, SearchResult } from "./perplexity.ts";
 import { hasCredentialSource, redactCredential, resolveCredential } from "./credential-source.ts";
 import { getWebSearchConfigPath } from "./utils.ts";
+import { startWebUsage } from "./web-usage.ts";
 
 const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
 const CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses";
@@ -355,56 +356,139 @@ function buildWebSearchTool(options: SearchOptions): Record<string, unknown> {
 interface ParsedOpenAIResponse {
 	payload: Record<string, unknown>;
 	webSearchCallSeen: boolean;
+	searchCalls: number;
 }
 
 function isWebSearchCall(item: unknown): boolean {
 	return !!item && typeof item === "object" && (item as { type?: unknown }).type === "web_search_call";
 }
 
-async function parseOpenAIResponse(response: Response): Promise<ParsedOpenAIResponse> {
-	const text = await response.text();
-	const trimmed = text.trim();
-	if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+function countCompletedSearches(items: unknown[]): number {
+	const callIds = new Set<string>();
+	for (const item of items) {
+		if (!isWebSearchCall(item)) continue;
+		const call = item as { id?: unknown; status?: unknown; action?: { type?: unknown } };
+		if (typeof call.id === "string" && call.id && call.status === "completed" && call.action?.type === "search") callIds.add(call.id);
+	}
+	return callIds.size;
+}
+
+function openAISearchUsage(parsed: ParsedOpenAIResponse, isCodex: boolean, officialEndpoint: boolean) {
+	const usage = parsed.payload.usage as {
+		input_tokens?: unknown;
+		input_tokens_details?: { cached_tokens?: unknown };
+		output_tokens?: unknown;
+		output_tokens_details?: { reasoning_tokens?: unknown };
+	} | undefined;
+	const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+	const input = count(usage?.input_tokens);
+	const cached = count(usage?.input_tokens_details?.cached_tokens);
+	const cacheRead = cached !== undefined && (input === undefined || cached <= input) ? cached : undefined;
+	const output = count(usage?.output_tokens);
+	const reasoning = count(usage?.output_tokens_details?.reasoning_tokens);
+	// The Responses receipt gives tokens, not the account's final USD bill.
+	// The documented web_search action fee can be estimated on OpenAI's
+	// official API. Other endpoints can have a different price schedule.
+	const estimated = officialEndpoint && !isCodex ? parsed.searchCalls * 0.01 : 0;
+	return {
+		...(input !== undefined ? { input: input - (cacheRead ?? 0) } : {}),
+		...(cacheRead !== undefined ? { cacheRead } : {}),
+		...(output !== undefined ? { output } : {}),
+		...(reasoning !== undefined && (output === undefined || reasoning <= output) ? { reasoning } : {}),
+		costDetails: { reported: 0, estimated, unknown: true, subscription: isCodex, seen: estimated > 0 },
+	};
+}
+
+async function parseOpenAIResponse(
+	response: Response,
+	onInterrupted: (progress: ParsedOpenAIResponse) => void,
+): Promise<ParsedOpenAIResponse> {
+	const outputItems: unknown[] = [];
+	const state: { completedResponse?: Record<string, unknown>; webSearchCallSeen: boolean; mode?: "json" | "sse" } = {
+		webSearchCallSeen: false,
+	};
+	const snapshot = () => {
+		const completed = state.completedResponse;
+		const output = Array.isArray(completed?.output) ? completed.output : [];
+		const payload = completed && output.length > 0 ? completed : { ...completed, output: outputItems };
+		return {
+			payload,
+			webSearchCallSeen: state.webSearchCallSeen || output.some(isWebSearchCall),
+			searchCalls: countCompletedSearches([...output, ...outputItems]),
+		};
+	};
+	const consumeLine = (line: string) => {
+		if (!line.startsWith("data:")) return;
+		const data = line.slice(5).trim();
+		if (!data || data === "[DONE]") return;
 		try {
-			const parsed = JSON.parse(trimmed);
-			const payload = Array.isArray(parsed)
-				? { output: parsed }
-				: parsed && typeof parsed === "object" ? parsed as Record<string, unknown> : { output: [] };
+			const frame = JSON.parse(data) as Record<string, unknown>;
+			const type = frame.type;
+			if (typeof type !== "string") return;
+			if (type.startsWith("response.web_search_call")) state.webSearchCallSeen = true;
+			if (type === "response.output_item.done" && frame.item) {
+				outputItems.push(frame.item);
+				state.webSearchCallSeen ||= isWebSearchCall(frame.item);
+			}
+			if (["response.done", "response.completed", "response.failed", "response.incomplete"].includes(type)
+				&& frame.response && typeof frame.response === "object") {
+				state.completedResponse = frame.response as Record<string, unknown>;
+			}
+		} catch { /* Stay compatible with providers that emit extra non-JSON events. */ }
+	};
+
+	const reader = response.body?.getReader();
+	const decoder = new TextDecoder();
+	let bytes = 0;
+	let buffer = "";
+	const consume = (text: string) => {
+		const searchFrom = buffer.length;
+		buffer += text;
+		if (state.mode === undefined) {
+			const first = buffer.trimStart()[0];
+			if (!first) return;
+			state.mode = first === "{" || first === "[" ? "json" : "sse";
+		}
+		if (state.mode === "sse") {
+			let start = 0;
+			for (let end = buffer.indexOf("\n", searchFrom); end >= 0; end = buffer.indexOf("\n", start)) {
+				consumeLine(buffer.slice(start, end));
+				start = end + 1;
+			}
+			buffer = buffer.slice(start);
+		}
+	};
+
+	try {
+		while (reader) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			bytes += value.byteLength;
+			if (bytes > 2 * 1024 * 1024) throw new Error("OpenAI search response exceeds bounded body limit");
+			consume(decoder.decode(value, { stream: true }));
+		}
+		consume(decoder.decode());
+	} catch (error) {
+		onInterrupted(snapshot());
+		await reader?.cancel().catch(() => {});
+		throw error;
+	} finally {
+		reader?.releaseLock();
+	}
+
+	if (state.mode === "json") {
+		try {
+			const parsed = JSON.parse(buffer);
+			const payload = Array.isArray(parsed) ? { output: parsed } : parsed as Record<string, unknown>;
 			const output = Array.isArray(payload.output) ? payload.output : [];
-			return { payload, webSearchCallSeen: output.some(isWebSearchCall) };
-		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
+			return { payload, webSearchCallSeen: output.some(isWebSearchCall), searchCalls: countCompletedSearches(output) };
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
 			throw new Error(`OpenAI API returned invalid JSON: ${message}`);
 		}
 	}
-
-	const outputItems: unknown[] = [];
-	let completedResponse: Record<string, unknown> | null = null;
-	let webSearchCallSeen = false;
-	for (const line of text.split("\n")) {
-		if (!line.startsWith("data: ")) continue;
-		const data = line.slice(6).trim();
-		if (!data || data === "[DONE]") continue;
-		try {
-			const parsed = JSON.parse(data) as Record<string, unknown>;
-			if (typeof parsed.type === "string" && parsed.type.startsWith("response.web_search_call")) webSearchCallSeen = true;
-			if (parsed.type === "response.output_item.done" && parsed.item) {
-				outputItems.push(parsed.item);
-				webSearchCallSeen ||= isWebSearchCall(parsed.item);
-			}
-			if ((parsed.type === "response.done" || parsed.type === "response.completed") && parsed.response && typeof parsed.response === "object") {
-				completedResponse = parsed.response as Record<string, unknown>;
-			}
-		} catch {
-		}
-	}
-
-	if (completedResponse) {
-		const output = Array.isArray(completedResponse.output) ? completedResponse.output : [];
-		const payload = output.length > 0 ? completedResponse : { ...completedResponse, output: outputItems };
-		return { payload, webSearchCallSeen: webSearchCallSeen || output.some(isWebSearchCall) };
-	}
-	if (outputItems.length > 0) return { payload: { output: outputItems }, webSearchCallSeen: webSearchCallSeen || outputItems.some(isWebSearchCall) };
+	consumeLine(buffer);
+	if (state.completedResponse || outputItems.length > 0) return snapshot();
 	throw new Error("OpenAI API returned no parseable response output");
 }
 
@@ -533,17 +617,26 @@ async function runOpenAISearch(
 		parallel_tool_calls: true,
 	};
 
+	let finishUsage: ReturnType<typeof startWebUsage> | undefined;
+	let usage = useCodexEndpoint
+		? { costDetails: { reported: 0, estimated: 0, unknown: true, subscription: true, seen: false } }
+		: undefined;
+	let timeoutSignal: AbortSignal | undefined;
 	try {
 		const endpoint = useCodexEndpoint ? CODEX_RESPONSES_URL : auth.responsesUrl;
-		const paceKey = `openai:${new URL(endpoint).origin}`;
+		const origin = new URL(endpoint).origin;
+		const paceKey = `openai:${origin}`;
 		await waitForSearchSlot(paceKey, options.signal, 1000);
+		options.signal?.throwIfAborted();
+		timeoutSignal = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+		finishUsage = startWebUsage(options, useCodexEndpoint ? "openai-codex" : auth.provider, auth.model);
 		const response = await fetch(endpoint, {
 			method: "POST",
 			headers,
 			body: JSON.stringify(body),
 			signal: options.signal
-				? AbortSignal.any([AbortSignal.timeout(SEARCH_TIMEOUT_MS), options.signal])
-				: AbortSignal.timeout(SEARCH_TIMEOUT_MS),
+				? AbortSignal.any([timeoutSignal, options.signal])
+				: timeoutSignal,
 		});
 
 		if (response.status === 429 || response.status === 503) {
@@ -556,7 +649,10 @@ async function runOpenAISearch(
 			throw new Error(`OpenAI API error ${response.status}: ${errorText.slice(0, 300)}`);
 		}
 
-		const parsed = await parseOpenAIResponse(response);
+		const officialEndpoint = ["https://api.openai.com", "https://us.api.openai.com", "https://eu.api.openai.com"].includes(origin);
+		const readUsage = (parsed: ParsedOpenAIResponse) => { usage = openAISearchUsage(parsed, useCodexEndpoint, officialEndpoint); };
+		const parsed = await parseOpenAIResponse(response, readUsage);
+		readUsage(parsed);
 		const output = Array.isArray(parsed.payload.output) ? parsed.payload.output : [];
 		if (!parsed.webSearchCallSeen) throw new Error("OpenAI web_search returned no web_search_call");
 		const answer = extractAnswer(output);
@@ -567,8 +663,10 @@ async function runOpenAISearch(
 		}
 
 		activityMonitor.logComplete(activityId, response.status);
+		finishUsage(parsed.payload.status === "failed" || parsed.payload.status === "incomplete" ? "failed" : "completed", usage);
 		return { answer, results };
 	} catch (err) {
+		finishUsage?.(options.signal?.aborted ? "cancelled" : timeoutSignal?.aborted ? "timeout" : "failed", usage);
 		const message = err instanceof Error ? err.message : String(err);
 		const redactedMessage = redactCredential(message, auth.apiKey);
 		if (redactedMessage.toLowerCase().includes("abort")) {

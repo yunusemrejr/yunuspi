@@ -126,6 +126,64 @@ test('native steering and follow-up queues retain accepted messages when Stop in
   }
 });
 
+test('steering queued during follow-up preparation reaches the provider first', async () => {
+  const began = deferred(), refresh = deferred(), responding = deferred();
+  const user = content => ({ role: 'user', content, timestamp: Date.now() });
+  const delivered = [];
+  const agent = new Agent({
+    initialState: { model: { id: 'fixture', provider: 'fixture', api: 'openai-completions' } },
+    async prepareNextTurn() { began.resolve(); await refresh.promise; },
+    streamFn(model, context) {
+      delivered.push(context.messages.findLast(message => message.role === 'user').content);
+      const first = delivered.length === 1;
+      const message = { role: 'assistant', model: model.id, provider: model.provider, api: model.api,
+        content: [{ type: 'text', text: 'done' }], stopReason: 'stop', timestamp: Date.now(),
+        usage: { input: 1, output: 1, totalTokens: 2, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } };
+      return { async *[Symbol.asyncIterator]() { if (first) await responding.promise; yield { type: 'done', message }; }, result: async () => message };
+    },
+  });
+  const running = agent.prompt(user('initial'));
+  await until(() => delivered.length === 1, 'first request started');
+  agent.followUp(user('queued follow-up'));
+  responding.resolve();
+  await began.promise;
+  agent.steer(user('current correction'));
+  refresh.resolve();
+  await running;
+  assert.deepEqual(delivered, ['initial', 'current correction', 'queued follow-up']);
+  assert.equal(agent.hasQueuedMessages(), false);
+});
+
+test('clear and Stop during a turn-start hook do not deliver its staged follow-up', async () => {
+  for (const action of ['clearAllQueues', 'abort']) {
+    const began = deferred(), release = deferred();
+    const user = content => ({ role: 'user', content, timestamp: Date.now() });
+    let requests = 0, turns = 0;
+    const agent = new Agent({
+      initialState: { model: { id: 'fixture', provider: 'fixture', api: 'openai-completions' } },
+      streamFn(model) {
+        requests++;
+        const message = { role: 'assistant', model: model.id, provider: model.provider, api: model.api,
+          content: [{ type: 'text', text: 'done' }], stopReason: 'stop', timestamp: Date.now(),
+          usage: { input: 1, output: 1, totalTokens: 2, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } };
+        return { async *[Symbol.asyncIterator]() { yield { type: 'done', message }; }, result: async () => message };
+      },
+    });
+    agent.subscribe(async event => {
+      if (event.type === 'turn_start' && ++turns === 2) { began.resolve(); await release.promise; }
+    });
+    agent.followUp(user('queued'));
+    const running = agent.prompt(user('initial'));
+    await began.promise;
+    agent[action]();
+    release.resolve();
+    await running;
+    assert.equal(requests, 1, action);
+    assert.deepEqual(agent.state.messages.filter(message => message.role === 'user').map(message => message.content), ['initial']);
+    assert.equal(agent.hasQueuedMessages(), action === 'abort');
+  }
+});
+
 test('steering defers unstarted calls and preserves results for each tool call', async () => {
   for (const toolExecution of ['parallel', 'sequential']) {
     const preflight = deferred(), began = deferred(), executed = [];

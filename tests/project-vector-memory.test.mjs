@@ -681,6 +681,49 @@ test('extension indexes session events incrementally', async (t) => {
   assert.match(command, /chunks/i);
 });
 
+test('project memory records one scoped Voyage request, including usage before malformed rankings', async t => {
+  const dir = tmpRoot();
+  cleanup(t, dir);
+  const cwd = path.join(dir, 'proj');
+  fs.mkdirSync(cwd, { recursive: true });
+  const pi = fakePi();
+  const receipts = [];
+  pi.appendEntry = (kind, receipt) => { if (kind === 'auxiliary-model-usage-v1') receipts.push(receipt); };
+  const credential = 'synthetic-voyage-key';
+  const env = { ...testEnv(dir), PI_OFFLINE: '0', PI_RERANK_MODEL: 'rerank-3-lite', VOYAGE_API_KEY: credential };
+  let store;
+  piVectorMemory(pi, { env, embedder: null, openStore: (_file, id) => store = openTestStore(dir, id) });
+  const ctx = fakeCtx(cwd);
+  pi.handlers.get('session_start')({}, ctx);
+  t.after(() => store.close());
+  for (const text of [
+    'Nebula calibration at startup uses a timed sensor sweep and a voltage check.',
+    'Track the nebula calibration around a warm restart using the persisted offset in storage.',
+    'Inspect the field controller when nebula calibration flags intermittent drift on sensor three.',
+    'Freeze nebula calibration for the new build until the diagnostics validate the baseline.',
+  ]) {
+    await indexEvent(store, store.projectId, { kind: 'observation', sessionId: 'fixture', timestamp: new Date().toISOString(), text });
+  }
+  const originalFetch = globalThis.fetch;
+  t.after(() => { globalThis.fetch = originalFetch; });
+  let wire;
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, 'https://api.voyageai.com/v1/rerank');
+    assert.equal(options.redirect, 'error');
+    wire = JSON.parse(options.body);
+    return Response.json({ usage: { total_tokens: 73 }, data: [{ index: 900, relevance_score: .9 }] });
+  };
+  const output = await pi.tools.get('project_memory').execute('search', {
+    action: 'search', query: 'nebula calibration', limit: 5, scope: 'project',
+  }, undefined, undefined, ctx);
+  assert.ok(output.details.hits.length >= 3, 'malformed remote ranking retains local recall');
+  assert.ok(wire?.documents.length >= 3);
+  assert.deepEqual(receipts.map(({ status }) => status), ['pending', 'failed']);
+  assert.equal(receipts[0].id, receipts[1].id);
+  assert.deepEqual(receipts[1].usage, { input: 73, totalTokens: 73 });
+  assert.equal(receipts[1].provider, 'voyage');
+});
+
 test('a session switch drains the old queue into the old project, not the void', async (t) => {
   const dir = tmpRoot();
   cleanup(t, dir);

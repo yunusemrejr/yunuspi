@@ -62,6 +62,7 @@ import {
 } from "./source-check.ts";
 import { askJev, jevMark, tooShort } from "../lib/jev-client.ts";
 import { microMetrics } from "../lib/micro-intelligence/metrics.ts";
+import { bindWebUsage, type WebUsageOptions, type WebUsageSink } from "./web-usage.ts";
 
 type ExtensionTheme = ExtensionContext["ui"]["theme"];
 
@@ -474,7 +475,7 @@ const pendingCurates = new Map<string, PendingCurate>();
 const activeCurators = new Map<string, CuratorServerHandle>();
 const glimpseWins = new Map<string, GlimpseWindow>();
 
-interface PendingCurate {
+interface PendingCurate extends WebUsageOptions {
 	phase: "searching" | "curating";
 	workflow: CuratorWorkflow;
 	summaryContext: SummaryGenerationContext;
@@ -962,12 +963,12 @@ export default function (pi: ExtensionAPI) {
 	const curateKey = initConfig.shortcuts?.curate || DEFAULT_SHORTCUTS.curate;
 	const activityKey = initConfig.shortcuts?.activity || DEFAULT_SHORTCUTS.activity;
 
-	function startBackgroundFetch(urls: string[], proxy?: string): string | null {
+	function startBackgroundFetch(urls: string[], proxy?: string, onUsage?: WebUsageSink): string | null {
 		if (urls.length === 0) return null;
 		const fetchId = generateId();
 		const controller = new AbortController();
 		pendingFetches.set(fetchId, controller);
-		runWithProxy(proxy, () => fetchAllContent(urls, controller.signal, withRegisteredFetchOptions(undefined, registeredToolNames, proxy)))
+		runWithProxy(proxy, () => fetchAllContent(urls, controller.signal, withRegisteredFetchOptions({ onUsage }, registeredToolNames, proxy)))
 			.then((fetched) => {
 				if (!sessionActive || !pendingFetches.has(fetchId)) return;
 				const data = {
@@ -1021,7 +1022,7 @@ export default function (pi: ExtensionAPI) {
 		return id;
 	}
 
-	interface SearchReturnOptions {
+	interface SearchReturnOptions extends WebUsageOptions {
 		queryList: string[];
 		results: QueryResultData[];
 		urls: string[];
@@ -1209,7 +1210,7 @@ export default function (pi: ExtensionAPI) {
 				output += `---\nFull content for ${opts.inlineContent.length} sources available [${fetchId}].`;
 			}
 		} else if (opts.includeContent) {
-			fetchId = startBackgroundFetch(opts.urls, opts.proxy);
+			fetchId = startBackgroundFetch(opts.urls, opts.proxy, opts.onUsage);
 			if (fetchId && !hasApprovedSummary) {
 				output += `---\nContent fetching in background [${fetchId}]. Will notify when ready.`;
 			}
@@ -1362,6 +1363,7 @@ export default function (pi: ExtensionAPI) {
 							curated: true,
 							curatedFrom: pc.searchResults.size,
 							proxy: pc.proxy,
+							onUsage: pc.onUsage,
 						};
 						if (!payload.rawResults) {
 							const resolvedSummary = resolveSummaryForSubmit(payload, pc.searchResults);
@@ -1430,6 +1432,7 @@ export default function (pi: ExtensionAPI) {
 								includeContent: pc.includeContent,
 								signal: addSearchSignal,
 								extensionContext: ctx,
+								onUsage: pc.onUsage,
 							});
 							if (pendingCurates.get(callId) !== pc) throw new Error("Curator session is no longer active.");
 							if (response.inlineContent) pc.allInlineContent.push(...response.inlineContent);
@@ -1597,6 +1600,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 
 		async execute(callId, params, signal, onUpdate, ctx) {
+			const onUsage = ctx ? bindWebUsage(pi, ctx, "web_search") : undefined;
 			const result = await runWithProxy(typeof params.proxy === "string" ? params.proxy : undefined, async () => {
 				const rawQueryList: unknown[] = Array.isArray(params.queries)
 					? params.queries
@@ -1653,10 +1657,12 @@ export default function (pi: ExtensionAPI) {
 				const summaryContext: SummaryGenerationContext = {
 					model: ctx.model,
 					modelRegistry: ctx.modelRegistry,
+					onUsage,
 				};
 
 				const pc: PendingCurate = {
 					phase: "searching",
+					onUsage,
 					workflow: curatorWorkflow,
 					summaryContext,
 					searchResults,
@@ -1727,6 +1733,7 @@ export default function (pi: ExtensionAPI) {
 							includeContent: params.includeContent,
 							signal: searchSignal,
 							extensionContext: ctx,
+							onUsage,
 						});
 						if (signal?.aborted || cancelled || searchAbort.signal.aborted) break;
 						if (response.inlineContent) allInlineContent.push(...response.inlineContent);
@@ -1830,6 +1837,7 @@ export default function (pi: ExtensionAPI) {
 						includeContent: params.includeContent,
 						signal,
 						extensionContext: ctx,
+						onUsage,
 					});
 
 					searchResults.push({ query, answer, results, error: null, provider, ...(providerErrors ? { providerErrors } : {}) });
@@ -1863,6 +1871,7 @@ export default function (pi: ExtensionAPI) {
 				const summaryContext: SummaryGenerationContext = {
 					model: ctx.model,
 					modelRegistry: ctx.modelRegistry,
+					onUsage,
 				};
 				const generated = await generateSummaryDraft(
 					searchResults,
@@ -1886,6 +1895,7 @@ export default function (pi: ExtensionAPI) {
 				approvedSummary,
 				summaryMeta,
 				proxy: typeof params.proxy === "string" ? params.proxy : undefined,
+				onUsage,
 			});
 			});
 			if (typeof result.details?.error === "string") throw new Error(result.details.error);
@@ -2166,6 +2176,7 @@ export default function (pi: ExtensionAPI) {
 			})),
 		}),
 		async execute(_callId, params, signal, _onUpdate, ctx) {
+			const onUsage = ctx ? bindWebUsage(pi, ctx, "source_check") : undefined;
 			return runWithProxy(typeof params.proxy === "string" ? params.proxy : undefined, async () => {
 				const claim = typeof params.claim === "string" ? params.claim.trim() : "";
 				if (!claim) {
@@ -2198,6 +2209,7 @@ export default function (pi: ExtensionAPI) {
 							domainFilter,
 							signal,
 							extensionContext: ctx,
+							onUsage,
 						});
 						if (signal?.aborted) break;
 						provider ??= response.provider;
@@ -2216,7 +2228,7 @@ export default function (pi: ExtensionAPI) {
 				if (params.fetchContent && results.length > 0) {
 					const urls = results.slice(0, 5).map((result) => result.url);
 					try {
-						fetched = await fetchAllContent(urls, signal, withRegisteredFetchOptions(undefined, registeredToolNames, typeof params.proxy === "string" ? params.proxy : undefined));
+						fetched = await fetchAllContent(urls, signal, withRegisteredFetchOptions({ onUsage }, registeredToolNames, typeof params.proxy === "string" ? params.proxy : undefined));
 					} catch (err) {
 						if (signal?.aborted || isAbortError(err)) throw err;
 						fetched = urls.map((url) => ({ url, title: "", content: "", error: err instanceof Error ? err.message : String(err) }));
@@ -2340,6 +2352,7 @@ export default function (pi: ExtensionAPI) {
 		}),
 
 		async execute(_toolCallId, params, signal, onUpdate, ctx): Promise<AgentToolResult<Record<string, unknown>>> {
+			const onUsage = ctx ? bindWebUsage(pi, ctx, "fetch_content") : undefined;
 			let normalized: ReturnType<typeof normalizeFetchContentParams>;
 			try {
 				normalized = normalizeFetchContentParams(params);
@@ -2390,7 +2403,7 @@ export default function (pi: ExtensionAPI) {
 						return { ...rest, ...(authFetchProfile ? { authFetchProfile } : {}) };
 					})()
 					: { ...extractionOptions, ...(authFetchProfile ? { authFetchProfile } : {}) };
-				const fetchResults = await fetchAllContent(urlList, signal, withRegisteredFetchOptions(fetchOptions, registeredToolNames, options.proxy));
+				const fetchResults = await fetchAllContent(urlList, signal, withRegisteredFetchOptions({ ...fetchOptions, onUsage }, registeredToolNames, options.proxy));
 				const presentedResults = mode === "answer"
 					? await Promise.all(fetchResults.map(async result => {
 						if (result.error) return result;
@@ -2402,7 +2415,7 @@ export default function (pi: ExtensionAPI) {
 								question: options.prompt!,
 								pageText: result.content,
 								sourceUrl: result.url,
-							}, ctx, signal);
+							}, ctx, signal, { onUsage });
 							return { ...result, content: answer.text };
 						} catch (err) {
 							return { ...result, error: `Page answer failed: ${err instanceof Error ? err.message : String(err)}` };
@@ -3028,6 +3041,7 @@ export default function (pi: ExtensionAPI) {
 	if (isCommandEnabled(initConfig, "websearch")) pi.registerCommand("websearch", {
 		description: "Open web search curator",
 		handler: async (args, ctx) => {
+			const onUsage = bindWebUsage(pi, ctx, "web_search");
 			const sessionToken = randomUUID();
 			const commandCallId = `cmd:${sessionToken}`;
 			closeCurator(commandCallId);
@@ -3060,6 +3074,7 @@ export default function (pi: ExtensionAPI) {
 			const summaryContext: SummaryGenerationContext = {
 				model: ctx.model,
 				modelRegistry: ctx.modelRegistry,
+				onUsage,
 			};
 
 			ctx.ui.notify("Opening web search curator...", "info");
@@ -3169,6 +3184,7 @@ export default function (pi: ExtensionAPI) {
 								provider: requestedProvider,
 								signal: searchAbort.signal,
 								extensionContext: ctx,
+								onUsage,
 							});
 							if (commandHandle && !isCommandActive()) {
 								throw new Error("Curator session is no longer active.");
@@ -3241,6 +3257,7 @@ export default function (pi: ExtensionAPI) {
 									provider: requestedProvider,
 									signal: searchAbort.signal,
 									extensionContext: ctx,
+									onUsage,
 								});
 								if (aborted || !isCommandActive()) break;
 								const entries = toCuratorSearchEntries(response);

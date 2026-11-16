@@ -4,6 +4,7 @@ import type { ExtensionContext } from "@yunuspi/coding-agent";
 import { activityMonitor } from "./activity.ts";
 import { redactCredential } from "./credential-source.ts";
 import type { SearchOptions, SearchResponse, SearchResult } from "./perplexity.ts";
+import { startWebUsage } from "./web-usage.ts";
 
 const KIMI_SEARCH_URL = "https://api.kimi.com/coding/v1/search";
 const KIMI_PROVIDERS = ["kimi-coding", "kimi-code"] as const;
@@ -163,6 +164,30 @@ function formatAnswer(results: SearchResult[]): string {
 		.join("\n\n");
 }
 
+function readKimiSearchUsage(value?: unknown) {
+	const usage = (value as { usage?: {
+		prompt_tokens?: unknown;
+		prompt_tokens_details?: { cached_tokens?: unknown };
+		completion_tokens?: unknown;
+		completion_tokens_details?: { reasoning_tokens?: unknown };
+	} } | undefined)?.usage;
+	const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+	const input = count(usage?.prompt_tokens);
+	const cached = count(usage?.prompt_tokens_details?.cached_tokens);
+	const cacheRead = cached !== undefined && (input === undefined || cached <= input) ? cached : undefined;
+	const output = count(usage?.completion_tokens);
+	const reasoning = count(usage?.completion_tokens_details?.reasoning_tokens);
+	return {
+		...(input !== undefined ? { input: input - (cacheRead ?? 0) } : {}),
+		...(cacheRead !== undefined ? { cacheRead } : {}),
+		...(output !== undefined ? { output } : {}),
+		...(reasoning !== undefined && (output === undefined || reasoning <= output) ? { reasoning } : {}),
+		// Kimi Code uses the membership quota first and can switch to paid
+		// Extra Usage automatically. The search response doesn't identify the bucket.
+		costDetails: { reported: 0, estimated: 0, unknown: true, subscription: true, seen: false },
+	};
+}
+
 export async function isKimiSearchAvailable(ctx?: ExtensionContext): Promise<boolean> {
 	try {
 		return !!(await resolveKimiAuth(ctx));
@@ -182,13 +207,18 @@ export async function searchWithKimi(
 	}
 
 	const activityId = activityMonitor.logStart({ type: "api", query });
-	const timeoutSignal = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
-	const requestSignal = options.signal
-		? AbortSignal.any([timeoutSignal, options.signal])
-		: timeoutSignal;
+	let timeoutSignal: AbortSignal | undefined;
+	let finishUsage: ReturnType<typeof startWebUsage> | undefined;
+	let usage = readKimiSearchUsage();
 	try {
 		const paceKey = "kimi";
 		await waitForSearchSlot(paceKey, options.signal, 1000);
+		options.signal?.throwIfAborted();
+		timeoutSignal = AbortSignal.timeout(SEARCH_TIMEOUT_MS);
+		const requestSignal = options.signal
+			? AbortSignal.any([timeoutSignal, options.signal])
+			: timeoutSignal;
+		finishUsage = startWebUsage(options, "kimi-code", "search");
 		const response = await fetch(KIMI_SEARCH_URL, {
 			method: "POST",
 			headers: buildRequestHeaders(auth),
@@ -213,19 +243,23 @@ export async function searchWithKimi(
 			const message = err instanceof Error ? err.message : String(err);
 			throw new Error(`Kimi Code search API returned invalid JSON: ${message}`);
 		}
+		usage = readKimiSearchUsage(parsed);
 		const results = parseResults(parsed, options);
 		if (results.length === 0) {
 			throw new Error("Kimi Code search API returned no results");
 		}
 
 		activityMonitor.logComplete(activityId, response.status);
+		finishUsage("completed", usage);
 		return { answer: formatAnswer(results), results };
 	} catch (err) {
+		const timedOut = timeoutSignal?.aborted || (err instanceof Error && err.name === "TimeoutError");
+		finishUsage?.(options.signal?.aborted ? "cancelled" : timedOut ? "timeout" : "failed", usage);
 		const message = err instanceof Error ? err.message : String(err);
 		const redactedMessage = redactCredential(message, auth.apiKey);
 		if (options.signal?.aborted) {
 			activityMonitor.logComplete(activityId, 0);
-		} else if (timeoutSignal.aborted || (err instanceof Error && err.name === "TimeoutError")) {
+		} else if (timedOut) {
 			activityMonitor.logError(activityId, "Kimi Code search API timed out");
 			throw new Error("Kimi Code search API timed out");
 		} else if (redactedMessage.toLowerCase().includes("abort")) {

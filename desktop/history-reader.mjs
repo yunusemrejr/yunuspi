@@ -5,6 +5,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 
 const readers = new Map();
 const MAX_FILE_BYTES = 128 * 1024 * 1024, MAX_RECORDS = 200_000;
+const MAX_CACHED_FILE_BYTES = 24 * 1024 * 1024, MAX_CACHED_RECORDS = 50_000;
 
 // One reader per owned core keeps parsing off Electron's main thread without
 // creating a process (or loading extensions) for every history being browsed.
@@ -63,6 +64,72 @@ export async function cancelPendingHistoryReads() {
   return pending.length;
 }
 
+function historyFiles(directory) {
+  let names;
+  try { names = fs.readdirSync(directory).filter(name => name.endsWith('.jsonl')); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  if (names.length > 128) throw Error('This history folder exceeds the 128-file discovery limit. Its original files are retained.');
+  // SessionManager.list() allocates searchable metadata for the whole file.
+  return names.map(name => {
+    const file = path.join(directory, name), stat = fs.lstatSync(file, { bigint: true });
+    if (!stat.isFile()) throw Error('The transcript must be a regular file.');
+    if (stat.size > MAX_FILE_BYTES) throw Error('This transcript exceeds the 128 MiB history-reader limit. Its original file is retained.');
+    return { path: file, name, stat };
+  }).sort((a, b) => Number(b.stat.mtimeNs - a.stat.mtimeNs));
+}
+
+function snapshotKey(files, sessionId) {
+  // The ordinary case is one transcript per session. Folder/branch selection
+  // with several candidates still resolves fresh on every read.
+  if (files.length !== 1 || files[0].stat.size > MAX_CACHED_FILE_BYTES) return undefined;
+  const { path: file, stat } = files[0];
+  return [file, sessionId, stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join('\0');
+}
+
+function readSnapshot(request, files, [manager, projection, accounting]) {
+  const { loadEntriesFromFile, migrateSessionEntries } = manager;
+  const { desktopBranchMessages, desktopGoal } = projection;
+  const canonical = directory => { try { return fs.realpathSync(directory); } catch { return path.resolve(directory); } };
+  const cwd = canonical(request.cwd);
+  let entries, fallback;
+  for (const file of files) {
+    const candidate = loadEntriesFromFile(file.path, { readOnly: true });
+    if (candidate[0]?.type !== 'session' || candidate[0].id !== request.sessionId) {
+      if (file.name.endsWith(`_${request.sessionId}.jsonl`) || file.name === `${request.sessionId}.jsonl`) throw Error('The transcript identity changed while opening it. Reopen the session to retry.');
+      continue;
+    }
+    if (files.length === 1 || typeof candidate[0].cwd === 'string' && canonical(candidate[0].cwd) === cwd) { entries = candidate; break; }
+    // The dedicated folder and session ID retain ownership after a project moves.
+    fallback ??= candidate;
+  }
+  entries ??= fallback ?? [];
+  if (entries.length > MAX_RECORDS) throw Error('This transcript exceeds the 200,000-record history-reader limit. Its original file is retained.');
+  if (entries.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry))) throw Error('The transcript contains an invalid record. Its original file is retained.');
+  // Migrate only in memory. Viewing a transcript never repairs or rewrites it.
+  if (entries.length) migrateSessionEntries(entries);
+  const byId = new Map();
+  let leaf;
+  for (const entry of entries) {
+    if (entry.type === 'session') continue;
+    if (typeof entry.id !== 'string' || !entry.id || byId.has(entry.id)
+      || entry.parentId != null && typeof entry.parentId !== 'string') throw Error('The transcript contains invalid entry identifiers. Its original file is retained.');
+    byId.set(entry.id, entry); leaf = entry;
+  }
+  const branch = [];
+  while (leaf) {
+    if (branch.length >= byId.size) throw Error('The transcript contains a branch cycle. Its original file is retained.');
+    branch.push(leaf);
+    leaf = leaf.parentId ? byId.get(leaf.parentId) : undefined;
+  }
+  branch.reverse();
+  const snapshot = { messages: desktopBranchMessages(branch), records: entries.length };
+  if (request.before === undefined) {
+    snapshot.goal = desktopGoal(branch);
+    snapshot.stats = accounting.collectSessionStats(entries);
+  }
+  return snapshot;
+}
+
 if (!isMainThread && workerData?.kind === 'yunuspi-history') {
   const core = workerData.coreRoot;
   const modules = Promise.all([
@@ -73,63 +140,23 @@ if (!isMainThread && workerData?.kind === 'yunuspi-history') {
   // Keep initialization failures attached to a request rather than unhandled.
   modules.catch(() => {});
   let tail = Promise.resolve();
+  let cached;
   parentPort.on('message', request => {
     tail = tail.then(async () => {
       try {
-        const [{ loadEntriesFromFile, migrateSessionEntries }, { desktopBranchMessages, desktopGoal, desktopHistory }, { collectSessionStats }] = await modules;
-        let names;
-        try { names = fs.readdirSync(request.directory).filter(name => name.endsWith('.jsonl')); }
-        catch (error) { if (error.code !== 'ENOENT') throw error; names = []; }
-        if (names.length > 128) throw Error('This history folder exceeds the 128-file discovery limit. Its original files are retained.');
-        // Do not call SessionManager.list(): its searchable metadata joins all
-        // message text and would parse/allocate the complete history twice.
-        const files = names.map(name => {
-          const file = path.join(request.directory, name), stat = fs.lstatSync(file);
-          if (!stat.isFile() || stat.isSymbolicLink()) throw Error('The transcript must be a regular file.');
-          if (stat.size > MAX_FILE_BYTES) throw Error('This transcript exceeds the 128 MiB history-reader limit. Its original file is retained.');
-          return { path: file, name, modified: stat.mtimeMs };
-        }).sort((a, b) => b.modified - a.modified);
-        const canonical = directory => { try { return fs.realpathSync(directory); } catch { return path.resolve(directory); } };
-        let entries, fallback;
-        for (const file of files) {
-          const candidate = loadEntriesFromFile(file.path, { readOnly: true });
-          if (candidate[0]?.type !== 'session' || candidate[0].id !== request.sessionId) {
-            if (file.name.endsWith(`_${request.sessionId}.jsonl`) || file.name === `${request.sessionId}.jsonl`) throw Error('The transcript identity changed while opening it. Reopen the session to retry.');
-            continue;
-          }
-          if (typeof candidate[0].cwd === 'string' && canonical(candidate[0].cwd) === canonical(request.cwd)) { entries = candidate; break; }
-          // The dedicated transcript folder and session ID establish ownership.
-          // A moved/deleted project must not make its saved history disappear.
-          fallback ??= candidate;
+        const components = await modules;
+        const [, { desktopHistory }] = components;
+        const files = historyFiles(request.directory);
+        const key = snapshotKey(files, request.sessionId);
+        const initial = request.before === undefined;
+        let snapshot = key && cached?.key === key && (!initial || cached.snapshot.stats) ? cached.snapshot : undefined;
+        if (!snapshot) {
+          cached = undefined;
+          snapshot = readSnapshot(request, files, components);
+          if (key && snapshot.records <= MAX_CACHED_RECORDS) cached = { key, snapshot };
         }
-        entries ??= fallback;
-        let branch = [];
-        if (entries) {
-          if (entries.length > MAX_RECORDS) throw Error('This transcript exceeds the 200,000-record history-reader limit. Its original file is retained.');
-          if (entries.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry))) throw Error('The transcript contains an invalid record. Its original file is retained.');
-          // Native migration mutates only these in-memory entries. Unlike
-          // SessionManager.open(), reading never repairs or rewrites the file.
-          migrateSessionEntries(entries);
-          const byId = new Map(); let leaf;
-          for (const entry of entries) {
-            if (entry.type === 'session') continue;
-            if (typeof entry.id !== 'string' || !entry.id || byId.has(entry.id)
-              || entry.parentId != null && typeof entry.parentId !== 'string') throw Error('The transcript contains invalid entry identifiers. Its original file is retained.');
-            byId.set(entry.id, entry); leaf = entry;
-          }
-          const visited = new Set();
-          while (leaf) {
-            if (visited.has(leaf.id)) throw Error('The transcript contains a branch cycle. Its original file is retained.');
-            visited.add(leaf.id); branch.push(leaf);
-            leaf = leaf.parentId ? byId.get(leaf.parentId) : undefined;
-          }
-          branch.reverse();
-        }
-        const data = { ...desktopHistory(desktopBranchMessages(branch), { before: request.before, limit: request.limit }), isStreaming: false, streamingMessage: null };
-        if (request.before === undefined) {
-          data.goal = desktopGoal(branch);
-          data.stats = collectSessionStats(entries ?? []);
-        }
+        const data = { ...desktopHistory(snapshot.messages, { before: request.before, limit: request.limit }), isStreaming: false, streamingMessage: null };
+        if (initial) { data.goal = snapshot.goal; data.stats = snapshot.stats; }
         // The projection clips normal text/images; malformed imported metadata
         // must not bypass its page budget on the first returned message.
         if (Buffer.byteLength(JSON.stringify(data)) > 8 * 1024 * 1024 + 4096) throw Error('This history preview exceeds the 8 MiB transfer limit. Its original file is retained.');

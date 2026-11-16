@@ -749,11 +749,16 @@ export function createQualityReviewLifecycle(pi: any, options: { shadow?: boolea
         patterns.set(file,[...new Map([...(whole?[]:earlier),...fresh].map(s=>[s.key,s])).values()].slice(0,12));
       }
     },
+    interrupt() {
+      if (pauseReason === 'stop') return;
+      cancel(); paused = true; pauseReason = 'stop';
+    },
     message(event: any) {
       activity++;
       if (event.message?.role !== 'assistant') return;
       const stop = event.message.stopReason;
-      if (['aborted','error'].includes(stop)) { cancel(); paused = true; if (pauseReason !== 'stop') pauseReason = stop === 'aborted' ? 'stop' : 'error'; }
+      if (stop === 'aborted') api.interrupt();
+      else if (stop === 'error' && pauseReason !== 'stop') { cancel(); paused = true; pauseReason = 'error'; }
       else if (pauseReason === 'error' && ['stop','toolUse','length'].includes(stop)) { paused = false; pauseReason = ''; noted = ''; }
     },
     notice() {

@@ -307,6 +307,7 @@ export class Agent {
         let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
         let selected;
         const poll = (queue) => {
+            if (!queue.hasItems()) return [];
             selected = queue.select();
             return selected.messages;
         };

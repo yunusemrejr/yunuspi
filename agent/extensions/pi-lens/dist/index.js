@@ -95995,6 +95995,7 @@ import * as path159 from "node:path";
 import { createHash as createHash16 } from "node:crypto";
 var OPAQUE_HASH_BUDGET_BYTES = 8 * 1024 * 1024;
 var OPAQUE_SCAN_MAX_FILES = 2e3;
+var OPAQUE_SCAN_BATCH_SIZE = 32;
 var OPAQUE_MTIME_TOLERANCE_MS = 150;
 var MAX_GIT_STATUS_OUTPUT_BYTES = 16 * 1024 * 1024;
 async function captureFileStats(root, options = {}) {
@@ -96013,19 +96014,30 @@ async function captureFileStats(root, options = {}) {
     }
     const snapshot = /* @__PURE__ */ new Map();
     let hashBytesSpent = 0;
-    for (const file of files2) {
-      try {
-        const stat4 = await fs109.promises.stat(file);
-        const entry = {
-          mtimeMs: stat4.mtimeMs,
-          size: stat4.size
-        };
-        if (options.withHashes && hashBytesSpent + stat4.size <= OPAQUE_HASH_BUDGET_BYTES) {
-          entry.hash = createHash16("sha256").update(await fs109.promises.readFile(file)).digest("hex");
-          hashBytesSpent += stat4.size;
+    for (let offset = 0; offset < files2.length; offset += OPAQUE_SCAN_BATCH_SIZE) {
+      const batch = files2.slice(offset, offset + OPAQUE_SCAN_BATCH_SIZE);
+      const stats = await Promise.all(batch.map(file => fs109.promises.stat(file).catch(() => undefined)));
+      // Allocate the hash budget in walk order, regardless of I/O completion.
+      // The filesystem queue holds at most one batch of stats or reads.
+      const entries = await Promise.all(batch.map(async (file, index) => {
+        const stat = stats[index];
+        if (!stat?.isFile())
+          return;
+        const entry = { mtimeMs: stat.mtimeMs, size: stat.size };
+        if (options.withHashes && hashBytesSpent + stat.size <= OPAQUE_HASH_BUDGET_BYTES) {
+          hashBytesSpent += stat.size;
+          try {
+            entry.hash = createHash16("sha256").update(await fs109.promises.readFile(file)).digest("hex");
+          } catch {
+            hashBytesSpent -= stat.size;
+            return;
+          }
         }
-        snapshot.set(normalizeMapKey(path159.resolve(file)), entry);
-      } catch {
+        return entry;
+      }));
+      for (const [index, entry] of entries.entries()) {
+        if (entry)
+          snapshot.set(normalizeMapKey(path159.resolve(batch[index])), entry);
       }
     }
     return { snapshot, scannedCount: snapshot.size };
@@ -96045,16 +96057,20 @@ function diffFileStats(before, after) {
   return changed;
 }
 var OpaqueBaselineStore = class {
-  byCwd = /* @__PURE__ */ new Map();
+  baselines = /* @__PURE__ */ new Map();
   evictions = 0;
-  record(cwdKey, baseline) {
-    if (this.byCwd.has(cwdKey))
+  record(key, baseline) {
+    if (this.baselines.delete(key))
       this.evictions += 1;
-    this.byCwd.set(cwdKey, baseline);
+    if (this.baselines.size >= 64) {
+      this.baselines.delete(this.baselines.keys().next().value);
+      this.evictions += 1;
+    }
+    this.baselines.set(key, baseline);
   }
-  take(cwdKey) {
-    const baseline = this.byCwd.get(cwdKey);
-    this.byCwd.delete(cwdKey);
+  take(key) {
+    const baseline = this.baselines.get(key);
+    this.baselines.delete(key);
     return baseline;
   }
   get evictionCount() {
@@ -96062,9 +96078,15 @@ var OpaqueBaselineStore = class {
   }
   /** Session-boundary clear - unconsumed baselines are unreachable after reset. */
   takeAllForTest() {
-    this.byCwd.clear();
+    this.baselines.clear();
   }
 };
+function opaqueBaselineKey(root, sessionId, generation, event) {
+  const id = resolveToolCallCorrelationId(event);
+  if (id === void 0)
+    return;
+  return JSON.stringify([normalizeMapKey(path159.resolve(root)), sessionId ?? null, generation, id]);
+}
 var globalStoreSymbol = /* @__PURE__ */ Symbol.for("pi-lens:opaque-snapshot-store");
 var globalSlot = globalThis;
 function getOpaqueBaselineStore() {
@@ -96101,7 +96123,8 @@ async function resolveGitToplevel(root) {
     timeout: 3e3
   });
   const toplevel = !result.error && result.status === 0 && result.stdout?.trim() ? result.stdout.trim() : void 0;
-  gitToplevelMemo.set(key3, toplevel);
+  if (toplevel)
+    gitToplevelMemo.set(key3, toplevel);
   return toplevel;
 }
 var UNMERGED_PORCELAIN_STATUSES = /* @__PURE__ */ new Set([
@@ -96155,8 +96178,12 @@ function isStructurallyValidStatus(status) {
   return PORCELAIN_STATUS_CHARS.test(status) && status.trim() !== "";
 }
 async function recoverOpaqueChangesViaGit(root, startedAt, options = {}) {
+  // Porcelain paths are rooted at the checkout even when Bash ran below it.
+  const checkout = await resolveGitToplevel(root);
+  if (!checkout)
+    return { verdict: "unknown", paths: [], unknownReason: "git-failed", scannedCount: 0 };
   const result = await safeSpawnAsync("git", ["status", "--porcelain", "-z", "--untracked-files=all"], {
-    cwd: root,
+    cwd: checkout,
     timeout: 5e3,
     maxOutputBytes: MAX_GIT_STATUS_OUTPUT_BYTES
   });
@@ -96217,7 +96244,7 @@ async function recoverOpaqueChangesViaGit(root, startedAt, options = {}) {
       unknownStatusCount += 1;
     if (status.includes("R") || status.includes("C"))
       skipNext = true;
-    entries.push({ status, absPath: path159.resolve(root, relPath) });
+    entries.push({ status, absPath: path159.resolve(checkout, relPath) });
   }
   if (skipNext) {
     return {
@@ -98906,10 +98933,11 @@ async function handleToolResult(deps) {
     const recognized = extractWrittenPathsFromCommand(command, workspaceRoot);
     const recognizedWritten = event.isError !== true ? recognized.filter((wp) => !isExternalOrVendorFile(wp, workspaceRoot) && !isPathIgnoredByProject(wp, workspaceRoot, false)) : [];
     let opaquePaths = [];
-    if (workspaceRoot && !getFlag("no-read-guard")) {
-      const scanRoot = workspaceRoot;
+    const scanRoot = deps.ctxCwd ?? workspaceRoot;
+    const baselineKey = opaqueBaselineKey(scanRoot, deps.sessionId, runtime2.sessionGeneration, event);
+    const pending3 = baselineKey === void 0 ? void 0 : getOpaqueBaselineStore().take(baselineKey);
+    if (!getFlag("no-read-guard")) {
       const started = Date.now();
-      const pending3 = getOpaqueBaselineStore().take(`${normalizeMapKey(path164.resolve(scanRoot))}:${runtime2.sessionGeneration}`);
       let unknownReason;
       if (!pending3 && recognized.length > 0) {
         unknownReason = "partial-recognition-no-baseline";
@@ -98920,7 +98948,7 @@ async function handleToolResult(deps) {
           excludeIndexOnlyWhenUnmerged: isFailedGitIntegrationCommand(command, event.isError)
         });
         if (recovery.verdict === "recovered") {
-          opaquePaths = recovery.paths.filter((p) => !isExternalOrVendorFile(p, scanRoot) && !isPathIgnoredByProject(p, scanRoot, false));
+          opaquePaths = recovery.paths.filter((p) => !isExternalOrVendorFile(p, workspaceRoot) && !isPathIgnoredByProject(p, workspaceRoot, false));
         } else if (recovery.verdict === "unknown") {
           unknownReason = recovery.unknownReason;
         }
@@ -99825,13 +99853,13 @@ async function handleToolCallImpl(deps) {
   });
   if (!lensEnabled)
     return;
-  if (toolName === "bash") {
+  if (toolName === "bash" && !getFlag("no-read-guard")) {
     const commandInput = event.input;
     if (typeof commandInput?.command === "string" && commandInput.command) {
       const scanRoot = ctx.cwd ?? runtime2.projectRoot;
-      if (scanRoot) {
+      const baselineKey = scanRoot ? opaqueBaselineKey(scanRoot, getStableSessionId(ctx), runtime2.sessionGeneration, event) : void 0;
+      if (baselineKey !== void 0) {
         const started = Date.now();
-        const rootKey2 = `${normalizeMapKey(path166.resolve(scanRoot))}:${runtime2.sessionGeneration}`;
         let baseline;
         let resultNote;
         if (await isGitWorktree(scanRoot)) {
@@ -99852,7 +99880,7 @@ async function handleToolCallImpl(deps) {
           };
           resultNote = outcome.unknownReason ?? `scanned:${outcome.scannedCount}`;
         }
-        getOpaqueBaselineStore().record(rootKey2, baseline);
+        getOpaqueBaselineStore().record(baselineKey, baseline);
         logLatency({
           type: "phase",
           phase: "opaque_mutation_prescan",

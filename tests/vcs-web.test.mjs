@@ -363,16 +363,24 @@ test("background research continues distinct query angles, paginates, and reject
     "extensions/pi-web-access/research-jobs.ts",
   );
   let tool;
-  const notices = [],
+  const { startWebUsage } = await load("extensions/pi-web-access/web-usage.ts");
+  const { collectSessionCost } = await import("@yunuspi/coding-agent/session-accounting");
+  const notices = [], receipts = [],
     events = {};
   registerResearchJobs(
     {
       registerTool: (value) => (tool = value),
       on: (name, handler) => (events[name] = handler),
       sendMessage: (value) => notices.push(value),
+      appendEntry: (customType, data) => receipts.push({ type: "custom", customType, data }),
     },
-    async (query) => {
-      if (query === "failure") throw Error("provider unavailable");
+    async (query, options) => {
+      const finish = startWebUsage(options, "fixture", "search");
+      if (query === "failure") {
+        finish("failed");
+        throw Error("provider unavailable");
+      }
+      finish("completed", { cost: { total: .02, source: "provider-reported" } });
       return {
         answer: "candidate",
         provider: "fixture",
@@ -400,6 +408,10 @@ test("background research continues distinct query angles, paginates, and reject
   const end = await call({ action: "wait", id });
   assert.equal(end.details.state, "partial");
   assert.equal(end.details.completedQueries, 4);
+  const billed = collectSessionCost(receipts);
+  assert.equal(receipts.length, 8);
+  assert.equal(billed.formatted, "$0.060000+?");
+  assert.equal(billed.pending, 0);
   const read = await call({ action: "read", id });
   assert.equal(read.details.results.length, 3);
   assert.equal(read.details.nextOffset, 3);

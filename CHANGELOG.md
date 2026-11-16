@@ -1,3 +1,11 @@
+## 0.56.3 — Hosted usage receipts and faster history paging
+
+- Hosted web, extraction, and configured reranking requests record usage separately, including work that fails after submission. The parent total includes delegated hosted charges and marks missing amounts as partial.
+- Desktop history reuses a bounded snapshot across pages and refreshes it when the transcript changes, including same-size rewrites.
+- A correction arriving during follow-up preparation reaches the model first. The earlier follow-up stays queued. Stop suppresses automatic wakes without discarding completed tool receipts.
+- Authenticated Gemini requests reject redirects, and authenticated or local-only PDF extraction stays local.
+- Pi-Lens tracks shell baselines per call, recognizes Git paths from nested working directories, and avoids collecting baselines when their guard is disabled.
+
 ## 0.56.2 — Session cost on reopen and safer interruptions
 
 - Stop leaves a result for every tool call in a started batch and cancels the next model request. Goal completion waits for earlier calls in the same batch to settle.

@@ -1,6 +1,8 @@
 import { complete, type Api, type Message, type Model } from "@yunuspi/ai/compat";
 import type { ExtensionContext } from "@yunuspi/coding-agent";
 import type { QueryResultData } from "./storage.ts";
+import { trackWebCompletion } from "./web-model-usage.ts";
+import type { WebUsageOptions } from "./web-usage.ts";
 
 type ProviderHeaders = Record<string, string | null>;
 type CompleteFunction = typeof complete;
@@ -18,7 +20,7 @@ export interface SummaryMeta {
 	edited?: boolean;
 }
 
-export type SummaryGenerationContext = Pick<ExtensionContext, "model" | "modelRegistry">;
+export type SummaryGenerationContext = Pick<ExtensionContext, "model" | "modelRegistry"> & WebUsageOptions;
 
 function estimateTokens(text: string): number {
 	const trimmed = text.trim();
@@ -313,7 +315,7 @@ export async function generateSummaryDraft(
 				...(usesRegistryComplete ? {} : { apiKey, headers }),
 				signal: completionSignal,
 			};
-			const completion = completeFn(model, { messages: [userMessage] }, completionOptions);
+			const completion = trackWebCompletion(ctx, model, completionSignal, () => completeFn(model, { messages: [userMessage] }, completionOptions));
 
 			const response = await raceSummaryOperation(Promise.resolve(completion));
 			if (response.stopReason === "aborted") {

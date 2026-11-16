@@ -21,6 +21,7 @@ const { createEventBus } = await import("../core/coding-agent/src/core/event-bus
 const { failureOf, projectRunEvidence } = await import(pathToFileURL(path.join(base, "runs/shared/run-history.ts")).href);
 const { resultFilePath } = await import(pathToFileURL(path.join(base, "runs/background/result-files.ts")).href);
 const { DIRS, SUBAGENT_ASYNC_STARTED_EVENT } = await import(pathToFileURL(path.join(base, "shared/types.ts")).href);
+const { collectSessionCost } = await import("../core/coding-agent/src/core/session-accounting.js");
 
 const route = "openrouter/org/executor-fixture";
 const model = { provider: "openrouter", id: "org/executor-fixture", name: "Executor fixture", fullId: route,
@@ -32,7 +33,7 @@ const pins = ["together", "friendli"].map(provider => ({ route, providerRouting:
 
 // Exercise the real executor and both actual child process launchers. Substitute
 // only the terminal model process, recording its applied provider request hook.
-function fixture(t, { stopReason = "stop", lingerAfterStop = false, captureNative = false, childDelayMs = 0, startBarrier = 0, config = {}, reasoning = false, sessionThinking, asyncByDefault = false, agentFields = {}, models = [] } = {}) {
+function fixture(t, { stopReason = "stop", lingerAfterStop = false, captureNative = false, childDelayMs = 0, startBarrier = 0, config = {}, reasoning = false, sessionThinking, asyncByDefault = false, agentFields = {}, models = [], hostedReceipt = false } = {}) {
   const cwd = fs.mkdtempSync(path.join(root, "case-"));
   const recordPath = path.join(cwd, "requests.jsonl");
   const fakePi = path.join(cwd, "fixture-pi.mjs");
@@ -59,9 +60,17 @@ while (readFileSync(${JSON.stringify(recordPath)}, "utf8").trim().split("\\n").m
 }` : ''}
 ${childDelayMs ? `await new Promise(resolve => setTimeout(resolve, ${childDelayMs}));` : ''}
 ${captureNative ? `appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify({phase:"end",pid:process.pid,timestamp:Date.now()}) + "\\n");` : ''}
+${hostedReceipt ? `
+for (const status of ["pending", "completed", "completed"]) {
+  process.stdout.write(JSON.stringify({ type:"entry_appended", entry:{type:"custom",customType:"auxiliary-model-usage-v1",
+    data:{ id:"fixture-search",owner:"web_search",provider:"perplexity",model:"sonar",status,
+      ...(status === "completed" ? {usage:{input:21,output:5,cost:{total:.032,source:"provider-reported"}}} : {}) }
+  } })+"\\n");
+}
+` : ''}
 process.stdout.write(JSON.stringify({ type: "message_end", message: { role: "assistant", provider: model.provider, model: model.id,
   api: "openai-completions", timestamp: Date.now(), content: [{ type: "text", text: "Child completed" }], stopReason: ${JSON.stringify(stopReason)},
-  usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } } }) + "\\n");
+  usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0${hostedReceipt ? ', source:"provider-reported"' : ''} } } } }) + "\\n");
 process.exitCode = ${stopReason === "length" ? 1 : 0};
 ${lingerAfterStop ? 'setInterval(() => {}, 1000);' : ''}
 `, { mode: 0o700 });
@@ -230,6 +239,24 @@ for (const background of [false, true]) test(`real ${background ? "background" :
   assert.equal(attempts.length, 1);
   assert.deepEqual(attempts.map(attempt => attempt.candidate), [pins[1]]);
   assert.deepEqual(attempts.map(attempt => attempt.provider), [pins[1].providerRouting]);
+});
+
+for (const background of [false, true]) test(`hosted billing from a ${background ? "background" : "foreground"} child reaches the parent total once`, { timeout: 30_000 }, async t => {
+  const f = fixture(t, { hostedReceipt: true });
+  const launch = await f.executor.executeDelegated("hosted-usage", {
+    agent: "route-fixture", task: "Read the source and return a concise observation", context: "fresh",
+    async: background, artifacts: false, modelRouteCandidates: [pins[1]], timeoutMs: 15_000,
+  }, new AbortController().signal, undefined, f.ctx);
+  assert.notEqual(launch.isError, true, JSON.stringify(launch));
+  if (background) await awaitNativeBackground(f, launch);
+  const result = background
+    ? JSON.parse(fs.readFileSync(resultFilePath(DIRS.results, launch.details.runId), "utf8"))
+    : launch.details;
+  const total = collectSessionCost([{ type: "custom", customType: "subagent-cost-v1", data: { runId: launch.details.runId, results: result.results } }]);
+  assert.equal(total.formatted, "$0.032000");
+  assert.equal(total.rows.find(row => row.route === "perplexity/sonar")?.reported, .032);
+  assert.equal(result.results[0].usage.input, 22);
+  assert.equal(result.results[0].usage.turns, 1);
 });
 
 test("a failed delegated session route is not retried on another upstream pin", { timeout: 30_000 }, async t => {

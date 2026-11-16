@@ -3,6 +3,7 @@ import { activityMonitor } from "./activity.ts";
 import type { ExtractedContent } from "./extract.ts";
 import { hasCredentialSource, redactCredential, resolveCredential } from "./credential-source.ts";
 import { getWebSearchConfigPath } from "./utils.ts";
+import { startWebUsage, type WebUsageOptions } from "./web-usage.ts";
 
 const PERPLEXITY_API_URL = "https://api.perplexity.ai/chat/completions";
 const CONFIG_PATH = getWebSearchConfigPath();
@@ -26,7 +27,7 @@ export interface SearchResponse {
 	inlineContent?: ExtractedContent[];
 }
 
-export interface SearchOptions {
+export interface SearchOptions extends WebUsageOptions {
 	numResults?: number;
 	recencyFilter?: "day" | "week" | "month" | "year";
 	domainFilter?: string[];
@@ -141,6 +142,8 @@ export async function searchWithPerplexity(query: string, options: SearchOptions
 	}
 
 	let response: Response;
+	options.signal?.throwIfAborted();
+	const finish = startWebUsage(options, "perplexity", "sonar");
 	try {
 		response = await fetch(PERPLEXITY_API_URL, {
 			method: "POST",
@@ -152,6 +155,9 @@ export async function searchWithPerplexity(query: string, options: SearchOptions
 			...(options.signal ? { signal: options.signal } : {}),
 		});
 	} catch (err) {
+		const reason = options.signal?.aborted ? options.signal.reason : err;
+		const name = reason instanceof Error ? reason.name : undefined;
+		finish(name === "TimeoutError" ? "timeout" : options.signal?.aborted || name === "AbortError" ? "cancelled" : "failed");
 		const message = err instanceof Error ? err.message : String(err);
 		const redactedMessage = redactCredential(message, apiKey);
 		if (redactedMessage.toLowerCase().includes("abort")) {
@@ -166,6 +172,7 @@ export async function searchWithPerplexity(query: string, options: SearchOptions
 	}
 
 	if (!response.ok) {
+		finish("failed");
 		activityMonitor.logComplete(activityId, response.status);
 		const errorText = redactCredential(await response.text(), apiKey);
 		throw new Error(`Perplexity API error ${response.status}: ${errorText}`);
@@ -175,10 +182,20 @@ export async function searchWithPerplexity(query: string, options: SearchOptions
 	try {
 		data = await response.json();
 	} catch (err) {
+		finish(options.signal?.aborted ? options.signal.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : "failed");
 		activityMonitor.logComplete(activityId, response.status);
 		const message = err instanceof Error ? err.message : String(err);
 		throw new Error(`Perplexity API returned invalid JSON: ${message}`);
 	}
+	const raw = data?.usage as { prompt_tokens?: number; completion_tokens?: number; cost?: { total_cost?: number } } | undefined;
+	const total = raw?.cost?.total_cost;
+	const input = raw?.prompt_tokens;
+	const output = raw?.completion_tokens;
+	finish("completed", {
+		...(typeof input === "number" && Number.isSafeInteger(input) && input >= 0 ? { input } : {}),
+		...(typeof output === "number" && Number.isSafeInteger(output) && output >= 0 ? { output } : {}),
+		...(typeof total === "number" && Number.isFinite(total) && total >= 0 ? { cost: { total, source: "provider-reported" } } : {}),
+	});
 
 	const answer = (data.choices as Array<{ message?: { content?: string } }>)?.[0]?.message?.content || "";
 	const citations = Array.isArray(data.citations) ? data.citations : [];

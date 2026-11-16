@@ -46,6 +46,24 @@ test('reading a complete final line does not repair or rewrite the source file',
   assert.equal(digest(f.file), hash); assert.equal(fs.statSync(f.file).mtimeMs, stat.mtimeMs);
 });
 
+test('paged snapshots notice same-size rewrites and appended history', async t => {
+  const f = fixture(t, { entries: [entry('first', null, 'before'), entry('next', 'first', 'next')] });
+  const mtime = new Date('2025-01-01T00:00:00.000Z');
+  fs.utimesSync(f.file, mtime, mtime);
+  const initial = await readHistory({ ...f, limit: 1 });
+  assert.equal(initial.before, 1);
+
+  const text = fs.readFileSync(f.file, 'utf8');
+  fs.writeFileSync(f.file, text.replace('"content":"before"', '"content":"edited"'));
+  fs.utimesSync(f.file, mtime, mtime);
+  assert.deepEqual((await readHistory({ ...f, before: initial.before })).messages.map(message => message.content), ['edited']);
+
+  fs.appendFileSync(f.file, JSON.stringify(entry('end', 'next', 'appended')) + '\n');
+  const appended = await readHistory({ ...f, limit: 1 });
+  assert.equal(appended.total, 3);
+  assert.equal(appended.messages[0].content, 'appended');
+});
+
 test('passive open includes whole-session charges, including discarded branches outside the page', async t => {
   const priced = (id, parentId, total) => ({
     ...entry(id, parentId, ''),

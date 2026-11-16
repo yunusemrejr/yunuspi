@@ -175,6 +175,22 @@ test('a stopped session emits no settled follow-ups until user input unlocks', a
   assert.equal(sent.filter((s) => s.message?.customType === 'session-stop-unlock').length, 0);
 });
 
+test('stopping after a tool-use answer suppresses checkpoint wakes without erasing the tool outcome', async () => {
+  const { hooks, sent } = loadCheckpoints();
+  const ctx = scopeCtx([], 'stop-during-tool-result');
+  hooks.input({ source: 'interactive', text: 'Edit the fixture' }, ctx);
+  const assistant = { role: 'assistant', stopReason: 'toolUse', content: [] };
+  await hooks.message_end({ message: assistant }, ctx);
+  await hooks.tool_result({ toolName: 'write', toolCallId: 'fixture-write', input: { path: 'value.txt' }, content: [], isError: false }, ctx);
+  await hooks.agent_end?.({ type: 'agent_end', messages: [assistant], aborted: true }, ctx);
+  await hooks.agent_settled({}, ctx);
+  assert.equal(assistant.stopReason, 'toolUse');
+  assert.equal(sent.length, 0, 'an unverified edit must not wake a manually stopped session');
+  assert.equal(stop.isSessionStopped(ctx), true);
+  hooks.input({ source: 'interactive', text: 'Continue with a new instruction' }, ctx);
+  assert.equal(stop.isSessionStopped(ctx), false);
+});
+
 test('extension-sourced input does not unlock a stopped session', async () => {
   const { hooks, tools, sent } = loadCheckpoints();
   const ctx = scopeCtx(gatedBranch(), 'stop-settled-2');

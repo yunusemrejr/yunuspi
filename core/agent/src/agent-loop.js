@@ -91,6 +91,7 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
     let lastCompletedTurn;
     // Check for steering messages at start (user may have typed while waiting)
     let pendingMessages = signal?.aborted ? [] : (await config.getSteeringMessages?.()) || [];
+    let pendingFollowUp = false;
     let hasMoreToolCalls = true;
     // Outer loop: continues when queued follow-up messages arrive after agent would stop
     while (!signal?.aborted) {
@@ -111,18 +112,24 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
                                 : nextTurnSnapshot.thinkingLevel,
                     };
                 }
-                // Preparation can be long-running (for example, compaction). Pick up steering
-                // queued while it ran. Only poll again if the earlier poll returned nothing;
-                // otherwise one-at-a-time mode would deliver two messages in this turn.
-                if (pendingMessages.length === 0) {
-                    pendingMessages = (await config.getSteeringMessages?.()) || [];
+                // Listeners can await work. Keep the selection revocable until
+                // those hooks finish, then look for any newer steering.
+                await emit({ type: "turn_start" });
+                if (signal?.aborted) break;
+                // Preparation can outlast a new user correction. A staged follow-up stays
+                // queued when steering takes its place. Legacy destructive getters cannot
+                // safely replace a selection. An already selected steering batch stays FIFO.
+                if (pendingMessages.length === 0 ||
+                    (pendingFollowUp && config.consumePendingMessages && config.hasInterruptingSteering?.())) {
+                    const steering = await config.getSteeringMessages?.();
+                    if (steering?.length) pendingMessages = steering;
                 }
             }
             if (signal?.aborted) break;
             const delivery = pendingMessages.length ? config.consumePendingMessages?.() ?? pendingMessages : [];
             pendingMessages = [];
+            pendingFollowUp = false;
             if (!hasMoreToolCalls && delivery.length === 0) break;
-            if (lastCompletedTurn) await emit({ type: "turn_start" });
             // Process pending messages (inject before next assistant response)
             for (const message of delivery) {
                 await emit({ type: "message_start", message });
@@ -186,6 +193,7 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
         if (followUpMessages.length > 0) {
             // Set as pending so inner loop processes them
             pendingMessages = followUpMessages;
+            pendingFollowUp = true;
             continue;
         }
         // No more messages, exit

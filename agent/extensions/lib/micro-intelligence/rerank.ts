@@ -14,8 +14,10 @@
  * degrades to undefined (caller keeps its local order).
  */
 import { raceWithAbortSignal } from "@yunuspi/ai/utils/abort";
+import { randomUUID } from "node:crypto";
 import { microMetrics } from "./metrics.ts";
 import { sessionObservability } from "../session-observability.ts";
+import { redactSecrets } from "../memory-redaction.ts";
 
 export const RERANK_DEFAULT_URL = "https://api.voyageai.com/v1/rerank";
 export const RERANK_TIMEOUT_MS = 15_000;
@@ -40,6 +42,16 @@ export interface RerankTransport {
   }): Promise<{ order: number[] }>;
 }
 
+type RerankUsage = {
+  id: string;
+  owner: "project-memory-rerank";
+  model: string;
+  provider: "voyage" | "voyage-compatible";
+  status: "pending" | "completed" | "failed" | "cancelled" | "timeout";
+  usage?: { input: number; totalTokens: number };
+};
+type RerankUsageSink = (receipt: RerankUsage) => void;
+
 export function rerankEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return !["1", "true", "yes"].includes((env.PI_OFFLINE ?? "").toLowerCase())
     && !["off", "0", "false", "no"].includes((env.PI_RERANK ?? "on").toLowerCase());
@@ -59,6 +71,7 @@ export function voyageRerankTransport(opts: {
   key?: () => string | undefined;
   fetchImpl?: typeof fetch;
   env?: Record<string, string | undefined>;
+  onUsage?: RerankUsageSink;
 } = {}): RerankTransport {
   const env = opts.env ?? process.env;
   const fetchImpl = opts.fetchImpl ?? ((...args: Parameters<typeof fetch>) => globalThis.fetch(...args));
@@ -67,21 +80,47 @@ export function voyageRerankTransport(opts: {
     const key = keyOf();
     if (!key) throw Error("rerank: no API key");
     signal?.throwIfAborted();
+    const endpoint = new URL(url);
+    if (!["https:", "http:"].includes(endpoint.protocol) || endpoint.username || endpoint.password) throw Error("rerank: invalid endpoint");
+    const bodyText = JSON.stringify({
+      model,
+      query: redactSecrets(query, env, [key]),
+      documents: documents.map(text => redactSecrets(text, env, [key])),
+      top_k: topK,
+      return_documents: false,
+    });
+    const identity = opts.onUsage && {
+      id: randomUUID(), owner: "project-memory-rerank" as const,
+      provider: endpoint.origin === "https://api.voyageai.com" && endpoint.pathname === "/v1/rerank" ? "voyage" as const : "voyage-compatible" as const,
+      model: /^[\w][\w./:@-]{0,127}$/.test(model) && !model.includes("://") ? model : "unknown-model",
+    };
+    let usage: RerankUsage["usage"];
+    const note = (status: RerankUsage["status"]) => {
+      if (!identity) return;
+      try { opts.onUsage?.({ ...identity, status, ...(usage ? { usage } : {}) }); }
+      catch { /* Billing evidence cannot invalidate a useful rank. */ }
+    };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(new DOMException("Rerank timeout", "TimeoutError")), timeoutMs);
-    const onAbort = () => controller.abort();
+    const onAbort = () => controller.abort(signal?.reason);
     signal?.addEventListener("abort", onAbort, { once: true });
+    note("pending");
     try {
       const response = await fetchImpl(url, {
         method: "POST",
+        redirect: "error",
         headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ model, query, documents, top_k: topK, return_documents: false }),
+        body: bodyText,
         signal: controller.signal,
       });
       if (!response.ok) throw Error(`rerank ${response.status}`);
-      const body = (await response.json()) as { data?: Array<{ index?: number; relevance_score?: number }> };
+      // The API supplies billed token units. Free credits and account pricing
+      // are unavailable here, so let the ledger flag an unknown USD charge.
+      const body = (await response.json()) as { usage?: { total_tokens?: number }; data?: Array<{ index?: number; relevance_score?: number }> };
+      const total = body?.usage?.total_tokens;
+      if (typeof total === "number" && Number.isSafeInteger(total) && total >= 0) usage = { input: total, totalTokens: total };
       controller.signal.throwIfAborted();
-      if (!Array.isArray(body.data) || !body.data.length || body.data.length > documents.length
+      if (!Array.isArray(body?.data) || !body.data.length || body.data.length > documents.length
         || new Set(body.data.map(row => row?.index)).size !== body.data.length
         || body.data.some(row => !row || !Number.isInteger(row.index) || row.index! < 0 || row.index! >= documents.length
           || typeof row.relevance_score !== 'number' || !Number.isFinite(row.relevance_score))) throw Error("rerank: malformed answers");
@@ -89,7 +128,11 @@ export function voyageRerankTransport(opts: {
         .sort((a, b) => b.relevance_score! - a.relevance_score!)
         .map((row) => row.index as number);
       if (!order.length) throw Error("rerank: malformed answers");
+      note("completed");
       return { order };
+    } catch (error) {
+      note(controller.signal.reason?.name === "TimeoutError" ? "timeout" : signal?.aborted ? "cancelled" : "failed");
+      throw error;
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
@@ -101,6 +144,7 @@ export interface RemoteRankerOptions {
   model?: string;
   url?: string;
   transport?: RerankTransport;
+  onUsage?: RerankUsageSink;
   topK?: number;
   timeoutMs?: number;
   /** Minimum candidates before a remote call is worthwhile. */
@@ -137,7 +181,7 @@ export function remoteRanker(opts: RemoteRankerOptions = {}): {
         return undefined;
       }
       metrics.offer("rerank");
-      const transport = opts.transport ?? voyageRerankTransport({ env });
+      const transport = opts.transport ?? voyageRerankTransport({ env, onUsage: opts.onUsage });
       const controller = new AbortController();
       const requestSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
       const timeoutMs = Number.isFinite(opts.timeoutMs) ? Math.max(1, Math.min(2_147_483_647, opts.timeoutMs!)) : RERANK_TIMEOUT_MS;

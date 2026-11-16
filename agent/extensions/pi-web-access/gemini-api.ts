@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { hasCredentialSource, redactCredential, resolveCredential } from "./credential-source.ts";
 import { getWebSearchConfigPath } from "./utils.ts";
+import { startWebUsage, type WebUsageOptions } from "./web-usage.ts";
 import {
 	isGeminiAdcAvailable,
 	getAdcAccessToken,
@@ -143,6 +144,7 @@ export async function fetchGeminiApi(
 	url: string | URL,
 	init: RequestInit = {},
 	apiKey?: string | null,
+	onDispatch?: (provider: string) => void,
 ): Promise<Response> {
 	const parsedUrl = new URL(url);
 	for (const name of parsedUrl.searchParams.keys()) {
@@ -180,7 +182,14 @@ export async function fetchGeminiApi(
 		}
 	}
 	try {
-		const response = await fetch(parsedUrl, { ...init, headers });
+		init.signal?.throwIfAborted();
+		onDispatch?.(adcMode ? "google-vertex"
+			: parsedUrl.hostname === "gateway.ai.cloudflare.com" ? "cloudflare-ai-gateway"
+			: parsedUrl.origin === DEFAULT_API_HOST ? "google"
+			: "gemini-gateway");
+		// Fetch strips Authorization across origins but forwards custom key
+		// headers. A resumable upload URL is a separate, validated request.
+		const response = await fetch(parsedUrl, { ...init, headers, redirect: needsAuth ? "error" : init.redirect });
 		responseCredentials.set(response, { apiKey: resolvedApiKey, cloudflareApiKey, adcToken });
 		return response;
 	} catch (error) {
@@ -214,7 +223,7 @@ export function isGeminiApiAvailableWithVideo(): boolean {
 	return hasGeminiApiKeySource() || isGatewayConfigured();
 }
 
-export interface GeminiApiOptions {
+export interface GeminiApiOptions extends WebUsageOptions {
 	apiKey?: string;
 	model?: string;
 	mimeType?: string;
@@ -226,6 +235,64 @@ export interface GeminiGenerateContentResult {
 	text: string;
 	finishReason?: string;
 	blockReason?: string;
+}
+
+interface GeminiUsageResponse {
+	usageMetadata?: {
+		promptTokenCount?: unknown;
+		cachedContentTokenCount?: unknown;
+		candidatesTokenCount?: unknown;
+		thoughtsTokenCount?: unknown;
+		toolUsePromptTokenCount?: unknown;
+	};
+}
+
+function geminiTokenUsage(metadata: GeminiUsageResponse["usageMetadata"]) {
+	const count = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+	const prompt = count(metadata?.promptTokenCount);
+	const cached = count(metadata?.cachedContentTokenCount);
+	const candidates = count(metadata?.candidatesTokenCount);
+	const reasoning = count(metadata?.thoughtsTokenCount);
+	const toolInput = count(metadata?.toolUsePromptTokenCount);
+	const cacheRead = cached !== undefined && (prompt === undefined || cached <= prompt) ? cached : undefined;
+	return {
+		// Tool results are fed back as additional input. Cached prompt tokens
+		// and thinking tokens each appear once in their respective totals.
+		...(prompt !== undefined || toolInput !== undefined ? { input: (prompt ?? 0) - (prompt === undefined ? 0 : cacheRead ?? 0) + (toolInput ?? 0) } : {}),
+		...(cacheRead !== undefined ? { cacheRead } : {}),
+		...(candidates !== undefined || reasoning !== undefined ? { output: (candidates ?? 0) + (reasoning ?? 0) } : {}),
+		...(reasoning !== undefined ? { reasoning } : {}),
+	};
+}
+
+export async function fetchGeminiContent<T>(
+	model: string,
+	body: Record<string, unknown>,
+	signal: AbortSignal,
+	apiKey: string | null,
+	options: WebUsageOptions,
+): Promise<{ response: Response; data?: T }> {
+	let finishUsage: ReturnType<typeof startWebUsage> | undefined;
+	try {
+		const response = await fetchGeminiApi(`${getVersionedApiBase()}/models/${model}:generateContent`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify(body),
+			signal,
+		}, apiKey, provider => { finishUsage = startWebUsage(options, provider, model); });
+		if (!response.ok) {
+			finishUsage?.("failed");
+			return { response };
+		}
+		const data = await response.json() as T & GeminiUsageResponse;
+		// Free tiers, ADC billing and gateway terms depend on the account.
+		// GenerateContent has token counts but no per-request dollar receipt.
+		finishUsage?.("completed", geminiTokenUsage(data?.usageMetadata));
+		return { response, data };
+	} catch (error) {
+		finishUsage?.(signal.reason?.name === "TimeoutError" ? "timeout" : signal.aborted ? "cancelled" : "failed");
+		throw error;
+	}
 }
 
 export async function queryGeminiApiWithInlineData(
@@ -246,7 +313,6 @@ export async function queryGeminiApiWithInlineData(
 	}
 
 	const model = options.model ?? DEFAULT_MODEL;
-	const url = `${getVersionedApiBase()}/models/${model}:generateContent`;
 	const body = {
 		contents: [
 			{
@@ -259,20 +325,13 @@ export async function queryGeminiApiWithInlineData(
 		],
 	};
 
-	const res = await fetchGeminiApi(url, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(body),
-		signal,
-	}, apiKey);
-
+	const { response: res, data: response } = await fetchGeminiContent<GenerateContentResponse>(model, body, signal, apiKey, options);
 	if (!res.ok) {
 		const errorText = redactGeminiApiResponse(res, await res.text(), apiKey);
 		throw new Error(`Gemini API error ${res.status}: ${errorText.slice(0, 300)}`);
 	}
 
-	const response = (await res.json()) as GenerateContentResponse;
-	const candidate = response.candidates?.[0];
+	const candidate = response?.candidates?.[0];
 	const text = candidate?.content?.parts
 		?.map((part) => part.text)
 		.filter((part): part is string => typeof part === "string" && part.length > 0)
@@ -281,7 +340,7 @@ export async function queryGeminiApiWithInlineData(
 	return {
 		text,
 		...(candidate?.finishReason ? { finishReason: candidate.finishReason } : {}),
-		...(response.promptFeedback?.blockReason ? { blockReason: response.promptFeedback.blockReason } : {}),
+		...(response?.promptFeedback?.blockReason ? { blockReason: response.promptFeedback.blockReason } : {}),
 	};
 }
 
@@ -301,7 +360,6 @@ export async function queryGeminiApiWithVideo(
 	}
 
 	const model = options.model ?? DEFAULT_MODEL;
-	const url = `${getVersionedApiBase()}/models/${model}:generateContent`;
 
 	const fileData: Record<string, string> = { fileUri: videoUri };
 	if (options.mimeType) fileData.mimeType = options.mimeType;
@@ -318,20 +376,13 @@ export async function queryGeminiApiWithVideo(
 		],
 	};
 
-	const res = await fetchGeminiApi(url, {
-		method: "POST",
-		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(body),
-		signal,
-	}, apiKey);
-
+	const { response: res, data } = await fetchGeminiContent<GenerateContentResponse>(model, body, signal, apiKey, options);
 	if (!res.ok) {
 		const errorText = redactGeminiApiResponse(res, await res.text(), apiKey);
 		throw new Error(`Gemini API error ${res.status}: ${errorText.slice(0, 300)}`);
 	}
 
-	const data = (await res.json()) as GenerateContentResponse;
-	const text = data.candidates?.[0]?.content?.parts
+	const text = data?.candidates?.[0]?.content?.parts
 		?.map((p) => p.text)
 		.filter(Boolean)
 		.join("\n");
@@ -340,7 +391,7 @@ export async function queryGeminiApiWithVideo(
 	return text;
 }
 
-interface GenerateContentResponse {
+interface GenerateContentResponse extends GeminiUsageResponse {
 	candidates?: Array<{
 		content?: {
 			parts?: Array<{ text?: string }>;

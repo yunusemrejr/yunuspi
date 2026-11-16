@@ -8,6 +8,7 @@ import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.ts";
 import { queryGeminiApiWithVideo, getApiKey, fetchGeminiApi, getVersionedApiBase, getUploadBase, redactGeminiApiResponse } from "./gemini-api.ts";
 import { extractHeadingTitle, type ExtractedContent, type ExtractOptions, type FrameResult } from "./extract.ts";
 import { readExecError, trimErrorText, mapFfmpegError, getWebSearchConfigPath, installHint } from "./utils.ts";
+import type { WebUsageOptions } from "./web-usage.ts";
 
 const CONFIG_PATH = getWebSearchConfigPath();
 
@@ -178,8 +179,8 @@ export async function extractVideo(
 	}
 	const activityId = activityMonitor.logStart({ type: "fetch", url: `video:${displayName}` });
 
-	const result = await tryVideoGeminiApi(info, effectivePrompt, effectiveModel, signal)
-		?? await tryVideoGeminiWeb(info, effectivePrompt, effectiveModel, signal);
+	const result = await tryVideoGeminiApi(info, effectivePrompt, effectiveModel, signal, options)
+		?? await tryVideoGeminiWeb(info, effectivePrompt, effectiveModel, signal, options);
 
 	if (result) {
 		if (canAttachImages()) {
@@ -242,6 +243,7 @@ async function tryVideoGeminiWeb(
 	prompt: string,
 	model: string,
 	signal?: AbortSignal,
+	options?: WebUsageOptions,
 ): Promise<ExtractedContent | null> {
 	try {
 		const cookies = await isGeminiWebAvailable();
@@ -250,6 +252,7 @@ async function tryVideoGeminiWeb(
 
 		const text = await queryWithCookies(prompt, cookies, {
 			files: [info.absolutePath],
+			onUsage: options?.onUsage,
 			...(model !== "gemini-3.6-flash" ? { model } : {}),
 			signal,
 			timeoutMs: 180000,
@@ -272,6 +275,7 @@ async function tryVideoGeminiApi(
 	prompt: string,
 	model: string,
 	signal?: AbortSignal,
+	options?: WebUsageOptions,
 ): Promise<ExtractedContent | null> {
 	const apiKey = await getApiKey(signal);
 	if (!apiKey) return null;
@@ -286,6 +290,7 @@ async function tryVideoGeminiApi(
 
 		const text = await queryGeminiApiWithVideo(prompt, uploaded.uri, {
 			apiKey,
+			onUsage: options?.onUsage,
 			model,
 			mimeType: info.mimeType,
 			signal,

@@ -7,6 +7,7 @@ import { isGeminiApiAvailableWithVideo, queryGeminiApiWithVideo } from "./gemini
 import { isPerplexityAvailable, searchWithPerplexity } from "./perplexity.ts";
 import { extractHeadingTitle, type ExtractedContent, type FrameResult, type VideoFrame } from "./extract.ts";
 import { formatSeconds, readExecError, isTimeoutError, trimErrorText, mapFfmpegError, getWebSearchConfigPath, installHint } from "./utils.ts";
+import type { WebUsageOptions } from "./web-usage.ts";
 
 const CONFIG_PATH = getWebSearchConfigPath();
 
@@ -99,6 +100,7 @@ export async function extractYouTube(
 	signal?: AbortSignal,
 	prompt?: string,
 	model?: string,
+	options: WebUsageOptions = {},
 ): Promise<ExtractedContent | null> {
 	const config = loadYouTubeConfig();
 	const { videoId } = isYouTubeURL(url);
@@ -111,9 +113,9 @@ export async function extractYouTube(
 	const activityId = activityMonitor.logStart({ type: "fetch", url: `youtube.com/${videoId ?? "video"}` });
 	const attemptErrors: string[] = [];
 
-	const result = await tryGeminiWeb(canonicalUrl, effectivePrompt, effectiveModel, signal, attemptErrors)
-		?? await tryGeminiApi(canonicalUrl, effectivePrompt, effectiveModel, signal, attemptErrors)
-		?? await tryPerplexity(url, effectivePrompt, signal, attemptErrors);
+	const result = await tryGeminiWeb(canonicalUrl, effectivePrompt, effectiveModel, signal, attemptErrors, options)
+		?? await tryGeminiApi(canonicalUrl, effectivePrompt, effectiveModel, signal, attemptErrors, options)
+		?? await tryPerplexity(url, effectivePrompt, signal, attemptErrors, options);
 
 	if (result) {
 		result.url = url;
@@ -231,6 +233,7 @@ async function tryGeminiWeb(
 	model: string,
 	signal: AbortSignal | undefined,
 	attemptErrors: string[],
+	options: WebUsageOptions,
 ): Promise<ExtractedContent | null> {
 	try {
 		const cookies = await isGeminiWebAvailable();
@@ -240,6 +243,7 @@ async function tryGeminiWeb(
 
 		const text = await queryWithCookies(prompt, cookies, {
 			youtubeUrl: url,
+			onUsage: options.onUsage,
 			...(model !== "gemini-3.6-flash" ? { model } : {}),
 			signal,
 			timeoutMs: 120000,
@@ -264,6 +268,7 @@ async function tryGeminiApi(
 	model: string,
 	signal: AbortSignal | undefined,
 	attemptErrors: string[],
+	options: WebUsageOptions,
 ): Promise<ExtractedContent | null> {
 	try {
 		if (!isGeminiApiAvailableWithVideo()) return null;
@@ -272,6 +277,7 @@ async function tryGeminiApi(
 
 		const text = await queryGeminiApiWithVideo(prompt, url, {
 			model,
+			onUsage: options.onUsage,
 			signal,
 			timeoutMs: 120000,
 		});
@@ -294,6 +300,7 @@ async function tryPerplexity(
 	prompt: string,
 	signal: AbortSignal | undefined,
 	attemptErrors: string[],
+	options: WebUsageOptions,
 ): Promise<ExtractedContent | null> {
 	try {
 		if (signal?.aborted || !isPerplexityAvailable()) return null;
@@ -304,7 +311,7 @@ async function tryPerplexity(
 
 		const { answer } = await searchWithPerplexity(
 			perplexityQuery,
-			{ signal },
+			{ signal, onUsage: options.onUsage },
 		);
 
 		if (!answer) return null;

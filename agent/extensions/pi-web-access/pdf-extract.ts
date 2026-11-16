@@ -23,6 +23,7 @@ import {
 import { isGeminiApiAvailable } from "./gemini-api.ts";
 import { extractPDFViaGemini } from "./gemini-pdf-extract.ts";
 import { getWebSearchConfigPath } from "./utils.ts";
+import type { WebUsageOptions } from "./web-usage.ts";
 
 export interface PDFExtractResult {
 	title: string;
@@ -31,12 +32,13 @@ export interface PDFExtractResult {
 	outputPath: string;
 }
 
-export interface PDFExtractOptions {
+export interface PDFExtractOptions extends WebUsageOptions {
 	maxPages?: number;
 	outputDir?: string;
 	filename?: string;
 	signal?: AbortSignal;
 	geminiTimeoutMs?: number;
+	localOnly?: boolean;
 }
 
 export type PDFProvider = "auto" | "gemini" | "datalab" | "unpdf";
@@ -180,7 +182,7 @@ export async function extractPDFToMarkdown(
 				? Math.max(1, Math.floor(maxPages))
 				: DEFAULT_MAX_PAGES;
 	const urlTitle = extractTitleFromURL(url);
-	const provider = pdfConfig.provider;
+	const provider = options.localOnly ? "unpdf" : pdfConfig.provider;
 
 	if (provider === "auto" || provider === "datalab") {
 		try {
@@ -190,6 +192,7 @@ export async function extractPDFToMarkdown(
 					title: urlTitle,
 					mode: pdfConfig.datalabMode,
 					timeoutMs: pdfConfig.datalabTimeoutMs,
+					onUsage: options.onUsage,
 					...(signal ? { signal } : {}),
 				});
 				return writeMarkdownResult({
@@ -212,6 +215,7 @@ export async function extractPDFToMarkdown(
 				const markdownBody = await extractPDFViaGemini(buffer, {
 					maxPages: safeMaxPages,
 					title: urlTitle,
+					onUsage: options.onUsage,
 					...(signal ? { signal } : {}),
 					...(geminiTimeoutMs !== undefined
 						? { timeoutMs: geminiTimeoutMs }

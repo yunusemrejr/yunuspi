@@ -91,3 +91,14 @@ test('a session model without text input is rejected', async (t) => {
     /does not support text input: fixture\/session/,
   );
 });
+
+test('a billed completion is recorded even when page answering rejects its empty output', async () => {
+  const calls = [], receipts = [], ctx = sessionContext(sessionModel, calls);
+  ctx.modelRegistry.complete = async () => ({
+    stopReason: 'stop', content: [], usage: { cost: { total: .02, source: 'provider-reported' } },
+  });
+  await assert.rejects(answerFromPage(input, ctx, undefined, { onUsage: receipt => receipts.push(receipt) }), /empty response/);
+  assert.deepEqual(receipts.map(receipt => receipt.status), ['pending', 'completed']);
+  assert.equal(receipts[1].id, receipts[0].id);
+  assert.equal(receipts[1].usage.cost.total, .02);
+});

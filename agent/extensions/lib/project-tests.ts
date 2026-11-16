@@ -757,13 +757,21 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       if (event.toolName === 'process') { await scan(ctx, completesOwnedCheck(event.details?.managedJob)); terminal(event.details?.managedJob); }
       if (event.toolName === 'bg_status') { await scan(ctx, (event.details?.tasks ?? []).some(completesOwnedCheck)); for (const task of event.details?.tasks ?? []) terminal(task); }
     },
+    interrupt() {
+      if (pauseReason === 'stop') return;
+      pauseReason = 'stop';
+      state.paused = true;
+      starts.clear();
+      save();
+    },
     async message(event: any, ctx: any) {
       activity++;
       const message = event.message;
-      if (message?.role === 'assistant' && ['aborted', 'error'].includes(message.stopReason)) {
-        // A provider may recover in the same user turn. Escape/Stop remains
-        // authoritative even if a later completion arrives after cancellation.
-        if (pauseReason !== 'stop') pauseReason = message.stopReason === 'aborted' ? 'stop' : 'error';
+      if (message?.role === 'assistant' && message.stopReason === 'aborted') {
+        api.interrupt();
+      } else if (message?.role === 'assistant' && message.stopReason === 'error' && pauseReason !== 'stop') {
+        // A provider may recover in the same user turn.
+        pauseReason = 'error';
         state.paused = true; starts.clear(); save();
       } else if (message?.role === 'assistant' && ['stop', 'toolUse', 'length'].includes(message.stopReason) && pauseReason === 'error') {
         pauseReason = undefined; state.paused = false; save();

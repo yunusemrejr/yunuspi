@@ -1,5 +1,6 @@
 import { complete, type Api, type Model, type ProviderHeaders } from "@yunuspi/ai/compat";
 import type { SummaryGenerationContext } from "./summary-review.ts";
+import { trackWebCompletion } from "./web-model-usage.ts";
 
 async function resolveSessionModel(
 	ctx: SummaryGenerationContext,
@@ -25,7 +26,7 @@ export async function rewriteSearchQuery(
 	const registry = ctx.modelRegistry as typeof ctx.modelRegistry & { complete?: typeof complete };
 	const usesRegistryComplete = typeof registry.complete === "function";
 	const completeFn = usesRegistryComplete ? registry.complete!.bind(registry) : complete;
-	const response = await completeFn(
+	const response = await trackWebCompletion(ctx, model, signal, () => completeFn(
 		model,
 		{
 			messages: [{
@@ -35,7 +36,7 @@ export async function rewriteSearchQuery(
 			}],
 		},
 		usesRegistryComplete ? { signal } : { apiKey, headers, signal },
-	);
+	));
 	if (response.stopReason === "aborted") throw new Error("Aborted");
 	const contentParts = Array.isArray(response.content) ? response.content : [];
 	const text = contentParts

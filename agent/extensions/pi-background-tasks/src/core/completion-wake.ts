@@ -33,6 +33,7 @@ export function createCompletionNotifier(
     wakeSignal = undefined; wakeAbort = undefined;
   };
   const clearCompact = () => { if (compactTimer) clearTimeout(compactTimer); compactTimer = undefined; };
+  const pause = () => { blocked = true; clearWake(); clearCompact(); };
   const flush = async () => {
     if (inFlight) { drainRequested = true; return; }
     if (!active || !pending || blocked || compactionBlocked || context()?.signal?.aborted || !context()?.isIdle()) return;
@@ -97,7 +98,7 @@ export function createCompletionNotifier(
     wakeTimer = timer;
     timer.unref?.();
     wakeSignal = ctx?.signal;
-    wakeAbort = () => { clearWake(); clearCompact(); blocked = true; };
+    wakeAbort = pause;
     wakeSignal?.addEventListener("abort", wakeAbort, { once: true });
     if (wakeSignal?.aborted) wakeAbort();
   };
@@ -111,13 +112,14 @@ export function createCompletionNotifier(
     blocked = pausesCompletionWake(last?.message);
   });
   pi.on("message_end", (event) => {
-    if (pausesCompletionWake(event.message)) { blocked = true; clearWake(); clearCompact(); }
+    if (pausesCompletionWake(event.message)) pause();
     else if (
       event.message.role === "assistant" &&
       !["error", "aborted"].includes(event.message.stopReason)
     )
       blocked = false;
   });
+  pi.on("agent_end", (event) => { if (event.aborted) pause(); });
   pi.on("input", (event) => {
     if (event.source !== "extension") {
       generation++; clearWake(); clearCompact(); graceDeadline = undefined; inFlight = undefined; drainRequested = false; blocked = false; compactionBlocked = false;

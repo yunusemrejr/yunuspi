@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { basename } from "node:path";
 import { getLastGoogleCookieDiagnostic, getLastGoogleCookieDiagnosticDetails, type BrowserCookieDiagnosticDetails, type CookieMap, getGoogleCookies } from "./chrome-cookies.ts";
 import { getBrowserCookieSelectionFromConfig, isBrowserCookieAccessAllowed, normalizeChromeProfile } from "./gemini-web-config.ts";
+import { startWebUsage, type WebUsageOptions } from "./web-usage.ts";
 
 const GEMINI_APP_URL = "https://gemini.google.com/app";
 const GEMINI_STREAM_GENERATE_URL =
@@ -89,7 +90,7 @@ export async function resolveGeminiFetch(): Promise<typeof fetch> {
 	return geminiFetchImpl;
 }
 
-export interface GeminiWebOptions {
+export interface GeminiWebOptions extends WebUsageOptions {
 	youtubeUrl?: string;
 	model?: string;
 	files?: string[];
@@ -163,7 +164,7 @@ export async function queryWithCookies(
 		fullPrompt = `${fullPrompt}\n\nYouTube video: ${options.youtubeUrl}`;
 	}
 
-	const result = await runGeminiWebOnce(fullPrompt, cookieMap, model, options.files, timeoutMs, options.signal);
+	const result = await runGeminiWebOnce(fullPrompt, cookieMap, model, timeoutMs, options);
 
 	if (result.errorMessage) throw new Error(result.errorMessage);
 	if (!result.text) throw new Error("Gemini Web returned empty response");
@@ -180,17 +181,16 @@ async function runGeminiWebOnce(
 	prompt: string,
 	cookieMap: CookieMap,
 	model: string,
-	files: string[] | undefined,
 	timeoutMs: number,
-	signal?: AbortSignal,
+	options: GeminiWebOptions,
 ): Promise<GeminiWebResult> {
-	const effectiveSignal = withTimeout(signal, timeoutMs);
+	const effectiveSignal = withTimeout(options.signal, timeoutMs);
 	const cookieHeader = buildCookieHeader(cookieMap);
 	const accessToken = await fetchAccessToken(cookieHeader, effectiveSignal);
 
 	const uploaded: Array<{ id: string; name: string }> = [];
-	if (files) {
-		for (const filePath of files) {
+	if (options.files) {
+		for (const filePath of options.files) {
 			uploaded.push(await uploadFile(filePath, cookieHeader, effectiveSignal));
 		}
 	}
@@ -200,7 +200,27 @@ async function runGeminiWebOnce(
 	params.set("at", accessToken);
 	params.set("f.req", fReq);
 
-	const res = await (await resolveGeminiFetch())(GEMINI_STREAM_GENERATE_URL, {
+	const fetchGemini = await resolveGeminiFetch();
+	effectiveSignal.throwIfAborted();
+	const finishUsage = startWebUsage(options, "gemini-web", model);
+	try {
+		const result = await requestGeminiWeb(fetchGemini, model, cookieHeader, params, effectiveSignal);
+		finishUsage(result.errorMessage || !result.text ? "failed" : "completed");
+		return result;
+	} catch (error) {
+		finishUsage(options.signal?.aborted ? "cancelled" : effectiveSignal.reason?.name === "TimeoutError" ? "timeout" : "failed");
+		throw error;
+	}
+}
+
+async function requestGeminiWeb(
+	fetchGemini: typeof fetch,
+	model: string,
+	cookieHeader: string,
+	params: URLSearchParams,
+	signal: AbortSignal,
+): Promise<GeminiWebResult> {
+	const res = await fetchGemini(GEMINI_STREAM_GENERATE_URL, {
 		method: "POST",
 		redirect: "error",
 		headers: {
@@ -214,7 +234,7 @@ async function runGeminiWebOnce(
 			[MODEL_HEADER_NAME]: MODEL_HEADERS[model],
 		},
 		body: params.toString(),
-		signal: effectiveSignal,
+		signal,
 	});
 
 	const rawText = await res.text();

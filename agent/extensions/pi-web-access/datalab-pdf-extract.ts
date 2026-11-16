@@ -5,6 +5,7 @@ import {
 	redactCredential,
 } from "./credential-source.ts";
 import { getWebSearchConfigPath } from "./utils.ts";
+import { startWebUsage, type WebUsageOptions } from "./web-usage.ts";
 
 const DEFAULT_API_HOST = "https://www.datalab.to";
 const API_PREFIX = "/api/v1";
@@ -123,7 +124,7 @@ export function normalizeDatalabMode(value: unknown): DatalabMode {
 	);
 }
 
-export interface DatalabPDFExtractOptions {
+export interface DatalabPDFExtractOptions extends WebUsageOptions {
 	maxPages: number;
 	title: string;
 	signal?: AbortSignal;
@@ -156,6 +157,7 @@ interface DatalabConversionState {
 	markdown?: unknown;
 	page_count?: unknown;
 	parse_quality_score?: unknown;
+	cost_breakdown?: { final_cost_cents?: unknown };
 	error?: unknown;
 }
 
@@ -225,6 +227,7 @@ export async function extractPDFViaDatalab(
 
 	let fileId = uploadFileId;
 	let reference = normalizeString(upload.reference);
+	let finish: ReturnType<typeof startWebUsage> | undefined;
 
 	try {
 		const put = await fetchDatalab(
@@ -268,13 +271,17 @@ export async function extractPDFViaDatalab(
 		// storage in the selected region, so the server processes the file
 		// wherever it was stored (US by default; use the env override for EU).
 
+		const endpoint = `${getDatalabApiBase()}/convert`;
+		const submitSignal = withTimeout(options.signal, remaining(deadline));
+		submitSignal.throwIfAborted();
+		finish = startWebUsage(options, "datalab", `convert-${mode}`);
 		const submit = await fetchDatalab(
-			`${getDatalabApiBase()}/convert`,
+			endpoint,
 			{
 				method: "POST",
 				headers: { "x-api-key": apiKey },
 				body: form,
-				signal: withTimeout(options.signal, remaining(deadline)),
+				signal: submitSignal,
 			},
 			apiKey,
 		);
@@ -283,8 +290,12 @@ export async function extractPDFViaDatalab(
 		// The submit response is an acceptance ack ({ success: true,
 		// request_check_url }) with no status field and no markdown; only the
 		// polled result carries a status. Key on status, never on success.
-		if (state.status === "complete") return toResult(state);
+		if (state.status === "complete") {
+			finish("completed", conversionUsage(state));
+			return toResult(state);
+		}
 		if (state.status === "failed") {
+			finish("failed", conversionUsage(state));
 			throw new Error(
 				`Datalab PDF conversion failed: ${state.error ?? "unknown error"}`,
 			);
@@ -307,8 +318,12 @@ export async function extractPDFViaDatalab(
 				apiKey,
 			);
 			const next = await readJsonResponse(poll, apiKey);
-			if (next.status === "complete") return toResult(next);
+			if (next.status === "complete") {
+				finish("completed", conversionUsage(next));
+				return toResult(next);
+			}
 			if (next.status === "failed") {
+				finish("failed", conversionUsage(next));
 				throw new Error(
 					`Datalab PDF conversion failed: ${next.error ?? "unknown error"}`,
 				);
@@ -316,11 +331,25 @@ export async function extractPDFViaDatalab(
 		}
 
 		throw new Error("Datalab PDF conversion timed out");
+	} catch (error) {
+		const reason = options.signal?.aborted ? options.signal.reason : error;
+		const name = reason instanceof Error ? reason.name : undefined;
+		finish?.(name === "TimeoutError" || Date.now() >= deadline ? "timeout" : options.signal?.aborted || name === "AbortError" ? "cancelled" : "failed");
+		throw error;
 	} finally {
 		// File deletion is best-effort. Do not extend a caller's timeout or
 		// cancellation while waiting for a remote cleanup request.
 		void deleteDatalabFile(apiKey, fileId);
 	}
+}
+
+function conversionUsage(state: DatalabConversionState) {
+	// Datalab's Python SDK documents final_cost_cents after discounts.
+	// The deprecated total_cost does not specify units.
+	const cents = state.cost_breakdown?.final_cost_cents;
+	return typeof cents === "number" && Number.isFinite(cents) && cents >= 0
+		? { cost: { total: cents / 100, source: "provider-reported" } }
+		: undefined;
 }
 
 async function requestUploadUrl(options: {

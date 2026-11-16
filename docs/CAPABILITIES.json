@@ -2822,7 +2822,7 @@
       {
         "name": "curator",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3283
+        "line": 3300
       },
       {
         "name": "effort",
@@ -2847,7 +2847,7 @@
       {
         "name": "google-account",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3325
+        "line": 3342
       },
       {
         "name": "graph",
@@ -2872,52 +2872,52 @@
       {
         "name": "lens-allow-edit",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 114001
+        "line": 114029
       },
       {
         "name": "lens-context-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113705
+        "line": 113733
       },
       {
         "name": "lens-drift",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113762
+        "line": 113790
       },
       {
         "name": "lens-health",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113797
+        "line": 113825
       },
       {
         "name": "lens-map",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113774
+        "line": 113802
       },
       {
         "name": "lens-perf",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113916
+        "line": 113944
       },
       {
         "name": "lens-tdi",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113730
+        "line": 113758
       },
       {
         "name": "lens-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113698
+        "line": 113726
       },
       {
         "name": "lens-tools",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113935
+        "line": 113963
       },
       {
         "name": "lens-widget-toggle",
         "source": "agent/extensions/pi-lens/dist/index.js",
-        "line": 113712
+        "line": 113740
       },
       {
         "name": "logs",
@@ -2952,7 +2952,7 @@
       {
         "name": "project-memory",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 618
+        "line": 623
       },
       {
         "name": "prompt-workflow",
@@ -2982,7 +2982,7 @@
       {
         "name": "search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3373
+        "line": 3390
       },
       {
         "name": "self",
@@ -3067,7 +3067,7 @@
       {
         "name": "websearch",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 3028
+        "line": 3041
       }
     ],
     "commandDynamicOwners": [
@@ -3239,14 +3239,14 @@
       {
         "name": "fetch_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 196,
+        "line": 197,
         "kind": "configured-default",
         "configurable": true
       },
       {
         "name": "get_search_content",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 197,
+        "line": 198,
         "kind": "configured-default",
         "configurable": true
       },
@@ -3379,13 +3379,13 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 807,
+        "line": 815,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 811,
+        "line": 816,
         "kind": "literal"
       },
       {
@@ -3445,7 +3445,7 @@
       {
         "name": "source_check",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 195,
+        "line": 196,
         "kind": "configured-default",
         "configurable": true
       },
@@ -3560,13 +3560,13 @@
       {
         "name": "web_research",
         "source": "agent/extensions/pi-web-access/research-jobs.ts",
-        "line": 73,
+        "line": 74,
         "kind": "literal"
       },
       {
         "name": "web_search",
         "source": "agent/extensions/pi-web-access/index.ts",
-        "line": 194,
+        "line": 195,
         "kind": "configured-default",
         "configurable": true
       },
@@ -3719,13 +3719,13 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 807,
+        "line": 815,
         "kind": "literal"
       },
       {
         "name": "quality_review",
         "source": "agent/extensions/lib/quality-review.ts",
-        "line": 811,
+        "line": 816,
         "kind": "literal"
       },
       {
@@ -3815,7 +3815,7 @@
       {
         "name": "web_research",
         "source": "agent/extensions/pi-web-access/research-jobs.ts",
-        "line": 73,
+        "line": 74,
         "kind": "literal"
       }
     ],
@@ -3971,7 +3971,7 @@
           "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
         ],
         "lines": [
-          596
+          601
         ]
       },
       {
@@ -3980,10 +3980,10 @@
           "registration uses configurable toolNames; checked-in defaults are enumerated"
         ],
         "lines": [
-          1572,
-          2151,
-          2305,
-          2694
+          1575,
+          2161,
+          2317,
+          2707
         ],
         "knownNames": [
           "fetch_content",
@@ -4036,7 +4036,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 659,
+      "sourceFiles": 661,
       "registrationSites": 60,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 77,

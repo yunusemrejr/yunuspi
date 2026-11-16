@@ -20,6 +20,7 @@ import { isImageEnabled } from "./feature-config.ts";
 import { assertAuthFetchUrl, authFetchRedirectGuard, type AuthFetchProfile } from "./auth-fetch.ts";
 import { getBrowserCookiesForHosts, getLastBrowserCookieDiagnostic } from "./chrome-cookies.ts";
 import { sanitizeInlineDataUris } from "./data-uri-sanitize.ts";
+import type { WebUsageOptions } from "./web-usage.ts";
 
 const DEFAULT_TIMEOUT_MS = 30000;
 const MAX_CONFIGURED_TIMEOUT_MS = 2_147_483_647;
@@ -316,7 +317,7 @@ export interface ExtractedContent {
 
 type HttpExtractedContent = ExtractedContent & { declaredLinks?: DeclaredWebLink[] };
 
-export interface ExtractOptions {
+export interface ExtractOptions extends WebUsageOptions {
 	/** Bounded background reading: direct HTTP extraction only, no clone, model or hosted fallback. */
 	httpOnly?: boolean;
 	timeoutMs?: number;
@@ -722,7 +723,7 @@ export async function extractContent(
 	}
 	if (ytInfo.isYouTube && youtubeEnabled) {
 		try {
-			const ytResult = await extractYouTube(url, signal, options?.prompt, options?.model);
+			const ytResult = await extractYouTube(url, signal, options?.prompt, options?.model, options);
 			if (ytResult) return ytResult;
 			if (signal?.aborted) return abortedResult(url);
 		} catch (err) {
@@ -810,8 +811,8 @@ export async function extractContent(
 		if (provider === "gemini") {
 			let geminiResult: ExtractedContent | null = null;
 			try {
-				geminiResult = await extractWithUrlContext(url, signal)
-					?? await extractWithGeminiWeb(url, signal);
+				geminiResult = await extractWithUrlContext(url, signal, options)
+					?? await extractWithGeminiWeb(url, signal, options);
 			} catch (err) {
 				if (isAbortError(err)) return abortedResult(url);
 				if (err instanceof CredentialResolutionError || isConfigParseError(err)) {
@@ -1069,7 +1070,11 @@ async function extractViaHttp(
 			try {
 				const buffer = await readPDFResponseBuffer(response, pdfConfig.maxSizeMB);
 				if (signal?.aborted) return abortedResult(url);
-				const result = await extractPDFToMarkdown(buffer, url, { signal });
+				const result = await extractPDFToMarkdown(buffer, url, {
+					signal,
+					onUsage: options?.onUsage,
+					localOnly: options?.httpOnly || Boolean(options?.authFetchProfile),
+				});
 				activityMonitor.logComplete(activityId, response.status);
 				return {
 					url,

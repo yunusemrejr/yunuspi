@@ -715,6 +715,17 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		if (event.source !== "extension") { verifyNudged = false; runMutations = 0; try { noteUserInput(Date.now(), event); } catch { /* automation control never breaks input */ } }
 		projectTests.input(event); quality.input(event); stopInputUnlocks(event, ctx);
 	});
+	pi.on("agent_end", (event, ctx) => {
+		if (!event.aborted) return;
+		// Tool-phase Stop has no aborted assistant message. Preserve the valid
+		// tool receipts and pause automatic wakes before the settled hooks run.
+		runMutations = 0;
+		pending.clear();
+		starts.clear();
+		noteSessionStopped(ctx, "user-interrupt");
+		projectTests.interrupt();
+		quality.interrupt();
+	});
 	pi.on("agent_settled", async (event, ctx) => {
 		// A stopped session stays silent: no test/review follow-ups revive it.
 		if (isSessionStopped(ctx)) return;

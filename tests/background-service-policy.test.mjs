@@ -61,6 +61,23 @@ test('finite local task completion still sends its receipt and exactly one wake'
   assert.equal(serviceNotificationOnly({...task,command,triggerOnCompletionExplicit:true}), false);
 });
 
+test('tool-phase interrupt keeps background receipts but suppresses their automatic wake', () => {
+  const f = notifier();
+  let idle = false;
+  f.ctx.isIdle = () => idle;
+  f.hooks.get('message_end')({ message: { role: 'assistant', stopReason: 'toolUse' } });
+  const receipt = { customType: 'background-task-notification', content: 'checked the fixture' };
+  f.notify(receipt, { triggerTurn: true });
+  f.hooks.get('agent_end')?.({ type: 'agent_end', aborted: true });
+  idle = true;
+  f.hooks.get('agent_settled')();
+  f.notify(receipt, { triggerTurn: true });
+  assert.deepEqual(f.sent.map(row => row.options.triggerTurn), [false, false]);
+  f.hooks.get('input')({ source: 'interactive' });
+  f.notify(receipt, { triggerTurn: true });
+  assert.deepEqual(f.sent.map(row => row.options.triggerTurn), [false, false, false, true]);
+});
+
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred() { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 

@@ -1,9 +1,10 @@
 import { activityMonitor } from "./activity.ts";
 import { CredentialResolutionError } from "./credential-source.ts";
-import { getApiKey, getVersionedApiBase, fetchGeminiApi, isGatewayConfigured, DEFAULT_MODEL } from "./gemini-api.ts";
+import { getApiKey, fetchGeminiContent, isGatewayConfigured, DEFAULT_MODEL } from "./gemini-api.ts";
 import { isGeminiAdcAvailable } from "./gemini-adc.ts";
 import { isGeminiWebAvailable, queryWithCookies } from "./gemini-web.ts";
 import { extractHeadingTitle, type ExtractedContent } from "./extract.ts";
+import type { WebUsageOptions } from "./web-usage.ts";
 
 const EXTRACTION_PROMPT = `Extract the complete readable content from this URL as clean markdown.
 Include the page title, all text content, code blocks, and tables.
@@ -19,6 +20,7 @@ function shouldRethrow(err: unknown): boolean {
 export async function extractWithUrlContext(
 	url: string,
 	signal?: AbortSignal,
+	options: WebUsageOptions = {},
 ): Promise<ExtractedContent | null> {
 	const requestSignal = AbortSignal.any([
 		AbortSignal.timeout(60000),
@@ -36,30 +38,25 @@ export async function extractWithUrlContext(
 			tools: [{ url_context: {} }],
 		};
 
-		const res = await fetchGeminiApi(`${getVersionedApiBase()}/models/${model}:generateContent`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(body),
-			signal: requestSignal,
-		}, apiKey);
+		const { response: res, data } = await fetchGeminiContent<UrlContextResponse>(model, body, requestSignal, apiKey, options);
 
 		if (!res.ok) {
 			activityMonitor.logComplete(activityId, res.status);
 			return null;
 		}
 
-		const data = await res.json() as UrlContextResponse;
 		activityMonitor.logComplete(activityId, res.status);
 
-		const metadata = data.candidates?.[0]?.url_context_metadata;
-		if (metadata?.url_metadata?.length) {
-			const status = metadata.url_metadata[0].url_retrieval_status;
-			if (status === "URL_RETRIEVAL_STATUS_UNSAFE" || status === "URL_RETRIEVAL_STATUS_ERROR") {
+		const metadata = data?.candidates?.[0]?.urlContextMetadata ?? data?.candidates?.[0]?.url_context_metadata;
+		const urls = metadata?.urlMetadata ?? metadata?.url_metadata;
+		if (urls?.length) {
+			const status = urls[0].urlRetrievalStatus ?? urls[0].url_retrieval_status;
+			if (status && status !== "URL_RETRIEVAL_STATUS_SUCCESS") {
 				return null;
 			}
 		}
 
-		const content = data.candidates?.[0]?.content?.parts
+		const content = data?.candidates?.[0]?.content?.parts
 			?.map(p => p.text).filter(Boolean).join("\n") ?? "";
 
 		if (!content || content.length < 50) return null;
@@ -81,6 +78,7 @@ export async function extractWithUrlContext(
 export async function extractWithGeminiWeb(
 	url: string,
 	signal?: AbortSignal,
+	options: WebUsageOptions = {},
 ): Promise<ExtractedContent | null> {
 	const cookies = await isGeminiWebAvailable();
 	if (!cookies) return null;
@@ -90,6 +88,7 @@ export async function extractWithGeminiWeb(
 	try {
 		const text = await queryWithCookies(EXTRACTION_PROMPT + url, cookies, {
 			signal,
+			onUsage: options.onUsage,
 			timeoutMs: 60000,
 		});
 
@@ -115,14 +114,20 @@ function extractTitleFromContent(text: string, url: string): string {
 	return extractHeadingTitle(text) ?? (new URL(url).pathname.split("/").pop() || url);
 }
 
+interface UrlContextMetadata {
+	urlMetadata?: UrlMetadata[];
+	url_metadata?: UrlMetadata[];
+}
+
+interface UrlMetadata {
+	urlRetrievalStatus?: string;
+	url_retrieval_status?: string;
+}
+
 interface UrlContextResponse {
 	candidates?: Array<{
 		content?: { parts?: Array<{ text?: string }> };
-		url_context_metadata?: {
-			url_metadata?: Array<{
-				retrieved_url?: string;
-				url_retrieval_status?: string;
-			}>;
-		};
+		urlContextMetadata?: UrlContextMetadata;
+		url_context_metadata?: UrlContextMetadata;
 	}>;
 }

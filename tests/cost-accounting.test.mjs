@@ -8,7 +8,7 @@ const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const agent=[path.join(root,'agent'),path.resolve(root,'..')].find(p=>fs.existsSync(path.join(p,'extensions/lib/session-cost.ts')));
 const load=rel=>import(pathToFileURL(path.join(agent,rel)));
 const {collectSessionCost:collect}=await load('extensions/lib/session-cost.ts');
-const {addUsageCost,addAuxiliaryUsage}=await load('extensions/pi-subagents/src/shared/cost-accounting.ts');
+const {addUsageCost,addAuxiliaryUsage,snapshotChildUsage,finalizeChildUsage}=await load('extensions/pi-subagents/src/shared/cost-accounting.ts');
 const {sumResultsCost,sumResultsUsage,toAgentToolUsage}=await load('extensions/pi-subagents/src/shared/utils.ts');
 const {persistSubagentCost}=await load('extensions/pi-subagents/src/extension/session-cost.ts');
 const {collectAuxiliaryModelUsage}=await load('extensions/lib/cost-evidence.ts');
@@ -153,6 +153,54 @@ test('compactions and non-delegation tools count once; delegated tool totals are
  close(a.cost,.3);assert.equal(a.input,200);assert.equal(a.turns,0);
  const entries=[{type:'compaction',id:'c',usage:usage(.2)},{type:'branch_summary',usage:usage(.1)}];
  close(collect([...entries,entries[0]]).auxiliary.reported,.3);
+});
+
+test('child hosted receipts reconcile in live snapshots and roll up once in the nested parent ledger',()=>{
+ const target=empty();
+ addUsageCost(target,usage(.1));
+ target.turns++;
+ const append=entry=>addAuxiliaryUsage(target,{type:'entry_appended',entry});
+ const hosted=(id,status,bill)=>auxiliary(id,status,bill,{owner:'web_search',provider:'perplexity',model:'sonar'});
+ const pending={...hosted('search','pending'),id:'pending-entry'};
+ append(pending);
+ assert.equal(snapshotChildUsage(target).costDetails.unknown,true);
+ append({...hosted('search','completed',usage(.6,'provider-estimate')),id:'estimated-entry'});
+ close(snapshotChildUsage(target).cost,.7);
+ const reported={...hosted('search','completed',usage(.03)),id:'reported-entry'};
+ append(reported);
+ append(reported);
+ append(pending);
+ close(snapshotChildUsage(target).cost,.13);
+ assert.equal(snapshotChildUsage(target).costDetails.unknown,false);
+ append(hosted('unpriced','failed'));
+ finalizeChildUsage(target);
+ finalizeChildUsage(target);
+ close(target.cost,.13);
+ assert.equal(target.costDetails.unknown,true);
+ assert.equal(target.turns,1,'auxiliary requests are not assistant turns');
+ addAuxiliaryUsage(target,{type:'message_end',message:{role:'toolResult',toolName:'subagent',usage:usage(999)}});
+ const native={runId:'child-proc',usage:target};
+ const parent=collect([receipt('parent',[{runId:'parent-proc',usage:usage(.2),children:[native]}]),receipt('child-proc',[native])]);
+ close(parent.total,.33);
+ assert.equal(parent.unknown,true);
+ assert.ok(parent.rows.some(row=>row.route==='perplexity/sonar'&&row.reported===.03));
+});
+
+test('child Jev and Span events deduplicate by entry and preserve confirmed zero',()=>{
+ const legacy=(id,customType,data)=>({type:'entry_appended',entry:{type:'custom',id,customType,data}});
+ const target=empty();
+ const free=legacy('span-free','span-usage-v1',{model:'span',costUsd:0,costSource:'provider-reported'});
+ addAuxiliaryUsage(target,free);
+ assert.equal(collect([receipt('child-run',[{usage:snapshotChildUsage(target)}])]).formatted,'$0.000');
+ const jev=legacy('jev-paid','jev-usage-v1',{model:'jev',costUsd:.02});
+ const span=legacy('span-paid','span-usage-v1',{model:'span',costUsd:.04,costSource:'provider-reported'});
+ for(const event of [free,jev,span,jev,span])addAuxiliaryUsage(target,event);
+ finalizeChildUsage(target);
+ const parent=collect([receipt('child-run',[{usage:target}])]);
+ close(parent.total,.06);
+ close(parent.reported,.04);
+ close(parent.estimated,.02);
+ assert.equal(parent.unknown,false);
 });
 
 test('late native identities replace unknown or priced wrapper evidence without a second charge',()=>{

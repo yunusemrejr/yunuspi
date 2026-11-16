@@ -1,4 +1,4 @@
-import { addUsageCost, addAuxiliaryUsage } from "../../shared/cost-accounting.ts";
+import { addUsageCost, addAuxiliaryUsage, snapshotChildUsage, finalizeChildUsage } from "../../shared/cost-accounting.ts";
 import { captureFileVerification, hasFailedFileVerification } from "../shared/file-verification.ts";
 import { shadowAssistanceLaunch } from "../shared/assistance-shadow.ts";
 import { createProgressEvidence, observeProgressEvidence } from "../../shared/progress-evidence.ts";
@@ -267,7 +267,7 @@ function snapshotResult(result: SingleResult, progress: AgentProgress): SingleRe
 		...result,
 		task: PROMPT_REDACTED,
 		messages: result.outputMode === "file-only" && result.savedOutputPath ? undefined : result.messages ? [...result.messages] : undefined,
-		usage: { ...result.usage },
+		usage: snapshotChildUsage(result.usage),
 		skills: result.skills ? [...result.skills] : undefined,
 		attemptedModels: result.attemptedModels ? [...result.attemptedModels] : undefined,
 		modelAttempts: result.modelAttempts
@@ -890,6 +890,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 		const finish = (code: number) => {
 			if (lifecycleFinished) return;
 			lifecycleFinished = true;
+			finalizeChildUsage(result.usage);
 			clearFinalDrainTimers();
 			clearWatchdogTailTimer();
 			clearStdioGuard();

@@ -18,6 +18,7 @@ const SEARCH_PROVIDERS = [
 const search: typeof SearchFunction = async (...args) =>
   (await import("./gemini-search.ts")).search(...args);
 import { runWithProxy } from "./utils.ts";
+import { bindWebUsage } from "./web-usage.ts";
 
 import { choices } from "../lib/tool-schema.ts";
 type Job = {
@@ -255,6 +256,7 @@ export function registerResearchJobs(
           startedAt: new Date().toISOString(),
         };
         jobs.set(job.id, job);
+        const onUsage = bindWebUsage(pi, ctx, "web_research");
         job.done = (async () => {
           let timedOut = false;
           const timeout = setTimeout(() => {
@@ -263,7 +265,7 @@ export function registerResearchJobs(
           }, 600_000);
           try {
             await runWithProxy(undefined, () =>
-              runResearchWork(job, p, queries, ctx, runSearch, readSource),
+              runResearchWork(job, p, queries, ctx, runSearch, readSource, onUsage),
             );
           } catch {
             job.state = timedOut

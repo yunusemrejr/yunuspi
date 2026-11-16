@@ -1,11 +1,12 @@
 import { Buffer } from "node:buffer";
 import { queryGeminiApiWithInlineData } from "./gemini-api.ts";
+import type { WebUsageOptions } from "./web-usage.ts";
 
 const PDF_MIME_TYPE = "application/pdf";
 const DEFAULT_TIMEOUT_MS = 120_000;
 const PAGE_MARKER_PATTERN = /^<!-- Page (\d+) -->$/gm;
 
-export interface GeminiPDFExtractOptions {
+export interface GeminiPDFExtractOptions extends WebUsageOptions {
 	pages?: number;
 	maxPages: number;
 	title: string;
@@ -27,6 +28,7 @@ export async function extractPDFViaGemini(
 		PDF_MIME_TYPE,
 		{
 			signal: options.signal,
+			onUsage: options.onUsage,
 			timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
 		},
 	);

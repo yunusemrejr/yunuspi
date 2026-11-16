@@ -42,12 +42,14 @@ import {
   formatMemoryRead,
   isRetrievalRole,
   readMemoryChunk,
+  memoryRanker,
   retrieveFamily,
   retrieveFamilyViews,
   retrieveProjectMemory,
   type FamilyStore,
   type RetrievalRole,
 } from "./lib/project-memory-retrieve.ts";
+import { remoteRanker } from "./lib/micro-intelligence/rerank.ts";
 import { needleHealth } from "./lib/needle-runtime.ts";
 import { Type } from "typebox";
 
@@ -413,6 +415,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
       const scope = params.scope ?? "family";
       if (scope !== "family" && scope !== "project") throw new Error(`Unknown scope '${params.scope}'. Use family or project.`);
       const store = ensureStore(ctx?.cwd ?? "");
+      const rerank = memoryRanker(undefined, remoteRanker({ env, onUsage: accounting() }));
       const primary = primaryIdentity();
       if (scope === "family") refreshFamily();
       const family = current?.family ?? [];
@@ -424,6 +427,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
           since: params.since,
           includeSuperseded: params.include_superseded,
           embedder: embedder ?? undefined,
+          rerank,
           now, signal,
         });
         signal?.throwIfAborted();
@@ -446,6 +450,7 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
         since: params.since,
         includeSuperseded: params.include_superseded,
         embedder: embedder ?? undefined,
+        rerank,
         now, signal,
       });
       signal?.throwIfAborted();
