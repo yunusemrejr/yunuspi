@@ -54,30 +54,42 @@ class PendingMessageQueue {
     constructor(mode) {
         this.mode = mode;
     }
-    enqueue(message, interrupt = false) {
-        this.messages.push({ message, interrupt });
+    enqueue(message, interrupt = false, canDeliver) {
+        this.messages.push({ message, interrupt, canDeliver });
+    }
+    static canDeliver(entry) {
+        try { return entry.canDeliver?.() !== false; }
+        catch { return false; }
+    }
+    prune() {
+        if (this.messages.some(entry => entry.canDeliver)) {
+            this.messages = this.messages.filter(PendingMessageQueue.canDeliver);
+        }
     }
     hasItems() {
+        this.prune();
         return this.messages.length > 0;
     }
     hasInterrupt() {
+        this.prune();
         return this.messages.some(entry => entry.interrupt);
     }
     select() {
         const count = this.mode === "all" ? this.messages.length : Math.min(1, this.messages.length);
         const first = this.messages[0];
-        const selected = this.messages.slice(0, count).map(entry => entry.message);
+        const selected = this.messages.slice(0, count);
         return {
-            messages: selected,
+            messages: selected.map(entry => entry.message),
             consume: () => {
                 // A clear during turn preparation revokes this selection.
                 if (this.messages[0] !== first) return [];
                 this.messages.splice(0, count);
-                return selected;
+                return selected.filter(PendingMessageQueue.canDeliver).map(entry => entry.message);
             },
         };
     }
     drain() {
+        this.prune();
         if (this.mode === "all") {
             const drained = this.messages.map(entry => entry.message);
             this.messages = [];
@@ -117,6 +129,7 @@ export class Agent {
     shouldStopAfterTurn;
     prepareNextTurn;
     prepareNextTurnWithContext;
+    canDeliverMessage;
     activeRun;
     /** Session identifier forwarded to providers for cache-aware backends. */
     sessionId;
@@ -144,6 +157,7 @@ export class Agent {
         this.shouldStopAfterTurn = runtimeOptions.shouldStopAfterTurn;
         this.prepareNextTurn = runtimeOptions.prepareNextTurn;
         this.prepareNextTurnWithContext = runtimeOptions.prepareNextTurnWithContext;
+        this.canDeliverMessage = runtimeOptions.canDeliverMessage;
         this.steeringQueue = new PendingMessageQueue(runtimeOptions.steeringMode ?? "one-at-a-time");
         this.followUpQueue = new PendingMessageQueue(runtimeOptions.followUpMode ?? "one-at-a-time");
         this.sessionId = runtimeOptions.sessionId;
@@ -189,12 +203,12 @@ export class Agent {
         return this.followUpQueue.mode;
     }
     /** Queue a message to be injected after the current assistant turn finishes. */
-    steer(message, { interrupt = message.role === "user" } = {}) {
-        this.steeringQueue.enqueue(message, interrupt);
+    steer(message, { interrupt = message.role === "user", canDeliver } = {}) {
+        this.steeringQueue.enqueue(message, interrupt, canDeliver);
     }
     /** Queue a message to run only after the agent would otherwise stop. */
-    followUp(message) {
-        this.followUpQueue.enqueue(message);
+    followUp(message, { canDeliver } = {}) {
+        this.followUpQueue.enqueue(message, false, canDeliver);
     }
     /** Remove all queued steering messages. */
     clearSteeringQueue() {
@@ -338,6 +352,7 @@ export class Agent {
                     return await this.prepareNextTurn?.(this.signal);
                 }
                 : undefined,
+            canDeliverMessage: this.canDeliverMessage,
             convertToLlm: this.convertToLlm,
             transformContext: this.transformContext,
             getApiKey: this.getApiKey,

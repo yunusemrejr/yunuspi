@@ -2952,7 +2952,7 @@
       {
         "name": "project-memory",
         "source": "agent/extensions/pi-vector-memory.ts",
-        "line": 623
+        "line": 629
       },
       {
         "name": "prompt-workflow",
@@ -2972,7 +2972,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1120
+        "line": 1161
       },
       {
         "name": "run",
@@ -3506,7 +3506,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 525,
+        "line": 555,
         "kind": "literal"
       },
       {
@@ -3803,7 +3803,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 525,
+        "line": 555,
         "kind": "literal"
       },
       {
@@ -3971,7 +3971,7 @@
           "registerTool() receives a computed or indirect definition; the runtime name is not inferred"
         ],
         "lines": [
-          601
+          607
         ]
       },
       {

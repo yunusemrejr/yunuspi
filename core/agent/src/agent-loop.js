@@ -51,18 +51,22 @@ export function agentLoopContinue(context, config, signal, streamFn) {
     return stream;
 }
 export async function runAgentLoop(prompts, context, config, emit, signal, streamFn) {
-    const newMessages = [...prompts];
+    const newMessages = [];
     const currentContext = {
         ...context,
-        messages: [...context.messages, ...prompts],
+        messages: context.messages.slice(),
     };
     await emit({ type: "agent_start" });
     await emit({ type: "turn_start" });
     for (const prompt of prompts) {
+        if (config.canDeliverMessage?.(prompt, signal) === false) continue;
         await emit({ type: "message_start", message: prompt });
         await emit({ type: "message_end", message: prompt });
+        currentContext.messages.push(prompt);
+        newMessages.push(prompt);
     }
-    await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn());
+    const hasInitialRequest = prompts.length === 0 || newMessages.length > 0;
+    await runLoop(currentContext, newMessages, config, signal, emit, streamFn ?? getDefaultStreamFn(), hasInitialRequest);
     return newMessages;
 }
 export async function runAgentLoopContinue(context, config, emit, signal, streamFn) {
@@ -85,14 +89,19 @@ function createAgentStream() {
 /**
  * Main loop logic shared by agentLoop and agentLoopContinue.
  */
-async function runLoop(initialContext, newMessages, initialConfig, signal, emit, streamFunction) {
+async function runLoop(initialContext, newMessages, initialConfig, signal, emit, streamFunction, hasInitialRequest = true) {
     let currentContext = initialContext;
     let config = initialConfig;
     let lastCompletedTurn;
     // Check for steering messages at start (user may have typed while waiting)
     let pendingMessages = signal?.aborted ? [] : (await config.getSteeringMessages?.()) || [];
+    if (!hasInitialRequest && pendingMessages.length === 0 && !signal?.aborted && config.consumePendingMessages) {
+        // A continuation normally skips the first poll because it already
+        // drained one steer. Poll again if that steer could not be delivered.
+        pendingMessages = (await config.getSteeringMessages?.()) || [];
+    }
     let pendingFollowUp = false;
-    let hasMoreToolCalls = true;
+    let hasMoreToolCalls = hasInitialRequest;
     // Outer loop: continues when queued follow-up messages arrive after agent would stop
     while (!signal?.aborted) {
         // Inner loop: process tool calls and steering messages
@@ -126,17 +135,26 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
                 }
             }
             if (signal?.aborted) break;
-            const delivery = pendingMessages.length ? config.consumePendingMessages?.() ?? pendingMessages : [];
-            pendingMessages = [];
-            pendingFollowUp = false;
-            if (!hasMoreToolCalls && delivery.length === 0) break;
             // Process pending messages (inject before next assistant response)
-            for (const message of delivery) {
-                await emit({ type: "message_start", message });
-                await emit({ type: "message_end", message });
-                currentContext.messages.push(message);
-                newMessages.push(message);
+            let delivered = 0;
+            while (pendingMessages.length > 0 && !signal?.aborted) {
+                const delivery = config.consumePendingMessages?.() ?? pendingMessages;
+                pendingMessages = [];
+                pendingFollowUp = false;
+                for (const message of delivery) {
+                    if (config.canDeliverMessage?.(message, signal) === false) continue;
+                    await emit({ type: "message_start", message });
+                    await emit({ type: "message_end", message });
+                    currentContext.messages.push(message);
+                    newMessages.push(message);
+                    delivered++;
+                }
+                if (hasMoreToolCalls || delivered > 0 || signal?.aborted || !config.consumePendingMessages) break;
+                // The owned queue removed the stale selection. Try the next
+                // steering item at the same boundary before looking for follow-ups.
+                pendingMessages = (await config.getSteeringMessages?.()) || [];
             }
+            if (!hasMoreToolCalls && delivered === 0) break;
             // Stream assistant response
             if (signal?.aborted) break;
             const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFunction);

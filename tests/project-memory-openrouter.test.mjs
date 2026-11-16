@@ -372,6 +372,91 @@ test('embedding charges use the existing auxiliary ledger, including paid malfor
   assert.equal(usage.rows.reduce((sum,r) => sum+r.evidence.reported, 0), 0.000002);
 });
 
+test('OpenRouter billing received after cancellation survives without caching the stale vectors', async () => {
+  const controller = new AbortController(), entered = Promise.withResolvers(), released = Promise.withResolvers();
+  const receipts = [];
+  let calls = 0;
+  const e = remote(async () => {
+    if (++calls === 1) { entered.resolve(); await released.promise; }
+    return response([[1,0]], undefined, { prompt_tokens:10, cost:.04 });
+  }, { accounting:() => receipt => receipts.push(receipt) });
+  const embedding = e.embed(['synthetic billing lifecycle'], { signal:controller.signal });
+  await entered.promise;
+  controller.abort();
+  released.resolve();
+  assert.equal(await embedding,null);
+  assert.equal(e.status().dimension,0);
+  assert.deepEqual(receipts.map(row=>row.status),['pending','cancelled']);
+  assert.equal(receipts[0].id,receipts[1].id);
+  assert.equal(receipts[1].usage.cost.total,.04);
+  assert.deepEqual(await e.embed(['synthetic billing lifecycle']),[[1,0]]);
+  assert.equal(calls,2,'the cancelled response did not cache the vectors');
+});
+
+test('project memory keeps late billing with the submitting session after owner switch', async t => {
+  const { dir } = storeFor(t);
+  const a = path.join(dir, 'old'), b = path.join(dir, 'new');
+  fs.mkdirSync(a); fs.mkdirSync(b);
+  fs.writeFileSync(path.join(a, '.pi-project-id'), 'old');
+  fs.writeFileSync(path.join(b, '.pi-project-id'), 'new');
+  const previousDir = process.env.PI_CODING_AGENT_DIR, previousKey = process.env.OPENROUTER_API_KEY;
+  process.env.PI_CODING_AGENT_DIR = dir;
+  process.env.OPENROUTER_API_KEY = 'synthetic-memory-test';
+  t.after(() => {
+    if (previousDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = previousDir;
+    if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = previousKey;
+  });
+  const sent = Promise.withResolvers(), release = Promise.withResolvers(), terminal = Promise.withResolvers();
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, 'https://openrouter.ai/api/v1/embeddings');
+    sent.resolve(options.signal);
+    await release.promise;
+    return response(JSON.parse(options.body).input.map(() => [1,0]), undefined, { prompt_tokens:10, cost:.04 });
+  });
+  const saved = { old:[], new:[] }, hooks = new Map(), tools = new Map();
+  let active = 'old';
+  piVectorMemory({ on:(name,hook)=>hooks.set(name,hook), registerTool:tool=>tools.set(tool.name,tool), registerCommand(){},
+    appendEntry(){ assert.fail('the bound ledger must own hosted requests'); },
+    bindAuxiliaryUsage() {
+      const owner = active;
+      return receipt => { saved[owner].push(receipt); if(receipt.status !== 'pending') terminal.resolve(); return true; };
+    },
+  }, { env:{ PI_PROJECTS_DIR:path.join(dir,'projects'), PI_MEMORY_EMBEDDER:'openrouter' } });
+  const ctx = cwd => ({ cwd, sessionManager:{ getSessionId:()=>path.basename(cwd) } });
+  hooks.get('session_start')({},ctx(a));
+  try {
+    hooks.get('input')({source:'user',text:'Preserve the existing database ownership and transactional boundaries.'},ctx(a));
+    hooks.get('agent_settled')({},ctx(a));
+    const networkSignal = await sent.promise;
+    assert.deepEqual(saved.old.map(row=>row.status),['pending']);
+    active = 'new';
+    hooks.get('session_switch')({},ctx(b));
+    assert.equal(networkSignal.aborted,true);
+    release.resolve();
+    await terminal.promise;
+    assert.deepEqual(saved.old.map(row=>row.status),['pending','cancelled']);
+    assert.equal(saved.old[1].usage.cost.total,.04);
+    assert.deepEqual(saved.new,[]);
+    const status = await tools.get('project_memory').execute('status',{action:'status'},undefined,undefined,ctx(b));
+    assert.equal(status.details.counts.embedded,0);
+  } finally {
+    release.resolve();
+    await hooks.get('session_shutdown')({},ctx(b));
+  }
+});
+
+test('a fork leaves in-flight memory bills with the source session and preserves summary receipts', async () => {
+  const { SessionManager } = await import('../core/coding-agent/src/core/session-manager.js');
+  const source = SessionManager.inMemory(process.cwd());
+  const leaf = source.appendMessage({role:'user',content:'Synthetic branch',timestamp:0});
+  const owners = ['project-memory','project-memory-rerank','compaction'];
+  for (const owner of owners) source.appendSummaryUsageReceipt({id:owner,owner,status:'pending'});
+  const saved = source.getEntries();
+  source.createBranchedSession(leaf);
+  assert.deepEqual(saved.filter(entry=>entry.accountingOnly).map(entry=>entry.data.owner),owners);
+  assert.deepEqual(source.getEntries().filter(entry=>entry.accountingOnly).map(entry=>entry.data.owner),['compaction']);
+});
+
 test('session switches fence remote indexing and discard queued records from the previous project', async t => {
   const { dir } = storeFor(t); const projects = path.join(dir, 'projects');
   const a = path.join(dir,'a'), b = path.join(dir,'b'); fs.mkdirSync(a); fs.mkdirSync(b);

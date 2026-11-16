@@ -44,12 +44,13 @@ export declare class OutputAccumulator {
     private capturedBytes;
     private maxCaptureBytes;
     constructor(options?: OutputAccumulatorOptions);
-    /** Producers should await a returned promise before delivering more data. */
-    append(data: Buffer): void | Promise<void>;
+    /** Strings are already decoded. Producers should await any returned promise before delivering more data. */
+    append(data: Buffer | string): void | Promise<void>;
     finish(): void;
     snapshot(options?: {
         persistIfTruncated?: boolean;
     }): OutputSnapshot;
+    private headTailPreview;
     closeTempFile(): Promise<void>;
     getLastLineBytes(): number;
     private appendDecodedText;
@@ -62,6 +63,7 @@ export declare class OutputAccumulator {
     private bytePrefix;
     private captureError;
     private headText;
+    private headBytesRemaining;
     private outputMode;
     private pendingDrain;
 }

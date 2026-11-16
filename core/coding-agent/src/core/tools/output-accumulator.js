@@ -10,6 +10,7 @@ function defaultTempFilePath(prefix) {
 // A command printing forever (`yes`, a followed log) must not fill the disk or
 // the tmpfs behind os.tmpdir(): full-output capture stops past this size.
 const DEFAULT_MAX_CAPTURE_BYTES = 64 * 1024 * 1024;
+const MIDDLE_OMISSION = "[... middle output omitted ...]";
 function formatMiB(bytes) {
     return `${Math.round(bytes / (1024 * 1024))} MiB`;
 }
@@ -47,6 +48,7 @@ export class OutputAccumulator {
     maxCaptureBytes;
     captureError;
     headText = "";
+    headBytesRemaining;
     outputMode;
     pendingDrain;
     constructor(options = {}) {
@@ -55,14 +57,22 @@ export class OutputAccumulator {
         this.maxRollingBytes = Math.max(this.maxBytes * 2, 1);
         this.tempFilePrefix = options.tempFilePrefix ?? "pi-output";
         this.outputMode = options.outputMode ?? "tail";
+        this.headBytesRemaining = this.outputMode === "head-tail" && this.maxLines >= 3
+            ? Math.max(0, Math.floor((this.maxBytes - MIDDLE_OMISSION.length - 2) / 2)) : 0;
         this.maxCaptureBytes = options.maxCaptureBytes ?? DEFAULT_MAX_CAPTURE_BYTES;
     }
     append(data) {
         if (this.finished) {
             throw new Error("Cannot append to a finished output accumulator");
         }
+        if (typeof data === "string") {
+            this.appendDecodedText(this.decoder.decode() + data);
+            data = Buffer.from(data, "utf8");
+        }
+        else {
+            this.appendDecodedText(this.decoder.decode(data, { stream: true }));
+        }
         this.totalRawBytes += data.length;
-        this.appendDecodedText(this.decoder.decode(data, { stream: true }));
         if (this.tempFileStream || this.shouldUseTempFile()) {
             this.ensureTempFile();
             const stream = this.tempFileStream;
@@ -95,16 +105,19 @@ export class OutputAccumulator {
         }
     }
     snapshot(options = {}) {
-        const tailTruncation = truncateTail(this.getSnapshotText(), {
-            maxLines: this.maxLines,
-            maxBytes: this.maxBytes,
-        });
+        const text = this.getSnapshotText();
         const truncated = this.totalLines > this.maxLines || this.totalDecodedBytes > this.maxBytes;
+        // Reserve a line and both separators for the omission marker. With a
+        // smaller custom budget the tail carries the most recent evidence.
+        const useHeadTail = this.outputMode === "head-tail" && this.maxLines >= 3 && this.maxBytes >= MIDDLE_OMISSION.length + 4;
+        const preview = truncated && useHeadTail
+            ? this.headTailPreview(text)
+            : truncateTail(text, { maxLines: this.maxLines, maxBytes: this.maxBytes });
         const truncatedBy = truncated
-            ? (tailTruncation.truncatedBy ?? (this.totalDecodedBytes > this.maxBytes ? "bytes" : "lines"))
+            ? (preview.truncatedBy ?? (this.totalDecodedBytes > this.maxBytes ? "bytes" : "lines"))
             : null;
         const truncation = {
-            ...tailTruncation,
+            ...preview,
             truncated,
             truncatedBy,
             totalLines: this.totalLines,
@@ -112,29 +125,37 @@ export class OutputAccumulator {
             maxLines: this.maxLines,
             maxBytes: this.maxBytes,
         };
-        let content = truncation.content;
-        if (truncated && this.outputMode === "head-tail") {
-            const marker = "\n[... middle output omitted ...]\n";
-            const budget = Math.max(0, this.maxBytes - byteLength(marker));
-            const head = this.bytePrefix(this.headText, Math.floor(budget / 2));
-            const tail = truncateTail(this.getSnapshotText(), {
-                maxLines: Math.max(1, Math.floor(this.maxLines / 2)),
-                maxBytes: budget - byteLength(head),
-            }).content;
-            content = head + marker + tail;
-            truncation.content = content;
-            truncation.outputBytes = byteLength(content);
-            truncation.outputLines = content.split("\n").length;
-        }
         if (options.persistIfTruncated && truncation.truncated) {
             this.ensureTempFile();
         }
         return {
-            content,
+            content: truncation.content,
             truncation,
-            outputMode: this.outputMode,
+            outputMode: useHeadTail ? "head-tail" : "tail",
             fullOutputPath: this.captureError ? undefined : this.tempFilePath,
             captureError: this.captureError,
+        };
+    }
+    headTailPreview(text) {
+        const headLines = Math.floor((this.maxLines - 1) / 2);
+        let headEnd = -1;
+        for (let line = 0; line < headLines; line++) {
+            headEnd = this.headText.indexOf("\n", headEnd + 1);
+            if (headEnd < 0) break;
+        }
+        const head = headEnd < 0 ? this.headText.replace(/\n$/, "") : this.headText.slice(0, headEnd);
+        const tail = truncateTail(text, {
+            maxLines: this.maxLines - 1 - headLines,
+            maxBytes: this.maxBytes - MIDDLE_OMISSION.length - 2 - byteLength(head),
+        });
+        const content = [head, MIDDLE_OMISSION, tail.content].filter(Boolean).join("\n");
+        return {
+            content,
+            truncatedBy: null,
+            outputBytes: byteLength(content),
+            outputLines: content.split("\n").length - Number(content.endsWith("\n")),
+            lastLinePartial: tail.lastLinePartial,
+            firstLineExceedsLimit: false,
         };
     }
     async closeTempFile() {
@@ -163,8 +184,16 @@ export class OutputAccumulator {
             return;
         }
         const bytes = byteLength(text);
-        if (byteLength(this.headText) < this.maxBytes)
-            this.headText = this.bytePrefix(this.headText + text, this.maxBytes);
+        if (this.headBytesRemaining > 0) {
+            if (bytes <= this.headBytesRemaining) {
+                this.headText += text;
+                this.headBytesRemaining -= bytes;
+            }
+            else {
+                this.headText += this.bytePrefix(text, this.headBytesRemaining);
+                this.headBytesRemaining = 0;
+            }
+        }
         this.totalDecodedBytes += bytes;
         this.tailText += text;
         this.tailBytes += bytes;
@@ -208,7 +237,10 @@ export class OutputAccumulator {
             return this.tailText;
         }
         const firstNewline = this.tailText.indexOf("\n");
-        return firstNewline === -1 ? this.tailText : this.tailText.slice(firstNewline + 1);
+        // A trailing delimiter can end the only (clipped) line in the tail.
+        // Keep its suffix so a long final diagnostic does not turn invisible.
+        return firstNewline < 0 || firstNewline === this.tailText.length - 1
+            ? this.tailText : this.tailText.slice(firstNewline + 1);
     }
     shouldUseTempFile() {
         return (this.totalRawBytes > this.maxBytes || this.totalDecodedBytes > this.maxBytes || this.totalLines > this.maxLines);

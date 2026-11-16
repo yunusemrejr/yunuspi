@@ -257,7 +257,6 @@ export function createShellToolDefinition(cwd, config, options) {
                 output.finish();
                 clearUpdateTimer();
                 emitOutputUpdate();
-                output.snapshot({ persistIfTruncated: true });
                 await output.closeTempFile();
                 return output.snapshot();
             };

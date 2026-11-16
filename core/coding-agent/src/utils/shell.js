@@ -125,42 +125,14 @@ export function getShellEnv() {
     };
 }
 /**
- * Sanitize binary output for display/storage.
- * Removes characters that crash string-width or cause display issues:
- * - Control characters (except tab, newline, carriage return)
- * - Lone surrogates
- * - Unicode Format characters (crash string-width due to a bug)
- * - Characters with undefined code points
+ * Remove unsafe shell display characters while preserving tabs, line breaks,
+ * and valid Unicode pairs. In Unicode mode the surrogate range matches only
+ * lone code units, leaving characters such as emoji intact.
  */
 export function sanitizeBinaryOutput(str) {
-    // Use Array.from to properly iterate over code points (not code units)
-    // This handles surrogate pairs correctly and catches edge cases where
-    // codePointAt() might return undefined
-    return Array.from(str)
-        .filter((char) => {
-        // Filter out characters that cause string-width to crash
-        // This includes:
-        // - Unicode format characters
-        // - Lone surrogates (already filtered by Array.from)
-        // - Control chars except \t \n \r
-        // - Characters with undefined code points
-        const code = char.codePointAt(0);
-        // Skip if code point is undefined (edge case with invalid strings)
-        if (code === undefined)
-            return false;
-        // Allow tab, newline, carriage return
-        if (code === 0x09 || code === 0x0a || code === 0x0d)
-            return true;
-        // Filter out control characters (0x00-0x1F, except 0x09, 0x0a, 0x0x0d)
-        if (code <= 0x1f)
-            return false;
-        // Filter out Unicode format characters
-        if (code >= 0xfff9 && code <= 0xfffb)
-            return false;
-        return true;
-    })
-        .join("");
+    return str.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\uD800-\uDFFF\uFFF9-\uFFFB]/gu, "");
 }
+
 /**
  * Detached child processes must be tracked so they can be killed on parent
  * shutdown signals (SIGHUP/SIGTERM).

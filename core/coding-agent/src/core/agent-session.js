@@ -159,6 +159,12 @@ export class AgentSession {
     _carriedSystemPrompt;
     constructor(config) {
         this.agent = config.agent;
+        const previousDeliveryCheck = this.agent.canDeliverMessage;
+        this.agent.canDeliverMessage = (message, signal) => {
+            if (previousDeliveryCheck?.(message, signal) === false) return false;
+            const check = this._customMessageDeliveryChecks.get(message);
+            return !check || (!signal?.aborted && this._canDeliverCustomMessage(check));
+        };
         this.sessionManager = config.sessionManager;
         this.settingsManager = config.settingsManager;
         this._scopedModels = config.scopedModels ?? [];
@@ -433,6 +439,11 @@ export class AgentSession {
     _lastAssistantResponse = undefined;
     /** Exact message identity owns its durable-acceptance callback across queues. */
     _customMessageAcceptances = new WeakMap();
+    _customMessageDeliveryChecks = new WeakMap();
+    _canDeliverCustomMessage(canDeliver) {
+        try { return canDeliver?.() !== false; }
+        catch { return false; }
+    }
     /** Internal handler for agent events - shared by subscribe and reconnect */
     _handleAgentEvent = async (event) => {
         try { await this._guardian?.observeAgentEvent(event); }
@@ -1075,7 +1086,7 @@ export class AgentSession {
             }, requestMessageMeta));
             // Inject any pending "nextTurn" messages as context alongside the user message
             for (const msg of this._pendingNextTurnMessages) {
-                messages.push(msg);
+                if (this._canDeliverCustomMessage(this._customMessageDeliveryChecks.get(msg))) messages.push(msg);
             }
             this._pendingNextTurnMessages = [];
             // Reset per-turn system prompt override before before_agent_start so setActiveTools
@@ -1091,7 +1102,8 @@ export class AgentSession {
             // Add all custom messages from extensions
             if (result?.messages) {
                 for (const msg of result.messages) {
-                    messages.push({
+                    if (!this._canDeliverCustomMessage(msg.canDeliver)) continue;
+                    const appMessage = {
                         role: "custom",
                         customType: msg.customType,
                         // Untyped extensions can pass null/missing content; normalize at ingestion.
@@ -1100,7 +1112,10 @@ export class AgentSession {
                         details: msg.details,
                         ...(msg.excludeFromContext ? { excludeFromContext: true } : {}),
                         timestamp: Date.now(),
-                    });
+                    };
+                    if (typeof msg.onAccepted === "function") this._customMessageAcceptances.set(appMessage, msg.onAccepted);
+                    if (typeof msg.canDeliver === "function") this._customMessageDeliveryChecks.set(appMessage, msg.canDeliver);
+                    messages.push(appMessage);
                 }
             }
             // Apply extension-modified system prompt, or reset to base
@@ -1330,6 +1345,7 @@ export class AgentSession {
      * @param options.deliverAs Delivery mode: "steer", "followUp", or "nextTurn"
      */
     async sendCustomMessage(message, options) {
+        if (!this._canDeliverCustomMessage(options?.canDeliver)) return;
         const appMessage = {
             role: "custom",
             customType: message.customType,
@@ -1341,15 +1357,16 @@ export class AgentSession {
             timestamp: Date.now(),
         };
         if (options?.onAccepted) this._customMessageAcceptances.set(appMessage, options.onAccepted);
+        if (options?.canDeliver) this._customMessageDeliveryChecks.set(appMessage, options.canDeliver);
         if (options?.deliverAs === "nextTurn") {
             this._pendingNextTurnMessages.push(appMessage);
         }
         else if (this.isStreaming && options?.triggerTurn !== false) {
             if (options?.deliverAs === "followUp") {
-                this.agent.followUp(appMessage);
+                this.agent.followUp(appMessage, { canDeliver: options?.canDeliver });
             }
             else {
-                this.agent.steer(appMessage);
+                this.agent.steer(appMessage, { canDeliver: options?.canDeliver });
             }
         }
         else if (options?.triggerTurn) {
@@ -1373,6 +1390,7 @@ export class AgentSession {
         }
     }
     _appendCustomMessage(appMessage) {
+        if (!this._canDeliverCustomMessage(this._customMessageDeliveryChecks.get(appMessage))) return;
         this.agent.state.messages.push(appMessage);
         this._persistCustomMessage(appMessage);
         this._emit({ type: "message_start", message: appMessage });

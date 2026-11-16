@@ -1226,7 +1226,8 @@ export class SessionManager {
         // Collect labels for entries in the path
         const pathEntryIds = new Set(pathWithoutLabels.map((e) => e.id));
         const accountingEntries = this.getBranchAccountingEntries(path)
-            .filter(entry => entry.data?.owner !== "jev" || entry.data.status !== "pending").map(entry => ({
+            // These requests settle in the original file even after a fork.
+            .filter(entry => entry.data?.status !== "pending" || !["jev", "project-memory", "project-memory-rerank"].includes(entry.data.owner)).map(entry => ({
             ...entry, parentId: pathEntryIds.has(entry.parentId) ? entry.parentId : null,
         }));
         const labelsToWrite = [];

@@ -5,116 +5,58 @@
  * - AgentSession.executeBash() for interactive and RPC modes
  * - Direct calls from modes that need bash execution
  */
-import { randomBytes } from "node:crypto";
-import { createWriteStream } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { stripAnsi } from "../utils/ansi.js";
 import { sanitizeBinaryOutput } from "../utils/shell.js";
-import { DEFAULT_MAX_BYTES, truncateTail } from "./tools/truncate.js";
-// ============================================================================
-// Implementation
-// ============================================================================
+import { OutputAccumulator } from "./tools/output-accumulator.js";
+
 /**
  * Execute a bash command using custom BashOperations.
  * Used for remote execution (SSH, containers, etc.).
  */
 export async function executeBashWithOperations(command, cwd, operations, options) {
-    const outputChunks = [];
-    let outputBytes = 0;
-    const maxOutputBytes = DEFAULT_MAX_BYTES * 2;
-    let tempFilePath;
-    let tempFileStream;
-    let totalBytes = 0;
-    const ensureTempFile = () => {
-        if (tempFilePath) {
-            return;
-        }
-        const id = randomBytes(8).toString("hex");
-        tempFilePath = join(tmpdir(), `pi-bash-${id}.log`);
-        tempFileStream = createWriteStream(tempFilePath);
-        for (const chunk of outputChunks) {
-            tempFileStream.write(chunk);
-        }
-    };
+    const output = new OutputAccumulator({ tempFilePrefix: "pi-bash" });
     const decoder = new TextDecoder();
-    // Ending a WriteStream is asynchronous; callers receive fullOutputPath and
-    // read it immediately, so the file must be fully flushed before returning.
-    const closeTempFile = () => new Promise((resolve) => {
-        if (!tempFileStream) {
-            resolve();
-            return;
-        }
-        const stream = tempFileStream;
-        tempFileStream = undefined;
-        // A write error must not surface as an unhandled stream error, and must
-        // not leave this promise pending: callers await it inside executeBash, so
-        // a hang here strands the bash tool with no abort path. The command's
-        // output is still valid without the spill file.
-        stream.once("error", () => resolve());
-        stream.end(() => resolve());
-    });
-    const onData = (data) => {
-        totalBytes += data.length;
-        // Sanitize: strip ANSI, replace binary garbage, normalize newlines
-        const text = sanitizeBinaryOutput(stripAnsi(decoder.decode(data, { stream: true }))).replace(/\r/g, "");
-        // Start writing to temp file if exceeds threshold
-        if (totalBytes > DEFAULT_MAX_BYTES) {
-            ensureTempFile();
-        }
-        if (tempFileStream) {
-            tempFileStream.write(text);
-        }
-        // Keep rolling buffer
-        outputChunks.push(text);
-        outputBytes += text.length;
-        while (outputBytes > maxOutputBytes && outputChunks.length > 1) {
-            const removed = outputChunks.shift();
-            outputBytes -= removed.length;
-        }
-        // Stream to callback
-        if (options?.onChunk) {
-            options.onChunk(text);
-        }
+    let acceptingOutput = true;
+    const append = decoded => {
+        const text = sanitizeBinaryOutput(stripAnsi(decoded)).replace(/\r/g, "");
+        const pending = output.append(text);
+        options?.onChunk?.(text);
+        return pending;
     };
+
+    let exitCode;
     try {
-        const result = await operations.exec(command, cwd, {
-            onData,
+        ({ exitCode } = await operations.exec(command, cwd, {
+            onData: data => acceptingOutput ? append(decoder.decode(data, { stream: true })) : undefined,
             signal: options?.signal,
-        });
-        const fullOutput = outputChunks.join("");
-        const truncationResult = truncateTail(fullOutput);
-        if (truncationResult.truncated) {
-            ensureTempFile();
-        }
-        await closeTempFile();
-        const cancelled = options?.signal?.aborted ?? false;
-        return {
-            output: truncationResult.truncated ? truncationResult.content : fullOutput,
-            exitCode: cancelled ? undefined : (result.exitCode ?? undefined),
-            cancelled,
-            truncated: truncationResult.truncated,
-            fullOutputPath: tempFilePath,
-        };
+        }));
     }
-    catch (err) {
-        // Check if it was an abort
-        if (options?.signal?.aborted) {
-            const fullOutput = outputChunks.join("");
-            const truncationResult = truncateTail(fullOutput);
-            if (truncationResult.truncated) {
-                ensureTempFile();
-            }
-            await closeTempFile();
-            return {
-                output: truncationResult.truncated ? truncationResult.content : fullOutput,
-                exitCode: undefined,
-                cancelled: true,
-                truncated: truncationResult.truncated,
-                fullOutputPath: tempFilePath,
-            };
+    catch (error) {
+        if (!options?.signal?.aborted) {
+            acceptingOutput = false;
+            await output.closeTempFile();
+            throw error;
         }
-        await closeTempFile();
-        throw err;
     }
+    finally {
+        acceptingOutput = false;
+    }
+
+    try {
+        const remaining = decoder.decode();
+        if (remaining) await append(remaining);
+        output.finish();
+    }
+    finally {
+        await output.closeTempFile();
+    }
+    const snapshot = output.snapshot();
+    const cancelled = options?.signal?.aborted ?? false;
+    return {
+        output: snapshot.captureError ? `${snapshot.content}\n\n[${snapshot.captureError}]` : snapshot.content,
+        exitCode: cancelled ? undefined : (exitCode ?? undefined),
+        cancelled,
+        truncated: snapshot.truncation.truncated,
+        fullOutputPath: snapshot.fullOutputPath,
+    };
 }

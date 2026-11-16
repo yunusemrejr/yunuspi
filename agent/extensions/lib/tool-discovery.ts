@@ -62,13 +62,18 @@ const RESUME_TOOLS = 6;
 const DISCOVERY_PAGE = 8;
 // Explicit activation belongs to this branch until the host revokes access.
 // Retain that selection across reloads; only inferred recent use has a soft cap.
-export function restoredToolNames(entries: any[], allowed: Set<string>): Set<string> {
-  const selected = new Set<string>(), recent = new Set<string>(), pending = new Map<string,string>();
+function recordedToolNames(entries: any[], allowed: Set<string>): Set<string> {
+  const recorded = new Set<string>();
   for (const entry of entries) {
     if (entry.type === 'custom' && entry.customType === RECEIPT && entry.data?.reason !== 'intent' && Array.isArray(entry.data?.names))
       for (const name of entry.data.names)
-        if (typeof name === 'string' && allowed.has(name) && !CORE_TOOLS.has(name)) selected.add(name);
+        if (typeof name === 'string' && allowed.has(name)) recorded.add(name);
   }
+  return recorded;
+}
+function restoreToolSelection(entries: any[], allowed: Set<string>) {
+  const recorded = recordedToolNames(entries, allowed);
+  const recent = new Set<string>(), pending = new Map<string,string>();
   const branch = entries.slice(-2000);
   for (const entry of branch) {
     const message = entry.type === 'message' ? entry.message : undefined;
@@ -85,8 +90,10 @@ export function restoredToolNames(entries: any[], allowed: Set<string>): Set<str
     if (entry.type === 'message' && ++messages > 12) break;
     if (entry.type === 'message' && entry.message?.role === 'toolResult') remember(entry.message.toolName);
   }
-  for (const name of [...recent, ...pending.values()]) selected.add(name);
-  return selected;
+  return {recorded, resumed: new Set([...recorded, ...recent, ...pending.values()])};
+}
+export function restoredToolNames(entries: any[], allowed: Set<string>): Set<string> {
+  return restoreToolSelection(entries, allowed).resumed;
 }
 /** A goal's kickoff message begins with this marker (lib/goal-state.ts). */
 const GOAL_KICKOFF = '[goal-tracked ';
@@ -311,6 +318,7 @@ export function registerToolDiscovery(pi: any) {
   let allowed = new Set<string>(), expected = new Set<string>(), wireDirty = false, owner: string | undefined, flushed = new Set<string>();
   let generation = 0, manager: any;
   let automatic = new Set<string>(), explicitSelections = new Set<string>(), usedCore = new Set<string>(), namedCore = new Set<string>();
+  let recordedSelections = new Set<string>();
   const sessionSelections = new Set<string>();
   let known = new Set<string>();
   let inputSequence = 0, acceptedInput = '', started = false;
@@ -380,6 +388,24 @@ export function registerToolDiscovery(pi: any) {
     applyActive(expected);
     wireDirty = !same(expected, flushed);
   };
+  const stageSelected = (names: Iterable<string>) => {
+    const added: string[] = [], unrecorded: string[] = [];
+    for (const name of names) {
+      explicitSelections.add(name);
+      automatic.delete(name);
+      if (!recordedSelections.has(name)) unrecorded.push(name);
+      if (!expected.has(name)) { expected.add(name); added.push(name); }
+    }
+    // Apply schema additions once after the tool batch. Receipt-only selections leave the wire alone.
+    if (added.length) wireDirty = true;
+    if (unrecorded.length && typeof pi.appendEntry === 'function') {
+      try {
+        pi.appendEntry(RECEIPT, {names: unrecorded});
+        for (const name of unrecorded) recordedSelections.add(name);
+      } catch { /* Keep the live selection and retry receipt persistence on explicit reselection. */ }
+    }
+    return added;
+  };
   const stageCore = (tier: string, prompt = '') => {
     if (!adaptiveExecutionEnabled()) return;
     // A goal is the long work where delegation pays, and the kickoff is the
@@ -417,14 +443,18 @@ export function registerToolDiscovery(pi: any) {
     manager = ctx.sessionManager;
     sessionSelections.clear(); lastCtx = ctx;
     pendingInput = undefined; acceptedInput = ''; started = false; routingTask = ''; authoredTask = ''; goalRun = false;
-    const remembered = restoredToolNames(ctx.sessionManager?.getBranch?.() ?? [], allowed);
-    explicitSelections = new Set(remembered); automatic.clear(); usedCore.clear(); namedCore.clear();
-    expected = new Set([...allowed].filter((name: string) => CORE_TOOLS.has(name) || remembered.has(name)));
+    const {recorded, resumed} = restoreToolSelection(ctx.sessionManager?.getBranch?.() ?? [], allowed);
+    recordedSelections = recorded;
+    explicitSelections = resumed; automatic.clear(); usedCore.clear(); namedCore.clear();
+    expected = new Set([...allowed].filter(name => CORE_TOOLS.has(name) || resumed.has(name)));
     wireDirty = false;
     applyActive(expected);
   };
   pi.on('session_start', initialize);
   pi.on('session_switch', initialize);
+  pi.on('session_tree', (_event: any, ctx: any) => {
+    if (owner && identity(ctx) === owner) recordedSelections = recordedToolNames(ctx.sessionManager?.getBranch?.() ?? [], allowed);
+  });
   for (const event of ['session_before_switch', 'session_before_fork', 'session_before_tree', 'session_shutdown']) pi.on(event, invalidate);
   // turn_end precedes the owned core's next-turn context snapshot. turn_start
   // would be too late; mutating in execute would split a parallel tool batch.
@@ -581,14 +611,7 @@ export function registerToolDiscovery(pi: any) {
           const visible = !selectionChanged ? allowed : active;
           const wanted = new Set<string>();
           for (const record of records) for (const name of record?.tools ?? []) if (typeof name === 'string' && visible.has(name)) wanted.add(name);
-          const added = [...wanted].filter(name => !expected.has(name));
-          for (const name of wanted) { explicitSelections.add(name); automatic.delete(name); }
-          if (added.length) {
-            expected = new Set([...expected, ...added]);
-            wireDirty = true;
-            try { pi.appendEntry?.(RECEIPT, {names: added}); } catch { /* Exposure succeeded; a missing receipt only affects later restoration. */ }
-          }
-          return added;
+          return stageSelected(wanted);
         };
         if (id) {
           const detail = getCapabilityDetail(id);
@@ -721,16 +744,7 @@ export function registerToolDiscovery(pi: any) {
       const limit = pageLimit(input.limit,explicit.length || 3);
       const selected = matches.slice(offset,offset+limit);
       const activate = input.enable === true || (explicit.length > 0 && input.enable !== false);
-      if (activate) for (const tool of selected) { explicitSelections.add(tool.name); automatic.delete(tool.name); }
-      const added = activate ? selected.map(tool=>tool.name).filter(name=>!expected.has(name)) : [];
-      if (added.length) {
-        expected = new Set([...expected,...added]);
-        // Stage until the tool batch ends; apply once before the next model turn
-        // (see applyActive/flushPending), keeping this turn's provider
-        // prefix - and its cache - intact.
-        wireDirty = true;
-        try { pi.appendEntry?.(RECEIPT,{names:added}); } catch { /* Exposure succeeded; a missing receipt only affects later restoration. */ }
-      }
+      const added = activate ? stageSelected(selected.map(tool => tool.name)) : [];
       const resultingActive = new Set(pi.getActiveTools());
       const toolsJevRank = (matches as any).jevRank as { mark: string; top: string; confidence: number } | undefined;
       return answer({tools:selected.map(tool=>({name:tool.name,description:String(tool.description??'').slice(0,input.detail === true ? 800 : 160),active:resultingActive.has(tool.name),staged:expected.has(tool.name) && !resultingActive.has(tool.name),

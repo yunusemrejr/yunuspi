@@ -131,6 +131,12 @@ export default function piVectorMemory(pi: any, testing: TestingSeams = {}) {
   const isoNow = testing.isoNow ?? (() => new Date().toISOString());
   const accounting = () => {
     const owner = current;
+    if (owner && !owner.controller.signal.aborted) {
+      try {
+        const bound = pi.bindAuxiliaryUsage?.();
+        if (bound) return bound;
+      } catch { /* Older or inactive runtimes use the guarded session append. */ }
+    }
     return (receipt: unknown) => { if (owner && current === owner && !owner.controller.signal.aborted) pi.appendEntry?.('auxiliary-model-usage-v1', receipt); };
   };
   const embedder: MemoryEmbedder | null = testing.embedder !== undefined ? testing.embedder : configuredMemoryEmbedder(env, { accounting });

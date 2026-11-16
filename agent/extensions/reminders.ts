@@ -541,13 +541,6 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			return undefined;
 		}
 	};
-	// Split so a failed send never arms a bogus watch: the trajectory line is
-	// needed before content is built, but the watch arms only after delivery.
-	const nextTrajectory = (sid: string): string => {
-		const seq = (trajSeq.get(sid) ?? 0) + 1;
-		trajSeq.set(sid, seq);
-		return trajectoryLine(seq);
-	};
 	const armCompliance = (sid: string, count: number): void => {
 		pendingCompliance.set(sid, { assistant: 0, tools: 0, ack: false, ackWords: 0, markers: new Set() });
 		try {
@@ -572,10 +565,37 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			sink("reminder.follow", { decision: follow, count: watch.tools });
 		} catch { /* telemetry is optional */ }
 	};
-	const load = (sid: string): ReminderState => {
+	type Occurrence = { id: string; dueAt: number };
+	const applyOccurrences = (st: ReminderState, occurrences: Occurrence[], acceptedAt: number): number => {
+		const dueById = new Map(occurrences.map(row => [row.id, row.dueAt]));
+		let count = 0;
+		for (const reminder of st.manual) {
+			if (!reminder.active || dueById.get(reminder.id) !== reminder.nextFireAt) continue;
+			reminder.delivered += 1;
+			catchUp(reminder, Math.max(acceptedAt, reminder.nextFireAt));
+			count++;
+		}
+		return count;
+	};
+	const recoverOccurrences = (sid: string, st: ReminderState, ctx: ExtensionContext): boolean => {
+		if (!st.manual.some(reminder => reminder.active)) return false;
+		let changed = false;
+		for (const entry of ctx.sessionManager.getEntries?.() ?? ctx.sessionManager.getBranch?.() ?? []) {
+			if (entry.type !== "custom_message" || entry.customType !== "reminders") continue;
+			const receipt = (entry.details as { reminderDelivery?: { sessionId?: string; occurrences?: Occurrence[] } })?.reminderDelivery;
+			if (receipt?.sessionId !== sid || !Array.isArray(receipt.occurrences)) continue;
+			const acceptedAt = Date.parse(entry.timestamp);
+			if (!Number.isFinite(acceptedAt)) continue;
+			const occurrences = receipt.occurrences.filter(row => typeof row?.id === "string" && Number.isSafeInteger(row.dueAt));
+			changed = applyOccurrences(st, occurrences, acceptedAt) > 0 || changed;
+		}
+		return changed;
+	};
+	const load = (sid: string, ctx?: ExtensionContext): ReminderState => {
 		let st = live.get(sid);
 		if (!st) {
 			st = readState(sid);
+			if (ctx && recoverOccurrences(sid, st, ctx)) writeState(sid, st);
 			live.set(sid, st);
 		}
 		return st;
@@ -592,9 +612,31 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		st.workspaceWarnings = st.workspaceWarnings.slice(-16);
 	};
 
-	const advanceDelivered = (r: ManualReminder, now: number) => {
-		r.delivered += 1;
-		catchUp(r, now);
+	const stageDelivery = (sid: string, ctx: ExtensionContext, st: ReminderState, reminders: ManualReminder[],
+		onDelivery?: (acceptedAt: number) => void) => {
+		const occurrences = reminders.map(reminder => ({ id: reminder.id, dueAt: reminder.nextFireAt }));
+		const sequence = (trajSeq.get(sid) ?? 0) + 1;
+		let accepted = false;
+		const currentSession = () => live.get(sid) === st && sidOf(ctx) === sid;
+		return {
+			trajectory: occurrences.length ? trajectoryLine(sequence) : undefined,
+			details: occurrences.length ? { reminderDelivery: { sessionId: sid, occurrences } } : undefined,
+			canDeliver: () => !accepted && currentSession() && occurrences.every(row =>
+				st.manual.some(reminder => reminder.active && reminder.id === row.id && reminder.nextFireAt === row.dueAt)),
+			wasAccepted: () => accepted,
+			onAccepted: () => {
+				if (accepted || !currentSession()) return;
+				accepted = true;
+				const at = Date.now();
+				const count = applyOccurrences(st, occurrences, at);
+				if (count > 0) {
+					trajSeq.set(sid, Math.max(sequence, trajSeq.get(sid) ?? 0));
+					armCompliance(sid, count);
+				}
+				try { onDelivery?.(at); }
+				finally { writeState(sid, st); }
+			},
+		};
 	};
 	const updateTodoCounts = (
 		st: ReminderState,
@@ -634,7 +676,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		try {
 			const sid = sidOf(ctx);
 			if (event.reason === "startup" || event.reason === "new") cleanupStale(sid);
-			const st = load(sid);
+			const st = load(sid, ctx);
 			if (sid) {
 				const { state } = acquireWorkspaceWriterLease(ctx.cwd, sid);
 				workspaceBaselines.set(sid, state);
@@ -656,6 +698,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				workspaceLeaseCwds.delete(sid);
 			}
 			if (nextSid && ctx?.cwd) {
+				load(nextSid, ctx);
 				const { state } = acquireWorkspaceWriterLease(ctx.cwd, nextSid);
 				workspaceBaselines.set(nextSid, state);
 				workspaceLeaseCwds.set(nextSid, ctx.cwd);
@@ -761,7 +804,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		try {
 			const sid = sidOf(ctx);
 			if (!sid) return undefined;
-			const st = load(sid);
+			const st = load(sid, ctx);
 			observeWorkspace(sid, ctx, st);
 			st.promptCount += 1;
 			const now = Date.now();
@@ -781,7 +824,25 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				writeState(sid, st);
 				return undefined;
 			}
-			const traj = dueManual.length > 0 ? nextTrajectory(sid) : undefined;
+			const warnings = st.workspaceWarnings.slice();
+			const lastMutation = st.lastMutAt;
+			const delivery = stageDelivery(sid, ctx, st, dueManual, at => {
+				if (fire.todo) {
+					st.todoReminders += 1;
+					st.lastTodoRemindAt = at;
+				}
+				if (fire.drift) st.driftReminders += 1;
+				if (fire.caution) {
+					st.cautionReminders += 1;
+					st.lastCautionAt = at;
+					if (st.lastMutAt === lastMutation) {
+						st.mutPending = false;
+						st.runMutCount = 0;
+					}
+				}
+				st.workspaceWarnings = st.workspaceWarnings.filter(warning => !warnings.includes(warning));
+				st.lastRemindAt = at;
+			});
 			const content = reminderText(
 				st,
 				sid,
@@ -790,30 +851,12 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				dueManual,
 				[],
 				todoSnapshots.get(st),
-				traj,
+				delivery.trajectory,
 			);
 			if (!content.trim()) {
 				writeState(sid, st);
 				return undefined;
 			}
-			if (dueManual.length > 0) armCompliance(sid, dueManual.length);
-			// Advance schedules BEFORE returning: a delivered occurrence cannot
-			// re-fire from a later lifecycle event (structural dedup).
-			for (const r of dueManual) advanceDelivered(r, now);
-			if (fire.todo) {
-				st.todoReminders += 1;
-				st.lastTodoRemindAt = now;
-			}
-			if (fire.drift) st.driftReminders += 1;
-			if (fire.caution) {
-				st.cautionReminders += 1;
-				st.lastCautionAt = now;
-				st.mutPending = false; // consumed: one fire per armed mutation
-				st.runMutCount = 0; // consumed here, never by an internal recovery run
-			}
-			st.workspaceWarnings = [];
-			st.lastRemindAt = now;
-			writeState(sid, st);
 			return {
 				message: {
 					customType: "reminders",
@@ -822,6 +865,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 					// visible where the user looks (TUI + session export both
 					// filter on display). Ambient-only injections stay quiet.
 					display: dueManual.length > 0,
+					details: delivery.details,
+					canDeliver: delivery.canDeliver,
+					onAccepted: delivery.onAccepted,
 				},
 			};
 		} catch (err) {
@@ -1040,7 +1086,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 					recoveryRoute = undefined;
 				return;
 			}
-			const st = load(sid);
+			const st = load(sid, ctx);
 			const now = Date.now();
 			const reasoning = loop.nudged ? undefined : repeatedReasoningNotice(m);
 			const candidate = loop.finishTurn() ?? reasoning;
@@ -1054,7 +1100,15 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			if (turnSteerInFlight) return;
 			turnSteerInFlight = true;
 			try {
-				const traj = dueManual.length > 0 ? nextTrajectory(sid) : undefined;
+				const signal = ctx.signal;
+				const currentLoop = loop;
+				const delivery = stageDelivery(sid, ctx, st, dueManual, at => {
+					if (!nudge || loop !== currentLoop) return;
+					loop.nudged = true;
+					if (reasoning && ctx.model) recoveryRoute = { provider: ctx.model.provider, model: ctx.model.id };
+					st.overthinkReminders += 1;
+					st.lastOverthinkAt = at;
+				});
 				await pi.sendMessage(
 					{
 						customType: "reminders",
@@ -1068,26 +1122,13 @@ export default function remindersExtension(pi: ExtensionAPI) {
 								...(nudge ? [nudge] : []),
 							],
 							[],
-							traj,
+							delivery.trajectory,
 						),
 						display: dueManual.length > 0,
+						details: delivery.details,
 					},
-					{ deliverAs: "steer" },
+					{ deliverAs: "steer", canDeliver: () => !signal?.aborted && delivery.canDeliver(), onAccepted: delivery.onAccepted },
 				);
-				if (dueManual.length > 0) armCompliance(sid, dueManual.length);
-				// A rejected queue operation must not consume the reminder or nudge.
-				// Once the queue accepts the steer, consume the delivered manual
-				// occurrences immediately: a later step throwing must not leave a
-				// delivered occurrence still due and re-fire it on the next turn.
-				for (const r of dueManual) advanceDelivered(r, now);
-				if (nudge) {
-					loop.nudged = true;
-					if (reasoning && ctx.model)
-						recoveryRoute = { provider: ctx.model.provider, model: ctx.model.id };
-					st.overthinkReminders += 1;
-					st.lastOverthinkAt = now;
-				}
-				writeState(sid, st);
 			} finally {
 				turnSteerInFlight = false;
 			}
@@ -1131,7 +1172,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 					);
 					return;
 				}
-				const st = load(sid);
+				const st = load(sid, ctx);
 				const arg = args.trim();
 				const m = arg.match(/^(list|clear(?:\s+(\d+|all|\*))?)$/i);
 				if (m) {
@@ -1196,7 +1237,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 					id: randomUUID(),
 					text: arg,
 					createdAt: now,
-					nextFireAt: now + MANUAL_INTERVAL_MS,
+					// The immediate occurrence remains due until a real append.
+					nextFireAt: now,
 					active: true,
 					delivered: 0,
 				};
@@ -1212,12 +1254,14 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				// The explicit slash command authorizes one immediate steer, even
 				// while the agent is idle. Periodic repeats remain turn-bound in
 				// before_agent_start/turn_end and cannot wake completed work.
+				const delivery = stageDelivery(sid, ctx, st, [reminder]);
 				const immediateMessage = {
 					customType: "reminders",
 					content: reminderText(st, sid, now, { todo: false, drift: false }, [
 						reminder,
-					], undefined, [], nextTrajectory(sid)),
+					], undefined, [], delivery.trajectory),
 					display: true,
+					details: delivery.details,
 				};
 				try {
 					if (typeof pi.sendMessage !== "function")
@@ -1225,35 +1269,17 @@ export default function remindersExtension(pi: ExtensionAPI) {
 					await pi.sendMessage(immediateMessage, {
 						deliverAs: "steer",
 						triggerTurn: true,
+						canDeliver: delivery.canDeliver,
+						onAccepted: delivery.onAccepted,
 					});
-					armCompliance(sid, 1);
 				} catch {
-					// A rejected queue must be due at the next available boundary;
-					// leave delivered=0 and retain the original createdAt grid for
-					// catchUp after that missed first occurrence is delivered.
-					reminder.nextFireAt = now;
-					writeState(sid, st);
-					ctx.ui.notify(
-						"Reminder set, but immediate delivery failed; it remains due for the next available active turn.",
-						"warning",
-					);
-					return;
-				}
-				// Keep the repeat anchored at registration+one interval; the immediate
-				// delivery only records that the text was queued once. Persistence
-				// and notification are outside the queue-failure boundary so a UI
-				// problem cannot re-arm an already accepted delivery.
-				reminder.delivered += 1;
-				if (!writeState(sid, st)) {
-					try {
+					if (!delivery.wasAccepted()) {
 						ctx.ui.notify(
-							`Reminder queued, but its delivery receipt could not be saved; it remains scheduled for ~${Math.round(MANUAL_INTERVAL_MS / 60_000)} min.`,
+							"Reminder set, but immediate delivery failed; it remains due for the next available active turn.",
 							"warning",
 						);
-					} catch (err) {
-						logReminderErr("reminder delivery notice", err);
+						return;
 					}
-					return;
 				}
 				try {
 					ctx.ui.notify(

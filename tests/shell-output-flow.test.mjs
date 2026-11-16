@@ -10,6 +10,7 @@ import {createHash} from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { OutputAccumulator } from '../core/coding-agent/dist/core/tools/output-accumulator.js';
 import { createBashToolDefinition, createLocalBashOperations } from '../core/coding-agent/dist/core/tools/bash.js';
+import { executeBashWithOperations } from '../core/coding-agent/dist/core/bash-executor.js';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const quote=s=>"'"+s.replaceAll("'","'\\''")+"'";
 const command=code=>`${quote(process.execPath)} -e ${quote(code)}`;
@@ -29,6 +30,35 @@ test('real shell output keeps beginning/end within budget and exact private UTF-
   assert.ok(result.details.truncation.outputBytes<=2048);assert.equal(result.details.truncation.totalBytes,Buffer.byteLength(text));
   assert.equal(fs.readFileSync(result.details.fullOutputPath,'utf8'),text);
   assert.equal(fs.statSync(result.details.fullOutputPath).mode&0o777,0o600);
+ }finally{remove(result);}
+});
+
+test('head-tail previews enforce both budgets for dense output and retain the full result',async()=>{
+ const input=Buffer.from('START\n'+'·\n'.repeat(4000)+'END\n');
+ const accumulator=new OutputAccumulator({maxBytes:5120,maxLines:7,outputMode:'head-tail'});
+ await accumulator.append(input);
+ accumulator.finish();await accumulator.closeTempFile();
+ const result=accumulator.snapshot();
+ try{
+  assert.match(result.content,/^START\n/);
+  assert.match(result.content,/middle output omitted/);assert.match(result.content,/\nEND$/);
+  assert.equal(result.truncation.outputLines,result.content.split('\n').length);
+  assert.ok(result.truncation.outputLines<=7,`${result.truncation.outputLines} lines exceed the preview budget`);
+  assert.ok(result.truncation.outputBytes<=5120);
+  assert.deepEqual(fs.readFileSync(result.fullOutputPath),input);
+ }finally{if(result.fullOutputPath)fs.rmSync(result.fullOutputPath,{force:true});}
+});
+
+test('real shell tail keeps evidence from a very long newline-terminated final line',async()=>{
+ const tool=createBashToolDefinition(scratch);
+ const output='🙂'.repeat(5000)+' LAST DIAGNOSTIC\n';
+ const result=await tool.execute('one-line',{command:command("process.stdout.write('🙂'.repeat(5000)+' LAST DIAGNOSTIC\\n')"),maxOutputBytes:256},undefined,undefined,context);
+ try{
+  assert.match(result.content[0].text,/LAST DIAGNOSTIC/);
+  assert.ok(!result.content[0].text.includes('\uFFFD'));
+  assert.ok(result.details.truncation.outputBytes<=256);
+  assert.equal(result.details.truncation.lastLinePartial,true);
+  assert.equal(fs.readFileSync(result.details.fullOutputPath,'utf8'),output);
  }finally{remove(result);}
 });
 
@@ -54,6 +84,9 @@ test('capture disk failure stays explicit without crashing, hanging or claiming 
   assert.match(result.content[0].text,/Full output unavailable: ENOSPC/);
   assert.equal(result.details.fullOutputPath,undefined);assert.match(result.details.captureError,/ENOSPC/);
   assert.ok(!result.content[0].text.includes('Full output: undefined'));
+  const interactive=await executeBashWithOperations(command("process.stdout.write('x'.repeat(100000)+' END')"),scratch,createLocalBashOperations());
+  assert.equal(interactive.exitCode,0);assert.equal(interactive.fullOutputPath,undefined);
+  assert.match(interactive.output,/ END\n\n\[Full output unavailable: ENOSPC\]$/);
  }finally{fs.createWriteStream=original;syncBuiltinESMExports();}
 });
 

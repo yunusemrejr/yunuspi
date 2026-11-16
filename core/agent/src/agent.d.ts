@@ -17,6 +17,7 @@ export interface AgentOptions {
     shouldStopAfterTurn?: (context: ShouldStopAfterTurnContext, signal?: AbortSignal) => boolean | Promise<boolean>;
     prepareNextTurn?: (signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
     prepareNextTurnWithContext?: (context: PrepareNextTurnContext, signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
+    canDeliverMessage?: (message: AgentMessage, signal?: AbortSignal) => boolean;
     steeringMode?: QueueMode;
     followUpMode?: QueueMode;
     sessionId?: string;
@@ -48,6 +49,7 @@ export declare class Agent {
     shouldStopAfterTurn?: (context: ShouldStopAfterTurnContext, signal?: AbortSignal) => boolean | Promise<boolean>;
     prepareNextTurn?: (signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
     prepareNextTurnWithContext?: (context: PrepareNextTurnContext, signal?: AbortSignal) => Promise<AgentLoopTurnUpdate | undefined> | AgentLoopTurnUpdate | undefined;
+    canDeliverMessage?: (message: AgentMessage, signal?: AbortSignal) => boolean;
     private activeRun?;
     /** Session identifier forwarded to providers for cache-aware backends. */
     sessionId?: string;
@@ -84,9 +86,9 @@ export declare class Agent {
     set followUpMode(mode: QueueMode);
     get followUpMode(): QueueMode;
     /** Queue a message to be injected after the current assistant turn finishes. */
-    steer(message: AgentMessage, options?: { interrupt?: boolean }): void;
+    steer(message: AgentMessage, options?: { interrupt?: boolean; canDeliver?: () => boolean }): void;
     /** Queue a message to run only after the agent would otherwise stop. */
-    followUp(message: AgentMessage): void;
+    followUp(message: AgentMessage, options?: { canDeliver?: () => boolean }): void;
     /** Remove all queued steering messages. */
     clearSteeringQueue(): void;
     /** Remove all queued follow-up messages. */

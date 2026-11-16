@@ -416,11 +416,15 @@ export declare class AgentSession {
         triggerTurn?: boolean;
         /** Called once after session-history acceptance, never merely queued: disk-backed sessions are fsynced; in-memory sessions are accepted only in memory. Does not report model completion. */
         onAccepted?: () => void;
+        /** If false, discard the staged custom message before delivery. */
+        canDeliver?: () => boolean;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): Promise<void>;
     private _appendCustomMessage;
     private _acknowledgeCustomMessage;
     private _customMessageAcceptances;
+    private _customMessageDeliveryChecks;
+    private _canDeliverCustomMessage;
     private _persistCustomMessage;
     /**
      * Append custom messages queued while the agent was running.

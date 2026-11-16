@@ -179,8 +179,11 @@ export function truncateTail(content, options = {}) {
     const maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
     const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
     const totalBytes = utf8ByteLength(content);
-    const lines = splitLinesForCounting(content);
-    const totalLines = lines.length;
+    const endsWithNewline = content.endsWith("\n");
+    let totalLines = content.length && !endsWithNewline ? 1 : 0;
+    for (let newline = content.indexOf("\n"); newline !== -1; newline = content.indexOf("\n", newline + 1)) {
+        totalLines++;
+    }
     // Check if no truncation needed
     if (totalLines <= maxLines && totalBytes <= maxBytes) {
         return {
@@ -197,44 +200,47 @@ export function truncateTail(content, options = {}) {
             maxBytes,
         };
     }
-    // Work backwards from the end
-    const outputLinesArr = [];
+    // Retained lines form a contiguous suffix. Find its boundary without
+    // allocating every line or shifting a growing array on each iteration.
+    const end = content.length - (endsWithNewline ? 1 : 0);
+    let lineEnd = end;
+    let outputStart = end;
+    let outputLines = 0;
     let outputBytesCount = 0;
     let truncatedBy = "lines";
-    let lastLinePartial = false;
-    for (let i = lines.length - 1; i >= 0 && outputLinesArr.length < maxLines; i--) {
-        const line = lines[i];
-        const lineBytes = utf8ByteLength(line) + (outputLinesArr.length > 0 ? 1 : 0); // +1 for newline
+    let partial;
+    for (let i = totalLines - 1; i >= 0 && outputLines < maxLines; i--) {
+        const lineStart = lineEnd > 0 ? content.lastIndexOf("\n", lineEnd - 1) + 1 : 0;
+        const line = content.slice(lineStart, lineEnd);
+        const lineBytes = utf8ByteLength(line) + (outputLines > 0 ? 1 : 0);
         if (outputBytesCount + lineBytes > maxBytes) {
             truncatedBy = "bytes";
-            // Edge case: if we haven't added ANY lines yet and this line exceeds maxBytes,
-            // take the end of the line (partial)
-            if (outputLinesArr.length === 0) {
-                const truncatedLine = truncateStringToBytesFromEnd(line, maxBytes);
-                outputLinesArr.unshift(truncatedLine);
-                outputBytesCount = utf8ByteLength(truncatedLine);
-                lastLinePartial = true;
+            // Preserve a partial suffix when even the latest line cannot fit.
+            if (outputLines === 0) {
+                partial = truncateStringToBytesFromEnd(line, maxBytes);
+                outputLines = 1;
+                outputBytesCount = utf8ByteLength(partial);
             }
             break;
         }
-        outputLinesArr.unshift(line);
+        outputLines++;
+        outputStart = lineStart;
         outputBytesCount += lineBytes;
+        lineEnd = lineStart - 1;
     }
     // If we exited due to line limit
-    if (outputLinesArr.length >= maxLines && outputBytesCount <= maxBytes) {
+    if (outputLines >= maxLines && outputBytesCount <= maxBytes) {
         truncatedBy = "lines";
     }
-    const outputContent = outputLinesArr.join("\n");
-    const finalOutputBytes = utf8ByteLength(outputContent);
     return {
-        content: outputContent,
+        content: partial ?? content.slice(outputStart, end),
         truncated: true,
         truncatedBy,
         totalLines,
         totalBytes,
-        outputLines: outputLinesArr.length,
-        outputBytes: finalOutputBytes,
-        lastLinePartial,
+        outputLines,
+        outputBytes: outputBytesCount,
+        lastLinePartial: partial !== undefined,
         firstLineExceedsLimit: false,
         maxLines,
         maxBytes,

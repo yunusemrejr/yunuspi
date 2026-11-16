@@ -95,7 +95,11 @@ test('native reminder hooks share one nudge and reset cycle enforcement on user/
     const {default:register}=await import(pathToFileURL(path.join(agent,'extensions/reminders.ts')));
     const hooks=new Map(), sent=[];
     const ctx={cwd:home,sessionManager:{getSessionId:()=> 'loop-cycle',getBranch:()=> []},ui:{notify(){}}};
-    register({on:(name,fn)=>{const list=hooks.get(name)??[];list.push(fn);hooks.set(name,list);},registerCommand(){},sendMessage:m=>sent.push(m)});
+    register({on:(name,fn)=>{const list=hooks.get(name)??[];list.push(fn);hooks.set(name,list);},registerCommand(){},sendMessage(message,options){
+      if(options?.canDeliver?.()===false)return;
+      sent.push(message);
+      options?.onAccepted?.();
+    }});
     const emit=async(name,event={})=>{let result;for(const fn of hooks.get(name)??[])result=await fn(event,ctx)??result;return result;};
     await emit('session_start',{reason:'startup'}); await emit('agent_start');
     const exercise=async()=>{for(let i=0;i<8;i++) {const result=read(i%2?'b':'a'); await emit('tool_result',result); await emit('turn_end',{message:{role:'assistant',stopReason:'toolUse',content:[]},toolResults:[result]});}};

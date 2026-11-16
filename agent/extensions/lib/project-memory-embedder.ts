@@ -17,7 +17,7 @@ export const MEMORY_EMBED_CHARS = 2000;
 export const MEMORY_EMBED_MAX_TEXTS = 64;
 export interface EmbeddingOptions { inputType?: 'query' | 'document'; signal?: AbortSignal; compatible?: ReadonlySet<string> }
 export interface MemoryEmbedding { space: EmbeddingSpace; vectors: number[][] }
-export type EmbeddingReceipt = { id: string; owner: 'project-memory'; provider: 'openrouter'; model: string; status: 'pending' | 'completed' | 'failed' | 'cancelled'; usage?: Record<string, unknown> };
+export type EmbeddingReceipt = { id: string; owner: 'project-memory'; provider: 'openrouter'; model: string; status: 'pending' | 'completed' | 'failed' | 'cancelled' | 'timeout'; usage?: Record<string, unknown> };
 export type EmbeddingAccounting = () => (receipt: EmbeddingReceipt) => void;
 export interface MemoryEmbedder {
   readonly id: string;
@@ -182,7 +182,6 @@ export function openRouterMemoryEmbedder(options: { model?: string; env?: Record
             for (;;) { const part = await reader.read(); if (part.done) break; bytes += part.value.byteLength;
               if (bytes > 8 * 1024 * 1024) { await reader.cancel(); throw Error('response-budget'); } chunks.push(part.value); }
           } finally { reader.releaseLock(); }
-          signal.throwIfAborted();
           const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
           const used = body.usage?.prompt_tokens ?? body.usage?.total_tokens;
           if (Number.isSafeInteger(used) && used >= 0) tokens += used;
@@ -190,6 +189,9 @@ export function openRouterMemoryEmbedder(options: { model?: string; env?: Record
           if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0) costUsd += cost;
           receipt.usage = { ...(Number.isSafeInteger(used) && used >= 0 ? { input: used, output: 0 } : {}),
             ...(typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? { cost: { total: cost, source: 'provider-reported' } } : {}) };
+          // A completed provider response can carry a charge even when its
+          // vectors are too late for the requesting session to apply.
+          signal.throwIfAborted();
           // OpenRouter currently echoes the upstream Hugging Face spelling
           // (Qwen/Qwen3-Embedding-8B); case does not create another model.
           if (typeof body.model === 'string' && body.model.toLowerCase() !== model.toLowerCase()) throw Error('model-mismatch');
@@ -212,9 +214,10 @@ export function openRouterMemoryEmbedder(options: { model?: string; env?: Record
         lastError = ''; retryAt = 0; note('embedded', texts.length, started); return out;
       } catch (error) {
         const cancelled = opts.signal?.aborted && opts.signal.reason?.name !== 'TimeoutError';
-        if (receipt) { receipt.status = cancelled ? 'cancelled' : 'failed'; record(); }
+        const timedOut = !cancelled && (controller.signal.aborted || opts.signal?.aborted);
+        if (receipt) { receipt.status = cancelled ? 'cancelled' : timedOut ? 'timeout' : 'failed'; record(); }
         const code = error instanceof Error ? error.message : '';
-        lastError = cancelled ? 'cancelled' : controller.signal.aborted || opts.signal?.aborted ? 'timeout'
+        lastError = cancelled ? 'cancelled' : timedOut ? 'timeout'
           : ['model-mismatch','partial-batch','invalid-index','malformed-vectors','dimension-mismatch','response-budget','empty-response'].includes(code) ? code : 'network-or-json';
         if (!cancelled) retryAt = now() + 60_000;
         return null;

@@ -1,3 +1,10 @@
+## 0.56.10 — Durable reminder delivery and bounded shell output
+
+- A reminder advances its schedule when the conversation records delivery. Stop before delivery leaves it due. The queue drops cleared or already delivered occurrences.
+- Project-memory requests keep provider usage in the submitting session when cancellation or navigation makes their results stale.
+- Explicit tool selections survive resume even if the tool was already active. Recording that choice leaves the provider's tool list alone.
+- Shell previews enforce both line and byte limits and keep the end of a long final line. Interactive shell commands use the same private, bounded capture as native tools.
+
 ## 0.56.9 — Physical request billing and faster verification
 
 - Jev and Kev record each submitted request in the owning session, including billed responses that fail validation and trigger a fallback. Recovery tests a cooling route on the next eligible request, and coalesced calls share one bill.

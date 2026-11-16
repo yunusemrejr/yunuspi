@@ -218,6 +218,68 @@ test("activation receipts restore on resume and separate session switches retain
   "switch does not lose original hidden catalog",
  );
 });
+test("explicitly selecting an already-active tool pins it beyond recent-use restoration", async () => {
+ const f = fixture();
+ f.entries.push({ type: "message", message: { role: "toolResult", toolName: "browser_session" } });
+ f.hooks.session_start({}, f.ctx);
+ const active = f.active();
+ assert.ok(active.includes("browser_session"));
+
+ await f.call({ names: ["browser_session"], enable: false });
+ assert.equal(f.entries.length, 1);
+ for (const input of [
+  { names: ["browser_session"] },
+  { kind: "capabilities", id: "web-and-media", enable: true },
+ ]) {
+  assert.equal((await f.call(input)).isError, undefined);
+  f.hooks.turn_end();
+  assert.equal(f.active(), active, "pinning an active tool preserves the provider tool list");
+ }
+ f.entries.push(...Array.from({ length: 13 }, () => ({ type: "message", message: { role: "user" } })));
+ f.hooks.session_start({}, f.ctx);
+ assert.ok(f.active().includes("browser_session"), "explicit selection survives when the tool result ages out");
+ assert.deepEqual(f.entries.filter(entry => entry.customType === "harness-tool-activation-v1"), [
+  { type: "custom", customType: "harness-tool-activation-v1", data: { names: ["browser_session"] } },
+ ]);
+});
+test("capability selection retries an activation receipt that failed to append", async () => {
+ const f = fixture();
+ f.api.setActiveTools([...f.active(), "browser_session"]);
+ const append = f.api.appendEntry;
+ let attempts = 0;
+ f.api.appendEntry = (customType, data) => {
+  if (++attempts === 1) throw new Error("injected append failure");
+  append(customType, data);
+ };
+ const input = { kind: "capabilities", id: "web-and-media", enable: true };
+ for (let repeat = 0; repeat < 3; repeat++) {
+  const result = await f.call(input);
+  assert.equal(result.isError, undefined);
+  assert.deepEqual(result.details.staged, []);
+ }
+ assert.equal(attempts, 2);
+ f.hooks.session_start({}, f.ctx);
+ assert.ok(f.active().includes("browser_session"));
+ assert.equal(f.entries.length, 1);
+});
+test("pinning on another branch records a receipt even while the tool remains on the wire", async () => {
+ const f = fixture();
+ await f.call({ names: ["http_request"] });
+ f.hooks.turn_end();
+ const active = f.active();
+ assert.ok(active.includes("http_request"));
+
+ // Navigate to the common ancestor, before the previous branch's pin.
+ f.hooks.session_before_tree({}, f.ctx);
+ f.entries.length = 0;
+ f.hooks.session_tree({}, f.ctx);
+ assert.equal(f.active(), active);
+ await f.call({ names: ["http_request"] });
+
+ f.hooks.session_start({}, f.ctx);
+ assert.ok(f.active().includes("http_request"));
+ assert.equal(f.entries.length, 1);
+});
 test("child sessions and explicit opt-out preserve their original tool selection", () => {
  const oldChild = process.env.PI_SUBAGENT_CHILD,
   oldMode = process.env.PI_TOOL_DISCOVERY;
@@ -709,6 +771,9 @@ test('direct schemas shrink without dropping checks, explicit choices or host re
  await f.call({names:['subagent'],enable:true});f.hooks.turn_end();
  f.events['adaptive-pipeline-selection']({sessionManager:f.ctx.sessionManager,tier:'direct',names:[],beforeStart:true});
  assert.ok(f.active().includes('subagent'),'explicit discovery survives simplification');
+ f.hooks.session_start({},f.ctx);
+ f.hooks.before_agent_start({prompt:'Correct teh to the in README.md. One-line typo.'},f.ctx);
+ assert.ok(f.active().includes('subagent'),'an explicitly selected core schema survives a direct task after resume');
  f.events['adaptive-pipeline-selection']({sessionManager:f.ctx.sessionManager,tier:'complex',names:[],beforeStart:true});
  assert.ok(f.active().includes('todo'),'observed escalation restores proportionate tools');
  f.hooks.tool_call({toolName:'todo'},f.ctx);

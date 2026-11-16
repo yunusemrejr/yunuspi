@@ -303,6 +303,8 @@ export interface ReplacedSessionContext extends ExtensionCommandContext {
         triggerTurn?: boolean;
         /** Called once after session-history acceptance, never merely queued: disk-backed sessions are fsynced; in-memory sessions are accepted only in memory. Does not report model completion. */
         onAccepted?: () => void;
+        /** If false, discard the staged custom message before delivery. */
+        canDeliver?: () => boolean;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): Promise<void>;
     sendUserMessage(content: string | (TextContent | ImageContent)[], options?: {
@@ -892,7 +894,12 @@ export interface MessageEndEventResult {
     message?: AgentMessage;
 }
 export interface BeforeAgentStartEventResult {
-    message?: Pick<CustomMessage, "customType" | "content" | "display" | "details" | "excludeFromContext">;
+    message?: Pick<CustomMessage, "customType" | "content" | "display" | "details" | "excludeFromContext"> & {
+        /** If false, discard the staged message after preflight and before delivery. */
+        canDeliver?: () => boolean;
+        /** Called once after the message is committed to session history. */
+        onAccepted?: () => void;
+    };
     /** Replace the system prompt for this turn. If multiple extensions return this, they are chained. */
     systemPrompt?: string;
 }
@@ -1030,6 +1037,8 @@ export interface ExtensionAPI {
         triggerTurn?: boolean;
         /** Called once after session-history acceptance, never merely queued: disk-backed sessions are fsynced; in-memory sessions are accepted only in memory. Does not report model completion. */
         onAccepted?: () => void;
+        /** If false, discard the staged custom message before delivery. */
+        canDeliver?: () => boolean;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): Promise<void>;
     /**
@@ -1258,6 +1267,8 @@ export type SendMessageHandler = <T = unknown>(message: Pick<CustomMessage<T>, "
     triggerTurn?: boolean;
         /** Called once after session-history acceptance, never merely queued: disk-backed sessions are fsynced; in-memory sessions are accepted only in memory. Does not report model completion. */
         onAccepted?: () => void;
+    /** If false, discard the staged custom message before delivery. */
+    canDeliver?: () => boolean;
     deliverAs?: "steer" | "followUp" | "nextTurn";
 }) => Promise<void>;
 export type SendUserMessageHandler = (content: string | (TextContent | ImageContent)[], options?: {

@@ -169,16 +169,37 @@ test("bash-executor flushes fullOutputPath before returning", async () => {
 	const total = chunk.length * chunks;
 	const operations = {
 		async exec(_command, _cwd, { onData }) {
-			for (let i = 0; i < chunks; i++) onData(Buffer.from(chunk));
+			for (let i = 0; i < chunks; i++) await onData(Buffer.from(chunk));
 			return { exitCode: 0 };
 		},
 	};
 	const result = await executeBashWithOperations("big", work, operations);
 	assert.ok(result.fullOutputPath, "expected a spilled temp file");
-	const stat = fs.statSync(result.fullOutputPath);
-	assert.ok(
-		stat.size >= total,
-		`temp file must be fully flushed on return (size ${stat.size} < ${total})`,
-	);
-	fs.rmSync(result.fullOutputPath, { force: true });
+	try {
+		const stat = fs.statSync(result.fullOutputPath);
+		assert.equal(stat.size, total, "the full output is flushed on return");
+		assert.equal(stat.mode & 0o777, 0o600, "interactive output uses a private file");
+		assert.equal(result.truncated, true);
+	} finally {
+		fs.rmSync(result.fullOutputPath, { force: true });
+	}
+});
+
+test("bash-executor flushes an incomplete UTF-8 suffix into display and history", async () => {
+	const { executeBashWithOperations } = await importFrom("core/coding-agent/src/core/bash-executor.js");
+	const seen = [];
+	const result = await executeBashWithOperations("fixture", work, {
+		async exec(_command, _cwd, { onData }) {
+			await onData(Buffer.from([0x61, 0xf0, 0x9f, 0x99]));
+			return { exitCode: 0 };
+		},
+	}, { onChunk: text => seen.push(text) });
+	assert.equal(result.output, "a\uFFFD");
+	assert.equal(seen.join(""), result.output);
+	assert.equal(result.exitCode, 0);
+});
+
+test("shell display sanitization removes lone surrogates and preserves valid Unicode", async () => {
+	const { sanitizeBinaryOutput } = await importFrom("core/coding-agent/src/utils/shell.js");
+	assert.equal(sanitizeBinaryOutput("🙂\uD800👩‍💻\uDC00字\u0000\u001f\uFFF9\t\r\n"), "🙂👩‍💻字\t\r\n");
 });

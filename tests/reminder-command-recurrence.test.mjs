@@ -23,12 +23,12 @@ let now = 1_900_000_000_000;
 Date.now = () => now;
 
 const { default: reminders } = await import(extension("reminders.ts"));
-const { readRemindersState, MANUAL_INTERVAL_MS } = await import(
+const { readRemindersState, writeRemindersState, MANUAL_INTERVAL_MS } = await import(
 	extension("lib/reminders-state.ts")
 );
 const T = MANUAL_INTERVAL_MS;
 
-function fixture(sid, { reject = false, rejectNotify = false, cwd = home } = {}) {
+function fixture(sid, { reject = false, rejectNotify = false, accept = true, entries = [], cwd = home } = {}) {
 	const hooks = new Map();
 	const commands = new Map();
 	const sent = [];
@@ -36,7 +36,7 @@ function fixture(sid, { reject = false, rejectNotify = false, cwd = home } = {})
 	let shouldReject = reject;
 	const ctx = {
 		cwd,
-		sessionManager: { getSessionId: () => sid, getBranch: () => [] },
+		sessionManager: { getSessionId: () => sid, getBranch: () => [], getEntries: () => entries },
 		ui: {
 			notify: (message, level) => {
 				if (rejectNotify) throw new Error("UI closed");
@@ -50,7 +50,9 @@ function fixture(sid, { reject = false, rejectNotify = false, cwd = home } = {})
 		getActiveTools: () => [],
 		sendMessage: (message, options) => {
 			if (shouldReject) throw new Error("queue unavailable");
+			if (options.canDeliver?.() === false) return;
 			sent.push({ message, options });
+			if (accept) options.onAccepted?.();
 		},
 	};
 	reminders(pi);
@@ -147,6 +149,10 @@ try {
 		/FINAL-VERIFICATION-CLAUSE/,
 	);
 	state = readRemindersState("command-recurrence");
+	assert.equal(state.manual[0].delivered, 3, "preflight only stages a reminder");
+	resumedStart.message.onAccepted();
+	resumedStart.message.onAccepted();
+	state = readRemindersState("command-recurrence");
 	assert.equal(state.manual[0].delivered, 4);
 
 	await resumed.command("clear 1");
@@ -195,7 +201,34 @@ try {
 		"retry uses the normal prompt injection path",
 	);
 	assert.match(retry?.message?.content ?? "", /transient queue failure/);
+	retry.message.onAccepted();
 	assert.equal(readRemindersState("command-rejected").manual[0].delivered, 1);
+
+	const pending = fixture("command-staged", { accept: false });
+	await pending.command("Recover a durable receipt after an interrupted sidecar save");
+	const staged = pending.sent[0];
+	state = readRemindersState("command-staged");
+	assert.equal(state.manual[0].delivered, 0);
+	assert.equal(state.manual[0].nextFireAt, now);
+	const receipt = { type: "custom_message", customType: "reminders", details: staged.message.details,
+		timestamp: new Date(now).toISOString() };
+	assert.equal(writeRemindersState("forked-reminder-fixture", state), true);
+	const fork = fixture("forked-reminder-fixture", { entries: [receipt] });
+	await fork.emit("session_start", { reason: "fork" });
+	assert.equal(readRemindersState("forked-reminder-fixture").manual[0].delivered, 0, "fork cannot recover a parent's receipt");
+	const recovered = fixture("command-staged", { entries: [receipt, receipt] });
+	await recovered.emit("session_start", { reason: "resume" });
+	state = readRemindersState("command-staged");
+	assert.equal(state.manual[0].delivered, 1);
+	assert.equal(state.manual[0].nextFireAt, now + T);
+
+	const clearedStage = fixture("command-cleared-staged", { accept: false });
+	await clearedStage.command("A pending reminder that will be cleared");
+	const clearedDelivery = clearedStage.sent[0];
+	await clearedStage.command("clear 1");
+	assert.equal(clearedDelivery.options.canDeliver(), false);
+	clearedDelivery.options.onAccepted();
+	assert.equal(readRemindersState("command-cleared-staged").manual[0].delivered, 0);
 
 	// A post-queue UI failure must not be mistaken for queue rejection or
 	// re-arm a reminder that has already been accepted.
@@ -221,7 +254,9 @@ try {
 	const readResult = { toolName: "read", toolCallId: "inspect", input: { path: "file" }, content: [{ type: "text", text: "fixture" }], isError: false };
 	await drift.emit("tool_result", readResult);
 	const prompt = { prompt: "Continue" };
-	assert.match((await drift.emit("before_agent_start", prompt))?.message?.content ?? "", /HEAD moved/);
+	const warning = await drift.emit("before_agent_start", prompt);
+	assert.match(warning?.message?.content ?? "", /HEAD moved/);
+	warning.message.onAccepted();
 	await drift.emit("tool_result", readResult);
 	assert.doesNotMatch((await drift.emit("before_agent_start", prompt))?.message?.content ?? "", /HEAD moved/, "an unchanged HEAD does not queue the same warning again");
 	commit();

@@ -130,6 +130,8 @@ export type AgentPayloadHook = (payload: unknown, model: Model<Api>, signal?: Ab
 export interface AgentLoopConfig extends SimpleStreamOptions {
     model: Model<any>;
     onPayload?: AgentPayloadHook;
+    /** Revalidate conditional messages immediately before emitting them. */
+    canDeliverMessage?: (message: AgentMessage, signal?: AbortSignal) => boolean;
     /**
      * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
      *
