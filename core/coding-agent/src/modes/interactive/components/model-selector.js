@@ -253,16 +253,21 @@ customModelItem(query) {
                 const defaultText = this.isDefaultModel(item.model) ? " default" : "";
                 return `${getModelSelectorSearchText({ id: item.id, provider: item.provider, name: item.model.name })}${defaultText}`;
             });
+            // A query that begins a route ("deepseek", "deeps") lists that provider's own models
+            // first, in the order the provider publishes them; the other matches follow.
+            const typed = query.trim().toLowerCase();
+            const own = this.activeModels.filter((item) => `${item.provider}/${item.id}`.toLowerCase().startsWith(typed));
+            const ranked = [...own, ...filtered.filter((item) => !own.includes(item))];
             if (this.isDefaultSearch(query)) {
                 const defaultItems = this.activeModels.filter((item) => this.isDefaultModel(item.model));
                 const defaultKeys = new Set(defaultItems.map((item) => `${item.provider}\0${item.id}`));
                 this.filteredModels = [
                     ...defaultItems,
-                    ...filtered.filter((item) => !defaultKeys.has(`${item.provider}\0${item.id}`)),
+                    ...ranked.filter((item) => !defaultKeys.has(`${item.provider}\0${item.id}`)),
                 ];
             }
             else {
-                this.filteredModels = filtered;
+                this.filteredModels = ranked;
             }
         }
         else {

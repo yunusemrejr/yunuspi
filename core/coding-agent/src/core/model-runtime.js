@@ -9,6 +9,7 @@ import { FileModelsStore, InMemoryCodingAgentModelsStore } from "./models-store.
 import { composeModelProvider, configuredRequestAuthStatus, resolveCompatibilityRequestConfig, resolveConfiguredModelHeaders, validateExtensionProvider, } from "./provider-composer.js";
 import { withRemoteCatalog } from "./remote-catalog-provider.js";
 import { withOpenAICodexCatalog } from "./codex-catalog-provider.js";
+import { vendorModelAlias } from "./model-aliases.js";
 import { RuntimeCredentials } from "./runtime-credentials.js";
 /** Credentials changed successfully, but the local model/auth snapshot could not be synchronized. */
 export class CredentialSynchronizationError extends Error {
@@ -45,6 +46,10 @@ export class ModelRuntime {
     builtins = new Map();
     nativeExtensionProviders = new Map();
     extensionProviders = new Map();
+    // The last list each extension's refresh published, kept across recompositions.
+    publishedExtensionModels = new Map();
+    // Cached-list restores started by registrations that have not finished yet.
+    registrationRestores = new Set();
     compositionErrors = new Map();
     modelsPath;
     modelNetworkEnabled;
@@ -149,7 +154,7 @@ export class ModelRuntime {
             return;
         }
         try {
-            this.models.setProvider(composeModelProvider(providerId, base, this.config, extension));
+            this.models.setProvider(composeModelProvider(providerId, base, this.config, extension, this.publishedExtensionModels));
             this.compositionErrors.delete(providerId);
         }
         catch (error) {
@@ -290,7 +295,8 @@ export class ModelRuntime {
         return this.models.getModels(providerId);
     }
     getModel(providerId, modelId) {
-        return this.models.getModel(providerId, modelId);
+        const alias = vendorModelAlias(providerId, modelId);
+        return this.models.getModel(providerId, modelId) ?? (alias ? this.models.getModel(providerId, alias) : undefined);
     }
     async checkAuth(providerId, options) {
         return this.models.checkAuth(providerId, options);
@@ -584,6 +590,7 @@ export class ModelRuntime {
         if (!provider.id.trim())
             throw new Error("Provider id must not be empty.");
         this.extensionProviders.delete(provider.id);
+        this.publishedExtensionModels.delete(provider.id);
         this.nativeExtensionProviders.set(provider.id, provider);
         this.recomposeProvider(provider.id);
         this.updateModelSnapshot();
@@ -601,19 +608,26 @@ export class ModelRuntime {
         pending.add(providerId);
         if (scheduled)
             return;
-        queueMicrotask(() => {
+        const restore = new Promise((resolve) => queueMicrotask(() => {
             const providers = [...pending];
             pending.clear();
             void this.refresh({ allowNetwork: false, providers }).catch(() => {
                 // A failed refresh leaves the composed provider usable; the next refresh reports it.
-            });
-        });
+            }).finally(resolve);
+        }));
+        this.registrationRestores.add(restore);
+        void restore.then(() => this.registrationRestores.delete(restore));
+    }
+    /** Settles when every provider registered so far has restored its cached list (no network). */
+    async whenRegistrationsRestored() {
+        await Promise.all(this.registrationRestores);
     }
     registerProvider(providerId, config) {
         // Validate the incoming registration on its own, like the legacy registry:
         // a broken re-registration must throw without touching the stored config.
         validateExtensionProvider(providerId, this.builtins.get(providerId), this.config.getProvider(providerId), config);
         this.nativeExtensionProviders.delete(providerId);
+        this.publishedExtensionModels.delete(providerId);
         // Re-registration merges defined values over the previous registration and
         // preserves undefined ones, matching the legacy ModelRegistry contract.
         const previous = this.extensionProviders.get(providerId);
@@ -647,6 +661,7 @@ export class ModelRuntime {
     }
     unregisterProvider(providerId) {
         this.extensionProviders.delete(providerId);
+        this.publishedExtensionModels.delete(providerId);
         this.nativeExtensionProviders.delete(providerId);
         this.recomposeProvider(providerId);
         this.updateModelSnapshot();

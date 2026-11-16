@@ -47,6 +47,53 @@ export function matchesQuery(text, query) {
   return String(query).toLocaleLowerCase().split(/\s+/).filter(Boolean).every(word => haystack.includes(word));
 }
 
+/** How many rows a picker draws before it says how many are left. */
+export const PICKER_LIMIT = 150;
+
+/**
+ * One picker row. `value` is what choosing it writes (provider/id, or a role's
+ * own word), `label` the provider · id line shown beneath, `name` the display
+ * name; `text` is what the search reads.
+ */
+export function modelRow(value, { name = '', label = '', provider, id } = {}) {
+  const written = String(value), slash = written.indexOf('/');
+  const ownProvider = typeof provider === 'string' && provider ? provider : slash > 0 ? written.slice(0, slash) : '';
+  const ownId = typeof id === 'string' && id ? id : slash > 0 ? written.slice(slash + 1) : written;
+  const shown = String(name || ownId), line = String(label || `${ownProvider} · ${ownId}`);
+  return { value: written, provider: ownProvider, id: ownId, name: shown, label: line, text: `${shown} ${ownProvider}/${ownId} ${ownProvider} ${ownId}` };
+}
+
+/**
+ * What a model picker shows for a query, best first: the provider the query
+ * names, then ids and names that begin with a typed word, then every other
+ * match. An empty query puts the current choice on top and groups the rest by
+ * provider in the order the list arrived. Nothing is dropped here.
+ */
+export function rankModels(rows, query, current = '') {
+  const words = String(query).toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  const matched = rows.filter(row => matchesQuery(row.text, query));
+  if (!words.length) {
+    const groups = new Map();
+    for (const row of matched) {
+      if (row.value === current) continue;
+      if (!groups.has(row.provider)) groups.set(row.provider, []);
+      groups.get(row.provider).push(row);
+    }
+    return [...matched.filter(row => row.value === current), ...[...groups.values()].flat()];
+  }
+  const term = words.join(' ');
+  const rank = row => {
+    const provider = String(row.provider).toLocaleLowerCase();
+    if (provider && (provider === term || provider.startsWith(term))) return 0;
+    const fields = [row.id, row.name].map(field => String(field ?? '').toLocaleLowerCase());
+    return fields.some(field => words.some(word => word && field.startsWith(word))) ? 1 : 2;
+  };
+  return matched
+    .map((row, index) => ({ row, index, rank: rank(row) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+    .map(entry => entry.row);
+}
+
 /** `inherit` and `off` only for the role that means them; anything else is provider/model-id. */
 export function validTeamValue(role, value) {
   if (!roleFor(role) || typeof value !== 'string' || !value || value.length > 300) return false;

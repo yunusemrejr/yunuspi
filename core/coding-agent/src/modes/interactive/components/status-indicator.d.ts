@@ -13,7 +13,7 @@ export declare class WorkingStatusIndicator extends StatusIndicator {
 }
 export declare class RetryStatusIndicator extends StatusIndicator {
     private countdown;
-    constructor(ui: TUI, attempt: number, maxAttempts: number, delayMs: number);
+    constructor(ui: TUI, attempt: number, maxAttempts: number, delayMs: number, rateLimitedProvider?: string);
     dispose(): void;
 }
 export type CompactionStatusReason = "manual" | "threshold" | "overflow";

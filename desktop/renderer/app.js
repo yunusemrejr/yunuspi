@@ -1,7 +1,7 @@
 import { createConversation, prependConversation, applyAgentEvent, messageText, imageParts, toolIcon, toolLine, toolTrouble, duration, workSummary, workBlocks, filesChanged } from './conversation.mjs';
 import { element, icon, markdown } from './markdown.mjs';
 import { readCommand, goalFromStatus } from './command-lens.mjs';
-import { TEAM_ROLES, matchesQuery, readTeam, teamOptions } from './team-settings.mjs';
+import { PICKER_LIMIT, TEAM_ROLES, modelRow, rankModels, readTeam, teamOptions } from './team-settings.mjs';
 
 const api = window.yunuspi;
 const $ = id => document.getElementById(id);
@@ -669,13 +669,17 @@ async function showModels() {
   await loadingModal('Choose a model', id, () => api.models(id), (content, { models }) => {
     const search = element('input', 'dialog-search'); search.type = 'search'; search.placeholder = 'Search models or providers'; search.setAttribute('aria-label', 'Search models');
     const list = element('div', 'dialog-list');
+    const rows = models.map(model => modelRow(`${model.provider}/${model.id}`, { name: model.name, provider: model.provider, id: model.id }));
+    const currentValue = () => { const model = conversationOf(id).model; return model ? `${model.provider}/${model.id}` : ''; };
     const draw = () => {
-      list.replaceChildren(); const query = search.value;
-      for (const model of models.filter(m => matchesQuery(`${m.name || ''} ${m.provider}/${m.id} ${m.provider} ${m.id}`, query)).slice(0, 150)) {
-        const button = element('button'), name = element('span', '', model.name || model.id); name.append(element('small', '', `${model.provider} · ${model.id}`)); button.append(name);
-        if (conversationOf(id).model?.id === model.id && conversationOf(id).model?.provider === model.provider) button.append(icon('check'));
-        button.onclick = () => tryAction(async () => { button.disabled = true; button.setAttribute('aria-busy', 'true'); try { await api.setModel(id, model.provider, model.id); closeModal(false); } finally { button.disabled = false; button.removeAttribute('aria-busy'); } }); list.append(button);
+      list.replaceChildren();
+      const ranked = rankModels(rows, search.value, currentValue());
+      for (const row of ranked.slice(0, PICKER_LIMIT)) {
+        const button = element('button'), name = element('span', '', row.name); name.append(element('small', '', row.label)); button.append(name);
+        if (row.value === currentValue()) button.append(icon('check'));
+        button.onclick = () => tryAction(async () => { button.disabled = true; button.setAttribute('aria-busy', 'true'); try { await api.setModel(id, row.provider, row.id); closeModal(false); } finally { button.disabled = false; button.removeAttribute('aria-busy'); } }); list.append(button);
       }
+      if (ranked.length > PICKER_LIMIT) list.append(element('p', 'empty-hint', `${ranked.length - PICKER_LIMIT} more: type to narrow`));
       if (!list.childNodes.length) list.append(element('p', 'empty-hint', 'No configured models match. Add a provider in Settings.'));
     };
     search.oninput = draw; content.append(search, list); draw(); search.focus();
@@ -823,17 +827,19 @@ function teamSection() {
     const panel = element('div', 'team-panel'), search = element('input', 'dialog-search'), list = element('div', 'dialog-list');
     panel.hidden = true; search.type = 'search'; search.placeholder = 'Search: a model, openrouter, codex…'; search.setAttribute('aria-label', `Search models for ${role.title}`);
     panel.append(search, list);
-    const picker = { role, toggle, current, panel, search, list, options: [], saved: role.first.value };
+    const picker = { role, toggle, current, panel, search, list, options: [], rows: [], saved: role.first.value };
     const draw = () => {
       list.replaceChildren();
-      for (const option of picker.options.filter(o => matchesQuery(`${o.label} ${o.value} ${o.name || ''}`, search.value)).slice(0, 150)) {
-        const button = element('button'), text = element('span', '', option.name || option.label);
-        if (option.name) text.append(element('small', '', option.label));
+      const ranked = rankModels(picker.rows, search.value, picker.saved);
+      for (const { option, name, label } of ranked.slice(0, PICKER_LIMIT)) {
+        const button = element('button'), text = element('span', '', name);
+        if (name !== label) text.append(element('small', '', label));
         button.type = 'button'; button.append(text);
         if (option.value === picker.saved) button.append(icon('check'));
         button.onclick = () => choose(picker, option);
         list.append(button);
       }
+      if (ranked.length > PICKER_LIMIT) list.append(element('p', 'empty-hint', `${ranked.length - PICKER_LIMIT} more: type to narrow`));
       if (!list.childNodes.length) list.append(element('p', 'empty-hint', 'No model matches.'));
     };
     picker.draw = draw;
@@ -865,6 +871,7 @@ function teamSection() {
     for (const role of TEAM_ROLES) {
       const picker = pickers.get(role.key);
       picker.saved = team[role.key]; picker.options = teamOptions(role, models, picker.saved);
+      picker.rows = picker.options.map(option => ({ ...modelRow(option.value, { name: option.name || option.label, label: option.label }), option }));
       show(picker); picker.toggle.disabled = false;
     }
   }).catch(error => { if ($('dialog').open) toast(safeError(error), 'error'); });

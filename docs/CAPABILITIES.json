@@ -2797,12 +2797,12 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 924
+        "line": 927
       },
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1855
+        "line": 1857
       },
       {
         "name": "claude-cache",
@@ -3057,7 +3057,7 @@
       {
         "name": "team",
         "source": "agent/extensions/team-command.ts",
-        "line": 453
+        "line": 459
       },
       {
         "name": "used",
@@ -3367,7 +3367,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 635,
+        "line": 637,
         "kind": "literal"
       },
       {
@@ -3707,7 +3707,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 635,
+        "line": 637,
         "kind": "literal"
       },
       {

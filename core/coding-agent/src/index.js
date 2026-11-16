@@ -8,6 +8,7 @@ export { InterventionControl, DEFAULT_BUDGETS, isActionable, isNoOpIntent, noopR
 export { createInterventionSession } from "./core/intervention-session.js";
 export { GuardianSupervisor, guardianOwnerForSession, guardianRequestMessages, relayIntelligenceUsageFromChild, tagGuardianRequestMessage, GUARDIAN_REQUEST_META } from "./core/guardian/guardian-supervisor.js";
 export { readStoredCredential } from "./core/auth-storage.js";
+export { vendorModelAlias } from "./core/model-aliases.js";
 // Compaction
 export { calculateContextTokens, collectEntriesForBranchSummary, compact, DEFAULT_COMPACTION_SETTINGS, estimateTokens, findCutPoint, findTurnStartIndex, generateBranchSummary, generateSummary, generateSummaryWithUsage, getLastAssistantUsage, prepareBranchEntries, serializeConversation, shouldCompact, } from "./core/compaction/index.js";
 export { createEventBus } from "./core/event-bus.js";

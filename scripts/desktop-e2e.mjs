@@ -348,6 +348,17 @@ try {
   // must match, and Enter on the search picks the first match and saves it.
   await page.keyboard.press('Enter');
   assert.equal(await page.evaluate(() => document.activeElement.closest('.team-panel') !== null), true, 'opening a picker puts the cursor in its search box');
+  // With an empty query the picker lists every model, or names how many are left; it never stops
+  // at a silent cut. The Team list is a session runtime's own catalog, so each row carries a name.
+  const teamList = page.locator('#team-legwork + .team-hint + .team-panel .dialog-list');
+  const teamShown = await teamList.locator(':scope > button').count();
+  const teamHint = await teamList.locator('p.empty-hint').allInnerTexts();
+  assert.ok(teamShown >= 1, 'an empty query lists models');
+  for (const hint of teamHint) assert.match(hint, /^\d+ more: type to narrow$|^No model matches\.$/, `an unexpected end line: ${hint}`);
+  await page.keyboard.type('fixture');
+  assert.match(await teamList.innerText(), /Local fixture/, 'the Team picker shows the model name');
+  assert.match(await teamList.innerText(), /desktop-example · desktop-fixture/, 'and the provider · id beneath it');
+  await page.locator('#team-legwork + .team-hint + .team-panel .dialog-search').fill('');
   await page.keyboard.type('fixture desktop');
   assert.equal(await page.locator('#team-legwork + .team-hint + .team-panel .dialog-list button').count(), 1, 'a search of two words keeps the one model that has both');
   await page.keyboard.press('Enter');

@@ -73,6 +73,8 @@ export type AgentSessionEvent = Exclude<AgentEvent, {
     attempt: number;
     maxAttempts: number;
     delayMs: number;
+    rateLimited?: true;
+    provider?: string;
     errorMessage: string;
 } | {
     type: "auto_retry_end";

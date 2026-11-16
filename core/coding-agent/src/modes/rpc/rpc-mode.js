@@ -12,6 +12,7 @@
  */
 import * as crypto from "node:crypto";
 import { flushRawStdout, takeOverStdout, waitForRawStdoutBackpressure, writeRawStdout, } from "../../core/output-guard.js";
+import { raceWithAbortSignal } from "../../utils/abort.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { theme } from "../interactive/theme/theme.js";
 import { toJsonEvent } from "../json-event.js";
@@ -392,6 +393,9 @@ export async function runRpcMode(runtimeHost) {
                 return success(id, "cycle_model", result);
             }
             case "get_available_models": {
+                // A just-started process must answer from the cached catalogs its providers restore at
+                // registration, not from the static lists; a provider that never restores cannot hold this.
+                await raceWithAbortSignal(session.modelRuntime.whenRegistrationsRestored(), AbortSignal.timeout(3_000)).catch(() => { });
                 const models = session.modelRuntime.getAvailableSnapshot();
                 return success(id, "get_available_models", { models });
             }

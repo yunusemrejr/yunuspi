@@ -66,6 +66,13 @@ function remoteModels(entry, localGeneratedAt) {
     }
     return entry.models;
 }
+// A check that cannot replace a stored body keeps its provenance and moves only checkedAt.
+// Older builds stored an unknown Last-Modified as 0; carrying that on as a date kept
+// the body unusable for good, so it is dropped here.
+function recheckedEntry(stored, checkedAt) {
+    const { lastModified, ...kept } = stored ?? { models: [] };
+    return { ...kept, ...(Number.isSafeInteger(lastModified) && lastModified > 0 ? { lastModified } : {}), checkedAt };
+}
 /** Add a persisted pi.dev catalog overlay to a static built-in provider. */
 export function withRemoteCatalog(provider, catalogBaseUrl = DEFAULT_CATALOG_BASE_URL, localGeneratedAt) {
     let dynamicModels = [];
@@ -84,12 +91,12 @@ export function withRemoteCatalog(provider, catalogBaseUrl = DEFAULT_CATALOG_BAS
             }
             if (!context.allowNetwork || context.signal.aborted)
                 return;
+            // A check inside the interval holds whatever it found: an old body, a 404,
+            // an empty catalog. Re-asking 44 catalogs on every refresh delayed the live lists.
             if (!context.force &&
                 stored?.checkedAt !== undefined &&
-                (stored.lastModified !== undefined || stored.validatedAt !== undefined) &&
                 Date.now() >= stored.checkedAt &&
-                Date.now() - stored.checkedAt < REMOTE_CATALOG_REFRESH_INTERVAL_MS &&
-                restored.length > 0) {
+                Date.now() - stored.checkedAt < REMOTE_CATALOG_REFRESH_INTERVAL_MS) {
                 return;
             }
             // Only revalidate when a cached body backs the validator, so a 304 can never
@@ -110,7 +117,7 @@ export function withRemoteCatalog(provider, catalogBaseUrl = DEFAULT_CATALOG_BAS
             // Unchanged: dynamicModels already holds the stored overlay, so only the
             // freshness window moves.
             if (response.status === 304 && stored) {
-                await context.publish({ persist: { ...stored, checkedAt } });
+                await context.publish({ persist: recheckedEntry(stored, checkedAt) });
                 return;
             }
             if (response.status === 404 || response.status === 501) {
@@ -118,18 +125,13 @@ export function withRemoteCatalog(provider, catalogBaseUrl = DEFAULT_CATALOG_BAS
                 // catalog. Preserve the body's freshness and validator so a later
                 // offline session still restores it; checkedAt records only the
                 // failed availability check, never new authority for an old body.
-                await context.publish({
-                    persist: {
-                        ...(stored ?? { models: [] }),
-                        checkedAt,
-                    },
-                });
+                await context.publish({ persist: recheckedEntry(stored, checkedAt) });
                 return;
             }
             if (!response.ok) {
                 // Transient failure: the cached body and its validator stay valid, so keep the
                 // etag and let the next refresh revalidate instead of downloading the catalog.
-                await context.publish({ persist: { ...(stored ?? { models: [] }), checkedAt } });
+                await context.publish({ persist: recheckedEntry(stored, checkedAt) });
                 throw new Error(`Model catalog request failed for ${provider.id}: ${response.status}`);
             }
             const refreshed = parseCatalog(provider.id, await response.json());

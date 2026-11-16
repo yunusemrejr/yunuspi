@@ -283,7 +283,7 @@ export function applyAgentEvent(state, event) {
     case 'thinking_level_changed': if (typeof event.level === 'string') state.thinkingLevel = event.level; break;
     case 'auto_compaction_start': state.compacting = true; break;
     case 'auto_compaction_end': state.compacting = false; break;
-    case 'auto_retry_start': state.retrying = event.attempt ?? 1; break;
+    case 'auto_retry_start': state.retrying = event.rateLimited && event.provider ? `${event.provider} rate limit, attempt ${event.attempt ?? 1}` : event.attempt ?? 1; break;
     case 'auto_retry_end': state.retrying = null; break;
   }
   return state;

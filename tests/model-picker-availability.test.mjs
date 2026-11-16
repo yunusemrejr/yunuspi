@@ -28,3 +28,17 @@ test('exact provider identity is preserved and unmatched session-only requests s
   assert.equal(picker.filteredModels[0].model.id, 'future-model');
   assert.equal(picker.filteredModels[0].model.piUnlistedModel, true);
 });
+
+test('G: typing a provider id lists that provider first, in its published order, and hides nothing', () => {
+  const entry = (provider, id, name) => { const m = { provider, id, name, api: 'openai-completions', baseUrl: 'https://example.invalid/v1', contextWindow: 32000, maxTokens: 8000 }; return { provider, id, model: m }; };
+  const rows = [entry('deepinfra', 'deepseek-ai/DeepSeek-V4-Flash', 'DeepSeek V4 Flash'), entry('deepseek', 'deepseek-flash', 'DeepSeek V4.1 Flash'),
+    entry('deepseek', 'deepseek-v4-pro', 'DeepSeek V4 Pro'), entry('openrouter', 'deepseek/deepseek-v4-flash', 'DeepSeek V4 Flash')];
+  const picker = Object.create(ModelSelectorComponent.prototype);
+  Object.assign(picker, { currentModel: model, allModels: rows, activeModels: rows, selectedIndex: 0, updateList() {} });
+  for (const query of ['deepseek', 'deeps']) {
+    picker.filterModels(query);
+    const shown = picker.filteredModels.filter((item) => !item.model.piUnlistedModel).map((item) => `${item.provider}/${item.id}`);
+    assert.deepEqual(shown.slice(0, 2), ['deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro'], query);
+    assert.equal(shown.length, 4, 'nothing is hidden');
+  }
+});

@@ -602,7 +602,9 @@ export default function (pi: ExtensionAPI) {
 		// Models pass bg_run's arguments to bash; the bash schema keeps the
 		// unknown keys, so refuse before anything runs instead of letting the
 		// call run unbounded in the foreground and die at the default timeout.
-		if (event.input?.run_in_background === true || event.input?.background === true)
+		// Some models write the flag as the text "true".
+		const asked = (flag: unknown) => flag === true || flag === "true";
+		if (asked(event.input?.run_in_background) || asked(event.input?.background))
 			return {
 				block: true,
 				reason:

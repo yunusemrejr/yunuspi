@@ -1,3 +1,25 @@
+## 0.56.1 — Model lists that stay complete, and shorter waits on Ling
+
+This release answers the complaints of 16 Nov 2026: model pickers that showed a different list from one opening to the next, DeepSeek and Ling rows for models their vendors have withdrawn, a "Rate Limit Exceeded" error that looked like OpenAI's, and small tasks that took far too long on Ling.
+
+**A model list no longer shrinks while it refreshes.** Every refresh rebuilt each provider from its built-in list and waited for the live list to be published again; a picker closed early, the 15-second limit or a newer refresh left the built-in list in force. The last list published for a provider is now kept until that provider is registered again, and a failed check of the pi.dev catalog no longer skips the provider's own live fetch. A session asked for its models right after start (the desktop does this) answers once the saved lists are loaded, within 3 seconds at most.
+
+**DeepSeek lists what DeepSeek lists.** The vendor's API names `deepseek-flash` (V4.1 Flash) and `deepseek-v4-pro`. `deepseek-v4-flash` and its vision variant are aliases that answer as `deepseek-flash`; they stayed in the pickers because an id once seen was never removed. The vendor's answer now decides, the built-in fallback lists the same two, and a saved `deepseek/deepseek-v4-flash` (a team role, the default model, `--model`, an old session) resolves to `deepseek/deepseek-flash`.
+
+**Ling's built-in fallback is the Ling 3 family.** It still held the three 2.6 models withdrawn on 14 Nov 2026, which is what appeared whenever the live list was not in force.
+
+**Typing a provider's name lists that provider first.** "deepseek" opened with rows of other providers that contain the word. In `/model`, `/team` and both desktop pickers the provider's own models come first, then every other match.
+
+**Desktop Settings > Team lists what a session lists.** It built a catalog of its own, without the live lists and without names. It now asks a session (a temporary one when none is open) and shows each model's name with `provider · id`. Neither desktop picker cuts a long list at 150 unsorted rows any more: the list is ranked first, and its last line says how many more there are.
+
+**A rate limit on Ling waits 8 seconds, not 25, and says whose limit it is.** Ling's error reads `"type":"openai_rate_limit"` whatever else the session uses, and the status line said only "Retrying (2/3)". The first retry now comes after 8 seconds, then 16, 24 and 25; the line reads "ant-ling rate limit, retry 2 in 16s", the desktop says the same, and the pause after two minutes names the provider.
+
+**An easy request on a model with on/off thinking runs without thinking.** Ling's thinking is a switch: every level except off is the same full thinking, so a request rated easy still thought at length (74% of the output of the 15 Nov session was thinking, at about 16 tokens a second). Such a request now runs with thinking off, and the next harder one turns it back on. `PIJEV_EFFORT=off` keeps the configured level throughout.
+
+**`run_in_background: "true"` is refused like `true`.** Written as text the flag passed the check, and the command ran in the foreground until the 120-second limit.
+
+**The pi.dev catalog check runs once in four hours again.** A stored date of 0 left by an old build kept the check from ever being skipped, so every refresh asked for about 44 catalogs before the live lists.
+
 ## 0.56.0 — Free OpenRouter models take the legwork
 
 Legwork (finding, reading, checks, mechanical edits) is work a free model can often do, and an OpenRouter account has free requests every day that go unused. This release lets the legwork children use them, with a measured choice of which free model and a fall back to the paid model when a free one cannot answer. It is on by default and needs an OpenRouter key; `team.free: "off"` removes all of it.

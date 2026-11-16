@@ -254,3 +254,9 @@ test('the /team model search keeps every option holding each word, and falls bac
   assert.deepEqual(team.filterModelOptions(options, 'openrouter coder', names), ['openrouter/qwen/qwen3-coder']);
   assert.ok(team.filterModelOptions(options, 'deepsek').includes('deepseek/deepseek-v4-flash'));
 });
+
+test('G: a query that begins a route lists that provider first, every other match stays below', () => {
+  const options = ['Same as the session', 'deepinfra/deepseek-ai/DeepSeek-V4-Flash', 'deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro', 'openrouter/deepseek/deepseek-v4-flash'];
+  assert.deepEqual(team.filterModelOptions(options, 'deepseek'), ['deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro', 'deepinfra/deepseek-ai/DeepSeek-V4-Flash', 'openrouter/deepseek/deepseek-v4-flash']);
+  assert.deepEqual(team.filterModelOptions(options, 'deeps').slice(0, 2), ['deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro']);
+});

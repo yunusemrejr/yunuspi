@@ -92,7 +92,7 @@ test('the stored auth.json key and ANT_LING_API_KEY both reach the catalog, and 
  const open=async credentials=>{
   const runtime=await ModelRuntime.create({credentials,modelsPath:path.join(root,'models.json'),modelsStore:new InMemoryCodingAgentModelsStore(),allowModelNetwork:false});
   const ids=()=>runtime.getModels('ant-ling').map(m=>m.id);
-  assert.ok(ids().includes('Ling-2.6-flash'),'the core still ships the withdrawn models');
+  assert.ok(ids().includes('Ling-3.0-tiny')&&!ids().some(id=>/2\.6/.test(id)),'the core ships the current Ling models, not the withdrawn ones');
   runtime.registerProvider('ant-ling',providers['ant-ling']);
   await runtime.refresh({allowNetwork:true,force:true,providers:['ant-ling']});
   return {runtime,ids:ids()};

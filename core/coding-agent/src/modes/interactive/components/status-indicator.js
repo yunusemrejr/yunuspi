@@ -26,8 +26,10 @@ export class WorkingStatusIndicator extends StatusIndicator {
 }
 export class RetryStatusIndicator extends StatusIndicator {
     countdown;
-    constructor(ui, attempt, maxAttempts, delayMs) {
-        const retryMessage = (seconds) => `Retrying (${attempt}/${maxAttempts}) in ${seconds}s... (${keyText("app.interrupt")} to cancel)`;
+    constructor(ui, attempt, maxAttempts, delayMs, rateLimitedProvider) {
+        // A rate limit is retried until it clears (no attempt cap), and the provider's raw error names
+        // no provider ("openai_rate_limit" from any OpenAI-compatible API): say whose limit it is.
+        const retryMessage = (seconds) => `${rateLimitedProvider ? `${rateLimitedProvider} rate limit, retry ${attempt}` : `Retrying (${attempt}/${maxAttempts})`} in ${seconds}s... (${keyText("app.interrupt")} to cancel)`;
         super("retry", ui, (spinner) => theme.fg("warning", spinner), (text) => theme.fg("muted", text), retryMessage(Math.ceil(delayMs / 1000)));
         this.countdown = new CountdownTimer(delayMs, ui, (seconds) => {
             this.setMessage(retryMessage(seconds));

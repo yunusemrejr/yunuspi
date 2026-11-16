@@ -1469,7 +1469,9 @@ async function refreshIdOnlyCatalog(
 	})) as { data?: { id: string }[] };
 	const liveIds = modelRows<{ id: string }>(raw.data).map((m) => m.id);
 	const store = storeModels(providerId);
-	const ids = [...new Set([...liveIds, ...store.keys(), ...Object.keys(facts)])];
+	// What the vendor lists is the catalog; the store and the facts only fill in details. They
+	// carry a list of their own only while the vendor lists nothing.
+	const ids = [...new Set(liveIds.length ? liveIds : [...store.keys(), ...Object.keys(facts)])];
 	return {
 		models: ids.map((id) => {
 			const stored = store.get(id);

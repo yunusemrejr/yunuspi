@@ -6,6 +6,7 @@ import chalk from "chalk";
 import { minimatch } from "minimatch";
 import { isValidThinkingLevel } from "../cli/args.js";
 import { DEFAULT_THINKING_LEVEL } from "./defaults.js";
+import { vendorModelAlias } from "./model-aliases.js";
 /** Default model IDs for each known provider */
 export const defaultModelPerProvider = {
     "amazon-bedrock": "us.anthropic.claude-opus-4-6-v1",
@@ -383,7 +384,12 @@ export function resolveCliModel(options) {
         }
     }
     const candidates = provider ? availableModels.filter((m) => m.provider === provider) : availableModels;
-    const { model, thinkingLevel, warning } = parseModelPattern(pattern, candidates, {
+    // A retired vendor id that no listed model carries resolves to the id the vendor lists now.
+    const requestedId = pattern.split(":")[0];
+    const alias = provider && !candidates.some((m) => m.id.toLowerCase() === requestedId.toLowerCase())
+        ? vendorModelAlias(provider, requestedId.toLowerCase())
+        : undefined;
+    const { model, thinkingLevel, warning } = parseModelPattern(alias ? alias + pattern.slice(requestedId.length) : pattern, candidates, {
         allowInvalidThinkingLevelFallback: false,
     });
     if (model) {

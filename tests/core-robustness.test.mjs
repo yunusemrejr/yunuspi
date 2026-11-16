@@ -172,6 +172,40 @@ test("retry without extension hooks uses the built-in retry policy", async () =>
 	assert.equal(session._retryAbortController, undefined);
 });
 
+test("a rate limit on a request-rate provider waits 8 s first, grows to 25 s, and the notice names the provider", async () => {
+	const { AgentSession } = await importFrom("core/coding-agent/src/core/agent-session.js");
+	const limit = '429: {"code":429,"message":"Rate Limit Exceeded","type":"openai_rate_limit"}';
+	const attempt = async (provider, earlier, loopStart) => {
+		const message = { role: "assistant", content: [], provider, model: "m", errorMessage: limit };
+		let started;
+		const session = {
+			settingsManager: { getRetrySettings: () => ({ enabled: true, maxRetries: 3, baseDelayMs: 2000 }) },
+			sessionManager: { appendCustomEntry() {} },
+			agent: { state: { messages: [message] } },
+			_retryAttempt: earlier,
+			_piRateLimitLoopStart: loopStart,
+			_emit(event) {
+				if (event.type !== "auto_retry_start") return;
+				started = event;
+				session._retryAbortController.abort();
+			},
+		};
+		const retried = await AgentSession.prototype._prepareRetry.call(session, message);
+		return { started, retried, message };
+	};
+	const first = (await attempt("ant-ling", 0)).started;
+	assert.equal(first.delayMs, 8000);
+	assert.equal(first.rateLimited, true);
+	assert.equal(first.provider, "ant-ling");
+	assert.equal((await attempt("ant-ling", 1)).started.delayMs, 16000);
+	assert.equal((await attempt("ant-ling", 5)).started.delayMs, 25000);
+	assert.equal((await attempt("deepseek", 0)).started.delayMs, 25000, "a token-per-minute provider keeps the full wait");
+	const paused = await attempt("ant-ling", 4, Date.now() - 130000);
+	assert.equal(paused.retried, false);
+	assert.equal(paused.started, undefined);
+	assert.match(paused.message.errorMessage, /paused: ant-ling kept answering with this error for 2 minutes; send a message to retry$/);
+});
+
 test("abortable sleep removes listeners after completion and cancellation", async () => {
 	const { sleep } = await importFrom("core/coding-agent/src/utils/sleep.js");
 	const controller = new AbortController();

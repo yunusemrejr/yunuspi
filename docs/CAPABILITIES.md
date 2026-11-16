@@ -1126,7 +1126,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `narration_tts` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 77; factory)
 - `obs_read` — [`agent/extensions/pi-observations.ts`](../agent/extensions/pi-observations.ts) (line 650; literal)
 - `office_doc` — [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts) (line 170; literal)
-- `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 635; literal)
+- `process` — [`agent/extensions/managed-bash.ts`](../agent/extensions/managed-bash.ts) (line 637; literal)
 - `project_intel` — [`agent/extensions/lib/project-intelligence-impl.ts`](../agent/extensions/lib/project-intelligence-impl.ts) (line 691; literal)
 - `project_tests` — [`agent/extensions/lib/project-tests.ts`](../agent/extensions/lib/project-tests.ts) (line 807; literal)
 - `quality_review` — [`agent/extensions/lib/quality-review.ts`](../agent/extensions/lib/quality-review.ts) (line 811; literal)
@@ -1185,8 +1185,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 - /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 603)
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 637)
-- /budget — [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) (line 924)
-- /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1855)
+- /budget — [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) (line 927)
+- /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1857)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
 - /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1827)
 - /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1377)
@@ -1237,7 +1237,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1740)
 - /task-state — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 215)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 629)
-- /team — [`agent/extensions/team-command.ts`](../agent/extensions/team-command.ts) (line 453)
+- /team — [`agent/extensions/team-command.ts`](../agent/extensions/team-command.ts) (line 459)
 - /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1759)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3028)
 

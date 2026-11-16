@@ -322,12 +322,15 @@ export function validateExtensionProvider(providerId, base, modelsConfig, extens
     }
     applyExtension(providerId, applyModelsJson(providerId, base?.getModels() ?? [], modelsConfig, Boolean(base)), extension);
 }
-/** Compose built-in, models.json, and extension layers without reading credentials. */
-export function composeModelProvider(providerId, base, modelConfig, extension) {
+/**
+ * Compose built-in, models.json, and extension layers without reading credentials.
+ * `published` holds, per provider, the last list the extension's refresh published. The
+ * caller owns it, so a recomposition starts from that list instead of the static one.
+ */
+export function composeModelProvider(providerId, base, modelConfig, extension, published = new Map()) {
     const config = modelConfig.getProvider(providerId);
     let extensionOAuthCredential;
-    let refreshedExtensionModels;
-    const currentExtension = () => extension && refreshedExtensionModels ? { ...extension, models: refreshedExtensionModels } : extension;
+    const currentExtension = () => extension && published.has(providerId) ? { ...extension, models: published.get(providerId) } : extension;
     // models.json modelOverrides are the topmost user-config layer: they apply once,
     // after custom-model upserts, extension model replacement, and legacy OAuth projection.
     const getModels = () => {
@@ -372,7 +375,14 @@ export function composeModelProvider(providerId, base, modelConfig, extension) {
         getModels,
         refreshModels: base?.refreshModels || extension?.refreshModels || extension?.oauth?.modifyModels
             ? async (context) => {
-                await base?.refreshModels?.(context);
+                // A failed upstream catalog must not cost the extension its own refresh.
+                let baseError;
+                try {
+                    await base?.refreshModels?.(context);
+                }
+                catch (error) {
+                    baseError = error;
+                }
                 let refreshed;
                 if (extension?.refreshModels)
                     refreshed = await extension.refreshModels(context);
@@ -387,11 +397,13 @@ export function composeModelProvider(providerId, base, modelConfig, extension) {
                                 ...extension,
                                 models: refreshed,
                             });
-                            refreshedExtensionModels = refreshed;
+                            published.set(providerId, refreshed);
                         }
                         extensionOAuthCredential = oauthCredential;
                     },
                 });
+                if (baseError)
+                    throw baseError;
             }
             : undefined,
         filterModels: base?.filterModels

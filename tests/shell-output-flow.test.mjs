@@ -102,7 +102,7 @@ test('bash refuses bg_run arguments before running the command',async()=>{
  // runner turns {block:true, reason} into an immediate error without executing.
  const {prepareToolCall}=await import('../core/agent/src/harness/execution/tools.js');
  const args=extra=>{const prepared=prepareToolCall({id:'bg',name:'bash',arguments:{command:`touch ${quote(marker)}`,...extra}},[tool]);assert.ok(prepared.args,'the args reach the tool_call hook unchanged');return prepared.args;};
- for(const extra of [{run_in_background:true,name:'baseline tests',isAgent:false},{background:true}]){
+ for(const extra of [{run_in_background:true,name:'baseline tests',isAgent:false},{background:true},{run_in_background:'true'},{background:'true'}]){
   const blocked=hooks.tool_call({toolName:'bash',input:args(extra)});
   assert.equal(blocked?.block,true);
   assert.equal(blocked.reason,'bash has no run_in_background. Start a long command with bg_run({ command, name }): it returns at once and reports when the command finishes. To keep it in the foreground, pass timeout in seconds.');

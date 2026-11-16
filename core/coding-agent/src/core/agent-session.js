@@ -43,6 +43,10 @@ import { addUsageToTotals, createUsageTotals } from "./usage-totals.js";
 import { collectSessionCost } from "./session-accounting.js";
 import { GuardianSupervisor, tagGuardianRequestMessage } from "./guardian/guardian-supervisor.js";
 import { sessionObservability, withSessionObservability } from "./session-observability.js";
+/** Providers that limit requests per second and send no Retry-After (Ling: 2 requests/s). A retry 5 to 8 s
+ * later is answered, so their rate-limit wait starts at 8 s and grows to the general 25 s. The children's
+ * list is REQUEST_RATE_PROVIDERS in pi-subagents provider-health.ts. */
+const REQUEST_RATE_PROVIDERS = new Set(["ant-ling"]);
 /**
  * Parse a skill block from message text.
  * Returns null if the text doesn't contain a skill block.
@@ -2590,7 +2594,8 @@ export class AgentSession {
         // PI_RATE_LIMIT_POLICY (local patch; re-applied by verify-harness.mjs): cooldown-class
         // errors (rate limits + gateway SSE injection + upstream
         // finish_reason: error) cool off a
-        // FIXED 25s per retry (no exponential growth, no maxRetries cap) and
+        // FIXED 25s per retry (no exponential growth, no maxRetries cap; a
+        // request-rate provider starts at 8s, see REQUEST_RATE_PROVIDERS) and
         // keep retrying while the consecutive loop is <2min; beyond that the run
         // pauses — the final error is annotated and prompt() resets the clock on
         // the next user message.
@@ -2606,7 +2611,7 @@ export class AgentSession {
         if (rateLimited && Date.now() - this._piRateLimitLoopStart > 120000) {
             /* PI_RETRY_PAUSE_RECORDED */ this.sessionManager.appendCustomEntry("harness-retry", {status: "paused", reason: "cooldown-window-exhausted", provider: message.provider, model: message.model, attempt: this._retryAttempt});
             message.errorMessage = (message.errorMessage || "429 rate limit") +
-                " — paused: transient provider error persisted >2min; send a message to retry";
+                ` — paused: ${message.provider || "the provider"} kept answering with this error for 2 minutes; send a message to retry`;
             this._piRateLimitLoopStart = undefined;
             return false;
         }
@@ -2617,7 +2622,7 @@ export class AgentSession {
             return false;
         }
         const delayMs = rateLimited
-            ? 25000
+            ? (REQUEST_RATE_PROVIDERS.has(message.provider) ? Math.min(25000, 8000 * this._retryAttempt) : 25000)
             : settings.baseDelayMs * 2 ** (this._retryAttempt - 1);
         this._retryAbortController = new AbortController();
         try { /* PI_RETRY_CONTROLLER_READY */
@@ -2626,6 +2631,7 @@ export class AgentSession {
             attempt: this._retryAttempt,
             maxAttempts: settings.maxRetries,
             delayMs,
+            ...(rateLimited ? { rateLimited: true, provider: message.provider } : {}),
             errorMessage: message.errorMessage || "Unknown error",
         });
         // Remove error message from agent state (keep in session for history)

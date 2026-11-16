@@ -122,3 +122,22 @@ test('offline catalogs require numeric positive provenance even without a built-
     }
   }
 });
+
+test('C: a check inside the interval holds the gate, whatever the stored body is, and a stored 0 is not carried on', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls++; return new Response(null, { status: 404 }); };
+  try {
+    for (const stored of [{ models: cachedModels, lastModified: 0 }, { models: cachedModels, lastModified: generatedAt - 1 }, { models: [] }]) {
+      calls = 0;
+      const store = new InMemoryCodingAgentModelsStore();
+      await store.write(providerId, { ...stored, checkedAt: Date.now() - 60_000 });
+      await refresh(wrap(), store, true);
+      assert.equal(calls, 0, `a body checked a minute ago is not asked for again (${JSON.stringify(stored.lastModified)})`);
+      await store.write(providerId, { ...stored, checkedAt: Date.now() - 5 * 60 * 60 * 1000 });
+      await refresh(wrap(), store, true);
+      assert.equal(calls, 1, 'past four hours it is asked again');
+      assert.equal((await store.read(providerId)).lastModified, stored.lastModified === generatedAt - 1 ? stored.lastModified : undefined, 'an unknown 0 is dropped, a real date kept');
+    }
+  } finally { globalThis.fetch = originalFetch; }
+});

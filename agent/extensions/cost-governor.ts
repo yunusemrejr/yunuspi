@@ -710,7 +710,10 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 			restoreCeiling(`jev effort ${String(judged.reason ?? "abstained")}; configured level kept`);
 			return;
 		}
-		const target = effortLevelForTier(tier, effortCeiling, { shortPlain });
+		// On an on/off model every level is the same full thinking, so an easy request runs
+		// without it; the next message restores the configured level.
+		const onOff = !!ctx?.model && levelInForce("minimal", ctx.model) !== "off" && levelInForce("minimal", ctx.model) === levelInForce("high", ctx.model);
+		const target = tier === "easy" && onOff ? "off" : effortLevelForTier(tier, effortCeiling, { shortPlain });
 		// The current request's own prompt text is not yet in totals; include it
 		// so a first turn with a large paste cannot be judged cheap.
 		const promptTokens = Math.ceil((prompt.length + String(event?.systemPrompt ?? "").length) / 3.5);

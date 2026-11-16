@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { TEAM_ROLES, applyTeamValue, matchesQuery, readTeam, teamOptions, validTeamValue } from '../desktop/renderer/team-settings.mjs';
+import { TEAM_ROLES, applyTeamValue, matchesQuery, modelRow, rankModels, readTeam, teamOptions, validTeamValue } from '../desktop/renderer/team-settings.mjs';
 import { SettingsManager } from '../core/coding-agent/dist/core/settings-manager.js';
 
 const role = key => TEAM_ROLES.find(candidate => candidate.key === key);
@@ -84,4 +84,37 @@ test('the model search needs every word somewhere in provider, id or name', () =
   assert.equal(matchesQuery('openrouter · qwen/qwen3-coder Qwen3 Coder', 'OpenRouter qwen'), true);
   assert.equal(matchesQuery('openrouter · qwen/qwen3-coder', 'openrouter llama'), false);
   assert.equal(matchesQuery('anything', '   '), true);
+});
+
+const row = (provider, id, name) => modelRow(`${provider}/${id}`, { name, provider, id });
+const many = [
+  row('openrouter', 'deepseek/deepseek-r1', 'DeepSeek R1'),
+  row('nvidia', 'deepseek-ai/deepseek-v4-flash-0731', 'DeepSeek V4 Flash 0731'),
+  row('deepseek', 'deepseek-flash', 'DeepSeek V4.1 Flash'),
+  row('anthropic', 'claude-sonnet-5', 'Claude Sonnet 5'),
+];
+
+test('a typed provider comes first, then ids and names that start with a word, and nothing is dropped', () => {
+  const ranked = rankModels(many, 'deepseek');
+  assert.deepEqual(ranked.map(entry => entry.value).slice(0, 1), ['deepseek/deepseek-flash'], 'the provider the query names is listed first');
+  // every matching model stays, including the ones a plain filter used to cut
+  assert.equal(ranked.length, 3);
+  assert.deepEqual(ranked.map(entry => entry.value).sort(), ['deepseek/deepseek-flash', 'nvidia/deepseek-ai/deepseek-v4-flash-0731', 'openrouter/deepseek/deepseek-r1'].sort());
+});
+
+test('a model whose id or name begins with a typed word ranks above a later match', () => {
+  const ranked = rankModels([row('vendor', 'x-claude-clone', 'A clone'), row('anthropic', 'claude-sonnet-5', 'Claude Sonnet 5')], 'claude');
+  assert.deepEqual(ranked.map(entry => entry.value), ['anthropic/claude-sonnet-5', 'vendor/x-claude-clone']);
+});
+
+test('an empty query puts the chosen model first and then groups by provider in arrival order', () => {
+  const ranked = rankModels(many, '', 'nvidia/deepseek-ai/deepseek-v4-flash-0731');
+  assert.equal(ranked.length, many.length, 'every model is listed');
+  assert.equal(ranked[0].value, 'nvidia/deepseek-ai/deepseek-v4-flash-0731');
+  assert.deepEqual(ranked.slice(1).map(entry => entry.provider), ['openrouter', 'deepseek', 'anthropic']);
+  assert.deepEqual(rankModels(many, '  ', ''), many, 'a blank query keeps every model');
+});
+
+test('a query that matches nothing lists nothing rather than old models', () => {
+  assert.deepEqual(rankModels(many, 'ling'), []);
 });

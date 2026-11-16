@@ -61,18 +61,58 @@ const coreModule = name => import(pathToFileURL(path.join(root, 'core/coding-age
 // Team settings in Settings: which model takes each kind of delegated work. The
 // harness's own settings owner writes the global file, so every other key — of
 // "team" and of the file — is kept as the locked writer finds it on disk.
-let teamRuntime = null;
-async function availableForTeam() {
-  const modelsPath = path.join(agentDir, 'models.json');
-  let signature = 'absent';
-  try { signature = String(fs.statSync(modelsPath).mtimeMs); } catch { /* a harness without models.json still has built-ins */ }
-  if (!teamRuntime || teamRuntime.signature !== signature) {
-    const { ModelRuntime } = await coreModule('model-runtime.js');
-    const runtime = await ModelRuntime.create({ modelsPath, authPath: path.join(agentDir, 'auth.json') });
-    teamRuntime = { signature, runtime };
+//
+// The Team lists exactly what a session's model menu lists, so it asks a session
+// runtime — with the same extensions that publish the live catalog — instead of
+// composing a catalog of its own. Settings is often open with no session worker
+// resident; then a temporary one is started for the answer and stopped again.
+const TEAM_MODELS_TTL = 60_000;
+let teamModelsCache = null, teamModelsRequest = null;
+function teamModelsSignature() {
+  const parts = [];
+  for (const file of ['models.json', 'live-model-catalog.json']) {
+    try { const stat = fs.statSync(path.join(agentDir, file)); parts.push(`${file}:${stat.mtimeMs}:${stat.size}`); }
+    catch { parts.push(`${file}:absent`); }
   }
-  // Exactly what a session's model menu lists: the available models of this agent directory.
-  return teamRuntime.runtime.getAvailableSnapshot().map(model => ({ provider: model.provider, id: model.id }));
+  return parts.join('|');
+}
+async function tempWorkerModels() {
+  const entry = path.join(root, 'core/coding-agent/dist/rpc-entry.js');
+  if (!fs.existsSync(entry)) throw Error('Build the owned core with npm run build:core first.');
+  await loginPath;
+  const node = process.env.YUNUSPI_NODE_BINARY || 'node';
+  const launcher = path.join(agentDir, 'scripts/pi-launch.sh');
+  const args = [entry, '--no-session', '--no-approve'];
+  const env = { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_DESKTOP_SESSION: '1', PI_SUBAGENT_PI_BINARY: path.join(agentDir, 'bin/yunuspi') };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const worker = new AgentWorker({ command: fs.existsSync(launcher) ? '/bin/bash' : node, args: fs.existsSync(launcher) ? [launcher, node, ...args] : args, cwd: agentDir, env });
+  try {
+    const { models } = await worker.request('get_available_models', {}, 90_000);
+    return models;
+  } finally { await worker.stop(); }
+}
+async function liveModels() {
+  const kept = [...workers.values()].filter(worker => !worker.dead);
+  const resident = kept.find(worker => !worker.busy) ?? kept[0];
+  if (resident) return (await resident.request('get_available_models')).models;
+  return tempWorkerModels();
+}
+async function availableForTeam() {
+  const signature = teamModelsSignature();
+  if (teamModelsCache && teamModelsCache.signature === signature && Date.now() - teamModelsCache.at < TEAM_MODELS_TTL) return teamModelsCache.models;
+  if (!teamModelsRequest) {
+    // A save or a catalog change while a request is in flight must not leave its
+    // older answer cached for the next minute.
+    const started = signature;
+    teamModelsRequest = liveModels()
+      .then(models => {
+        const answer = models.map(model => ({ provider: model.provider, id: model.id, ...(typeof model.name === 'string' && model.name ? { name: model.name } : {}) }));
+        if (teamModelsSignature() === started) teamModelsCache = { signature: started, at: Date.now(), models: answer };
+        return answer;
+      })
+      .finally(() => { teamModelsRequest = null; });
+  }
+  return teamModelsRequest;
 }
 async function teamSettingsManager() {
   const { SettingsManager } = await coreModule('settings-manager.js');
@@ -392,7 +432,7 @@ async function dispatch(action, input = {}) {
       if (!/^[a-z0-9][a-z0-9._-]*$/i.test(provider) || !key) throw Error('Enter a provider ID and API key.');
       const { AuthStorage } = await import(pathToFileURL(path.join(root, 'core/coding-agent/dist/core/auth-storage.js')).href);
       await AuthStorage.create(path.join(agentDir, 'auth.json')).modify(provider, () => ({ type: 'api_key', key }));
-      teamRuntime = null;
+      teamModelsCache = null;
       return;
     }
     case 'teamSettings': {

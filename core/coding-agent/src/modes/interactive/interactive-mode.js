@@ -2890,7 +2890,7 @@ export class InteractiveMode {
                 this.defaultEditor.onEscape = () => {
                     this.session.abortRetry();
                 };
-                this.showStatusIndicator(new RetryStatusIndicator(this.ui, event.attempt, event.maxAttempts, event.delayMs));
+                this.showStatusIndicator(new RetryStatusIndicator(this.ui, event.attempt, event.maxAttempts, event.delayMs, event.rateLimited ? event.provider : undefined));
                 this.ui.requestRender();
                 break;
             }
@@ -2910,7 +2910,7 @@ export class InteractiveMode {
             }
             case "summarization_retry_scheduled": {
                 this.showError(event.errorMessage);
-                this.showStatusIndicator(new RetryStatusIndicator(this.ui, event.attempt, event.maxAttempts, event.delayMs));
+                this.showStatusIndicator(new RetryStatusIndicator(this.ui, event.attempt, event.maxAttempts, event.delayMs, event.rateLimited ? event.provider : undefined));
                 this.ui.requestRender();
                 break;
             }

@@ -179,6 +179,18 @@ test('a simple human turn steps down through Jev and the next complex turn resto
   } finally { f.cleanup(); }
 });
 
+test('an easy turn on an on/off thinking model runs without thinking and a complex turn turns it back on', async () => {
+  mockJev();
+  const onOff = { provider: 'ant-ling', id: 'Ling-3.2-flash', reasoning: true, contextWindow: 256_000, cost: { input: 0.1, cacheRead: 0.02 }, thinkingLevelMap: { off: 'none', minimal: null, low: null, medium: 'enabled', high: null, xhigh: null, max: null } };
+  const f = await start({ initial: 'medium', ctx: { model: onOff } });
+  try {
+    await f.turn('what does the json flag mean');
+    assert.equal(f.thinking(), 'off', 'every level is the same full thinking there, so an easy turn drops it');
+    await f.turn('debug the parser race condition and migrate the loader');
+    assert.equal(f.thinking(), 'medium', 'a complex turn restores the configured level');
+  } finally { f.cleanup(); }
+});
+
 test('a subagent child judges its own task: it starts at the session ceiling and steps down for an easy task', async () => {
   const calls = mockJev();
   const previous = process.env.PI_SUBAGENT_CHILD;

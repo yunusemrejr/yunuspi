@@ -176,14 +176,20 @@ export interface ModelEntry {
  * The options a search leaves, best first. Every word must appear in the
  * provider, id or name ("codex", "openrouter qwen", "gpt-5"); when no option
  * holds every word, a looser fuzzy match runs so a typo still finds something.
- * The role's first option (session model / off) stays at the top of an empty search.
+ * An option that starts with the query comes first. The role's first option
+ * (session model / off) stays at the top of an empty search.
  */
 export function filterModelOptions(options: readonly string[], query: string, names: ReadonlyMap<string, string> = new Map()): string[] {
 	const words = query.toLowerCase().split(/\s+/).filter(Boolean);
 	if (!words.length) return [...options];
 	const text = (option: string) => `${option} ${names.get(option) ?? ""}`.toLowerCase();
 	const exact = options.filter((option) => words.every((word) => text(option).includes(word)));
-	if (exact.length) return exact;
+	if (exact.length) {
+		// A query that begins a route ("deepseek") lists that provider's own models first.
+		const typed = query.trim().toLowerCase();
+		const own = exact.filter((option) => option.toLowerCase().startsWith(typed));
+		return [...own, ...exact.filter((option) => !own.includes(option))];
+	}
 	return fuzzyFilter([...options], query, text);
 }
 

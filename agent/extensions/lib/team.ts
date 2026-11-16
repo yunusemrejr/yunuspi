@@ -8,6 +8,7 @@
  * subagent settings use. With no block everything resolves to today's
  * behaviour: every role runs on the session's model.
  */
+import { vendorModelAlias } from "@yunuspi/coding-agent";
 import { getProjectAgentSettingsPath, getUserAgentSettingsPath, readSettingsFileStrict } from "../pi-subagents/src/agents/agents.ts";
 import { THINKING_LEVELS, type ThinkingLevel } from "../pi-subagents/src/shared/model-info.ts";
 
@@ -266,6 +267,11 @@ export function resolveRoleRoute(
 	}
 	const models = typeof available === "function" ? available() : available;
 	if (models && models.length > 0 && !models.some((model) => routeOf(model) === setting)) {
+		// A route saved under an id the vendor has since retired runs on the id it lists now.
+		const slash = setting.indexOf("/");
+		const alias = slash > 0 ? vendorModelAlias(setting.slice(0, slash), setting.slice(slash + 1)) : undefined;
+		const current = alias && `${setting.slice(0, slash)}/${alias}`;
+		if (current && models.some((model) => routeOf(model) === current)) return current;
 		throw new Error(`team.${role} is set to '${setting}', which is not among the available models. Pick another with /team.`);
 	}
 	return setting;
