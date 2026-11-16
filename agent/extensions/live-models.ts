@@ -1767,7 +1767,7 @@ function refreshFor(
 			if (cached?.models) return publishModels(providerId, cached.models, cached.probes);
 			if (providerId === "orcarouter")
 				return publishModels(providerId, ORCA_FALLBACK_MODELS);
-			return publishModels(providerId, [...storeModels(providerId).values(), ...(providerId === "deepseek" && idOnlyFacts("deepseek")["deepseek-flash"] && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(providerId).baseUrl.replace(/\/$/, "")) ? [{...minimalModel("deepseek-flash", "deepseek", 384_000), ...idOnlyFacts("deepseek")["deepseek-flash"]}] : [])]);
+			return publishModels(providerId, [...storeModels(providerId).values()]);
 		};
 		if (context.allowNetwork === false || context.signal.aborted)
 			return previousModels();
