@@ -68,6 +68,15 @@ test('the pool keeps free text models with tools and a long context, and drops a
   assert.deepEqual(free.poolFromCatalog(undefined, NOW), []);
 });
 
+test('an empty pool is read again after two minutes, a filled one after an hour', () => {
+  const at = (models) => ({ catalog: { at: NOW, models } });
+  assert.equal(free.catalogStale(at([]), NOW + free.QUOTA_TTL_MS - 1), false);
+  assert.equal(free.catalogStale(at([]), NOW + free.QUOTA_TTL_MS), true, 'models may not have been registered yet');
+  const filled = at([{ id: 'a/one:free', context: 131072 }]);
+  assert.equal(free.catalogStale(filled, NOW + free.QUOTA_TTL_MS), false);
+  assert.equal(free.catalogStale(filled, NOW + free.CATALOG_TTL_MS), true);
+});
+
 test('IQ is the share of probe checks and child runs that went well; speed is the median', () => {
   const stats = measured({ passed: 4, runs: 5, successes: 3, speeds: [10, 90, 30, 50] });
   assert.equal(free.iqOf(stats), (100 * (4 + 3)) / (5 + 5));

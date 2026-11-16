@@ -81,7 +81,7 @@ export default function freeModels(pi: ExtensionAPI) {
 	let lastRun = 0;
 
 	/** One pass at a time; a failure is kept for /team to show and never reaches the session. */
-	async function maintain(ctx: ExtensionContext, probe: boolean): Promise<void> {
+	async function maintain(ctx: ExtensionContext): Promise<void> {
 		if (running || process.env.PI_OFFLINE === "1" || !teamFreeOn(ctx.cwd)) return;
 		running = true;
 		try {
@@ -92,7 +92,7 @@ export default function freeModels(pi: ExtensionAPI) {
 			const state = readState();
 			if (catalogStale(state, now)) await refreshCatalog({ registered });
 			if (quotaStale(state, now)) await refreshQuota({ key });
-			if (probe) await runProbes({ key });
+			await runProbes({ key });
 		} catch (error) {
 			try {
 				noteRefreshError(error instanceof Error ? error.message : String(error));
@@ -106,12 +106,12 @@ export default function freeModels(pi: ExtensionAPI) {
 
 	pi.on("session_start", (_event, ctx) => {
 		lastRun = Date.now();
-		void maintain(ctx, true);
+		void maintain(ctx);
 	});
-	// Before each turn, so the day's remainder is read again before a child is launched.
+	// Before each turn, so the day's remainder is read again before a child is launched and models found since are measured.
 	pi.on("turn_start", (_event, ctx) => {
 		if (Date.now() - lastRun < QUOTA_TTL_MS) return;
 		lastRun = Date.now();
-		void maintain(ctx, false);
+		void maintain(ctx);
 	});
 }

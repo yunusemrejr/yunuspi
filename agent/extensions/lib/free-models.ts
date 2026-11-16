@@ -406,7 +406,9 @@ async function getJson(fetchImpl: Fetch, url: string, key: string | undefined, t
 	return response.json();
 }
 
-export const catalogStale = (state: FreeState, now: number): boolean => !state.catalog || now - state.catalog.at >= CATALOG_TTL_MS;
+/** An empty pool is read again with the quota: at a session's start the OpenRouter models may not be registered yet. */
+export const catalogStale = (state: FreeState, now: number): boolean =>
+	!state.catalog || now - state.catalog.at >= (state.catalog.models.length ? CATALOG_TTL_MS : QUOTA_TTL_MS);
 export const quotaStale = (state: FreeState, now: number): boolean => !state.quota || now - state.quota.at >= QUOTA_TTL_MS;
 
 /** The pool: OpenRouter's free models that the session's registry also has. */
