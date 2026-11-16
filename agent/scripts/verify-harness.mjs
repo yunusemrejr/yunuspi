@@ -634,6 +634,7 @@ async function main() {
   // the recovery owner and the user-confirmed profile switch.
   const modelSelectionOwners = new Map([
     ["pi-subagents/src/extension/autonomous-recovery.ts", "bounded recovery"],
+    ["free-models.ts", "child moves off a rate-limited free model to its next recovery route"],
     [
       "pi-subagents/src/slash/slash-commands.ts",
       "user-confirmed profile switch",
