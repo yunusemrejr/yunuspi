@@ -476,7 +476,7 @@ export class SettingsManager {
         this.save();
     }
     getSteeringMode() {
-        return this.settings.steeringMode || "one-at-a-time";
+        return this.settings.steeringMode || "all";
     }
     setSteeringMode(mode) {
         this.globalSettings.steeringMode = mode;

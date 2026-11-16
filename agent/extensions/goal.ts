@@ -16,14 +16,14 @@
  * still start a goal with that standard already in force, and share this
  * extension's one persisted goal state.
  */
-import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
+import { GUARDIAN_REQUEST_META, type ExtensionAPI, type ExtensionContext } from "@yunuspi/coding-agent";
 import { Type } from "typebox";
 import { StringEnum } from "@yunuspi/ai";
 import { RATIONALE_INTAKE } from "./lib/tool-schema.ts";
 import { isTestLikeCommand, uncountedCheck } from "./lib/task-state/ingest.ts";
 import { collectVerificationReceipts, resumesElsewhere } from './lib/continuation-notice.ts';
-import { completionReport, createStaticCompletionCheck, staticAdvisories } from "./lib/completion-check.ts";
-import { selfVerificationPrompt } from "./lib/lean-policy.ts";
+import { completionReport, createStaticCompletionCheck } from "./lib/completion-check.ts";
+import { isPromptAmendment, isPromptPivot, isReferentialFollowup } from "./lib/intent-context.ts";
 import { noteSessionStopped, unlockSessionStop } from "./lib/session-stop.ts";
 import {
 	block, complete, createGoal, goalAnchor, goalCompletionGate, goalCompletionReceipts, goalIsLive, goalKickoff, goalRestoreNotice, goalStatusText, goalSummary,
@@ -47,6 +47,7 @@ const GOAL_SUBCOMMANDS: ReadonlyArray<readonly [string, string]> = [
 ];
 const CONTEXT = "goal-anchor";
 const STATUS_KEY = "goal";
+const STOP_GOAL = /^(?:please\s+)?(?:stop(?: now| working| (?:this|the) goal)?|pause(?: (?:this|the) goal)?|don['’]t continue|do not continue)[.!]?$/i;
 const WRITE_TOOLS = new Set(["edit", "write"]);
 /** Tools whose successful run is itself a verification of built output. */
 const VERIFY_TOOLS = new Set([
@@ -76,7 +77,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	const checkStarts = new Map<string, CheckStart>();
 	const backgroundChecks = new Map<string, CheckStart>();
 	const debt = () => Math.max(0, (goal?.verification?.revision ?? 0) - (goal?.verification?.checked ?? 0));
-	const remember = (map: Map<string, CheckStart>, key: string, value: CheckStart) => {
+	const remember = <T>(map: Map<string, T>, key: string, value: T) => {
 		map.set(key, value);
 		while (map.size > 64) map.delete(map.keys().next().value!);
 	};
@@ -88,28 +89,54 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	// kickoff for a goal that is no longer active is dropped, and so is a copy
 	// of one already waiting in the queue; delivery forgets the waiting copy.
 	const queuedKickoffs = new Set<string>();
-	let humanRun = false;
+	const authoredInputs = new Map<string, { goalId: string; text: string; steer: boolean }>();
+	let detour = false;
 	pi.on("input", (event: any) => {
 		const text = typeof event?.text === "string" ? event.text : "";
 		// A continuation queued for a goal that was cleared or replaced is dropped too.
 		const continued = /^\[goal (\S+), continuation /.exec(text)?.[1];
-		if (continued) return goal?.id !== continued || goal.status !== "active" ? { action: "handled" as const } : undefined;
+		if (continued && event.source === "extension") {
+			return goal?.id !== continued || goal.status !== "active" || detour ? { action: "handled" as const } : undefined;
+		}
 		const id = /^\[goal-tracked (\S+)\]/.exec(text)?.[1];
 		if (!id) {
-			// A message of the user's own that starts a run (not a steer into a running one) may be about
-			// something else entirely; that run is not followed by an automatic goal continuation.
-			if ((event?.source === "interactive" || event?.source === "rpc") && !event.streamingBehavior && !text.startsWith("/")) humanRun = true;
+			// A rejected or cleared input must never steer or reopen a goal. Match the
+			// native request ID when it is actually delivered to the agent.
+			if (goal && event.requestId && (event.source === "interactive" || event.source === "rpc")) {
+				remember(authoredInputs, event.requestId, {
+					goalId: goal.id, text: event.originalText ?? text, steer: event.streamingBehavior === "steer",
+				});
+			}
 			return undefined;
 		}
 		if (goal?.id !== id || goal.status !== "active" || queuedKickoffs.has(text)) return { action: "handled" as const };
 		if (event.streamingBehavior) queuedKickoffs.add(text);
 		return undefined;
 	});
-	pi.on("message_start", (event: any) => {
+	pi.on("message_start", (event: any, ctx) => {
 		const message = event?.message;
-		if (message?.role !== "user" || !queuedKickoffs.size) return;
+		if (message?.role !== "user") return;
 		const text = typeof message.content === "string" ? message.content : Array.isArray(message.content) ? message.content.map((part: any) => part?.text ?? "").join("\n") : "";
 		queuedKickoffs.delete(text);
+		if (/^\[goal-tracked (\S+)\]/.exec(text)?.[1] === goal?.id && goal?.status === "active") detour = false;
+		const requestId = message[GUARDIAN_REQUEST_META]?.requestId;
+		const input = authoredInputs.get(requestId);
+		authoredInputs.delete(requestId);
+		if (!input || !goal || input.goalId !== goal.id) return;
+		const stopping = STOP_GOAL.test(input.text.trim());
+		if (stopping && goal.status === "active") {
+			persist({ ...goal, status: "paused", note: "Paused at your request.", updatedAt: Date.now() }, ctx);
+			return;
+		}
+		const pivot = isPromptPivot(input.text);
+		const reopened = !pivot && !detour ? reopenRejectedGoal(goal, input.text) : undefined;
+		if (reopened) {
+			resetChecks();
+			persist({ ...reopened, verification: { revision: 0, checked: 0 } }, ctx);
+			ctx.ui?.notify?.("Goal reopened for your correction. Verify the revised result.", "info");
+		} else {
+			detour ||= pivot || !(input.steer || isPromptAmendment(input.text) || isReferentialFollowup(input.text));
+		}
 	});
 	// A cleared queue (Stop, session switch) delivers nothing; forget what was waiting.
 	pi.on("agent_settled", (_event: any, ctx: any) => { if (!ctx?.hasPendingMessages?.()) queuedKickoffs.clear(); });
@@ -153,11 +180,24 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		// A stalled goal stays visible too: it is waiting for /goal retry, not gone.
 		try { ctx?.ui?.setStatus?.(STATUS_KEY, goalStatusText(goal)); } catch { /* status is cosmetic */ }
 	};
+	const resetChecks = () => {
+		checkStatic = createStaticCompletionCheck();
+		checkStarts.clear(); backgroundChecks.clear(); planCandidates.clear(); passedPlanCalls.clear();
+		lastCtx = undefined; uncounted = undefined; pointedOut = -1; refused.clear();
+	};
+	const startGoal = (next: GoalState, ctx: ExtensionContext) => {
+		resetChecks();
+		lastStop = undefined;
+		// A kickoff queued behind another run owns its work only once delivered.
+		detour = ctx.isIdle?.() === false;
+		persist(next, ctx);
+	};
+	const currentVerification = (ctx: ExtensionContext) => collectVerificationReceipts(32, ctx.sessionManager)
+		.filter((receipt) => receipt.source !== "deliverables");
 	const restore = (ctx: ExtensionContext) => {
 		try { goal = restoreGoal(ctx.sessionManager.getBranch()); } catch { goal = undefined; }
-		checkStatic = createStaticCompletionCheck();
-		checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
-		refused.clear();
+		resetChecks();
+		lastStop = undefined; unsaved = undefined; detour = false; authoredInputs.clear();
 		show(ctx);
 		// A reopened session (after an update, a crash or a closed window) must say it still holds unfinished work.
 		const notice = ctx.hasUI ? goalRestoreNotice(goal) : undefined;
@@ -166,17 +206,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	pi.on("session_start", (_event, ctx) => restore(ctx));
 	pi.on("session_switch", (_event, ctx) => restore(ctx));
 	pi.on("session_tree", (_event, ctx) => restore(ctx));
-	pi.on('input', (event, ctx) => {
-		if (event.source !== 'interactive' && event.source !== 'rpc') return;
-		const next = reopenRejectedGoal(goal, event.originalText ?? event.text);
-		if (!next) return;
-		checkStarts.clear(); backgroundChecks.clear(); refused.clear(); persist({ ...next, verification: { revision: 0, checked: 0 } }, ctx);
-		ctx.ui?.notify?.('Goal reopened for your correction; prior completion evidence needs verification on the revised result.', 'info');
-	});
-
 	pi.on("context", (event) => {
 		const messages = event.messages.filter((message: any) => message.customType !== CONTEXT);
-		const anchor = goalAnchor(goal);
+		const anchor = detour ? undefined : goalAnchor(goal);
 		if (!anchor) return messages.length !== event.messages.length ? { messages } : undefined;
 		return { messages: [...messages, { role: "custom", customType: CONTEXT, content: anchor, display: false, timestamp: 0 } as any] };
 	});
@@ -228,7 +260,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	};
 
 	pi.on("tool_call", (event) => {
-		if (!goalIsLive(goal)) return;
+		if (detour || !goalIsLive(goal)) return;
 		remember(checkStarts, event.toolCallId, { goalId: goal.id, revision: goal.verification?.revision ?? 0,
 			command: String(event.input?.command ?? ""), tool: event.toolName });
 	});
@@ -243,7 +275,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	pi.on("tool_result", (event: { toolName?: string; toolCallId?: string; input?: Record<string, unknown>; details?: any; isError?: boolean }, ctx) => {
 		const start = event.toolCallId ? checkStarts.get(event.toolCallId) : undefined;
 		if (event.toolCallId) checkStarts.delete(event.toolCallId);
-		if (!goalIsLive(goal) || event.isError || start && start.goalId !== goal.id) return;
+		if (detour || !goalIsLive(goal) || event.isError || start && start.goalId !== goal.id) return;
 		const name = event.toolName ?? "";
 		// A model that started a film or a 3D scene without adopting its standard gets it at the first such call.
 		const shown = WORK_STANDARD[name];
@@ -305,27 +337,20 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			persistPending();
 			const stop = lastStop;
 			lastStop = undefined;
-			const fromUser = humanRun;
-			humanRun = false;
+			if (detour || stop === "stop" && resumesElsewhere(ctx.sessionManager)) return;
 			// Recording the last criterion used to wake a model just to call complete. Close that exact checked goal
 			// here instead; unresolved receipts still take the normal bounded continuation path, never an auto-waiver.
 			if (stop === "stop" && goal?.status === "active" && !ctx.hasPendingMessages() && !debt() && goal.criteria.every(c => c.status !== "open")) {
-				if (resumesElsewhere(ctx.sessionManager)) return;
 				const closing = goal;
 				const verification = await checkStatic(ctx.cwd, ctx.signal);
 				if (goal !== closing || ctx.signal?.aborted || ctx.hasPendingMessages() || resumesElsewhere(ctx.sessionManager)) return;
-				const checked = goalCompletionGate(goal, { unverifiedWrites: 0, refused: new Set(), verification: [...collectVerificationReceipts(32, ctx.sessionManager), ...verification] });
+				const checked = goalCompletionGate(goal, { unverifiedWrites: 0, refused: new Set(), verification: [...currentVerification(ctx), ...verification] });
 				if (!checked.block) {
 					persist(complete(goal, false), ctx);
 					noteSessionStopped(ctx, `goal:${goal.id}:achieved`);
 					ctx.ui?.notify?.(`Goal ${goal.id} achieved.`, "info");
 					return;
 				}
-			}
-			// The user switched to other work mid-goal: answer them, keep the goal open, do not drag the session back.
-			if (fromUser && stop === "stop" && goal?.status === "active") {
-				ctx.ui?.notify?.(`Goal ${goal.id} is still open (${goal.criteria.filter((c) => c.status === "open").length} criteria). /goal resume continues it, /goal clear drops it.`, "info");
-				return;
 			}
 			const decision = stopGate(goal, { lastStop: stop, hasPendingMessages: ctx.hasPendingMessages() });
 			if (!decision) return;
@@ -378,10 +403,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 					const replaced = goalIsLive(goal) ? goal : undefined;
 					const next = createGoal(command.text);
 					if (replaced) notify(`Goal ${replaced.id} replaced (${replaced.criteria.filter((c) => c.status === "open").length} criteria were open).`);
-					checkStatic = createStaticCompletionCheck();
-					checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
-					refused.clear();
-					persist(next, ctx);
+					startGoal(next, ctx);
 					notify(`Goal ${next.id} set with ${next.criteria.length} criteria. The session keeps working until each has evidence. /goal shows progress.`);
 					kickoff(next);
 					return;
@@ -398,6 +420,8 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			if (command.kind === "done") { persist(complete(goal, true, now), ctx); return notify("Goal marked achieved by you."); }
 			// resume and retry both re-arm the continuation budget and fingerprint.
 			const rearmed: GoalState = { ...goal, status: "active", nudges: 0, stalls: 0, progressMark: "", note: undefined, updatedAt: now };
+			detour = ctx.isIdle?.() === false;
+			refused.clear();
 			persist(rearmed, ctx);
 			const open = rearmed.criteria.filter((criterion) => criterion.status === "open").length;
 			const note = "note" in command ? command.note : undefined;
@@ -412,10 +436,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	// A /goal that names boosts: one goal carrying the user's words, each brief and its core fronts.
 	const startBoosted = (found: PresetTokens, ctx: ExtensionContext) => {
 		const next = createBoostedGoal(found.task, found.presets);
-		checkStatic = createStaticCompletionCheck();
-		checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
-		refused.clear();
-		persist(next, ctx);
+		startGoal(next, ctx);
 		ctx.ui?.notify?.(boostedGoalNotice(found.presets, next), "info");
 		// The literal is the user's own words; the expanded briefs travel as the kickoff text.
 		void Promise.resolve(pi.sendUserMessage(kickoffText(next), { authored: true, userText: found.literal, deliverAs: "followUp" }))
@@ -450,10 +471,7 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			if (found.goal && found.task) return startBoosted(found, ctx);
 			if (!found.task && goalIsLive(live)) return boostLive(live, found.presets, ctx);
 			const next = createPresetChainGoal(chain);
-			checkStatic = createStaticCompletionCheck();
-			checkStarts.clear(); backgroundChecks.clear(); lastStop = undefined;
-			refused.clear();
-			persist(next, ctx);
+			startGoal(next, ctx);
 			ctx.ui?.notify?.(presetNotice(chain, next), "info");
 			// Authored like a typed /goal, but userText stays the user's own
 			// short demand; the expanded briefs are the harness's wording and
@@ -510,18 +528,18 @@ export default function goalExtension(pi: ExtensionAPI): void {
 			summary: Type.Optional(Type.String({ maxLength: 800 * RATIONALE_INTAKE })),
 		}),
 		async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: unknown, ctx: ExtensionContext) {
+			if (params.action === "status") return text(goalSummary(goal));
+			if (goal?.status === "blocked") return text("This goal is blocked. /goal resume or /goal retry reactivates it.");
 			if (!goal || !goalIsLive(goal)) return text("No live goal in this session; nothing to record.");
 			switch (params.action) {
-				case "status": return text(goalSummary(goal));
 				case "check": {
-					// The one completion check: criteria plus every test, review, delivery, media, audit and syntax step.
-					const receipts = [...goalCompletionReceipts(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, uncounted }).filter((receipt) => receipt.id === "writes"), ...collectVerificationReceipts(32, ctx.sessionManager), ...await checkStatic(ctx.cwd, signal)];
-					const report = completionReport(goal.criteria, receipts);
-					const advisories = await staticAdvisories(ctx.cwd, signal);
-					// Same-model self-verification replaces external quality/observer gates:
-					// the model that did the work checks it against the goal and its own session journey.
-					const verify = selfVerificationPrompt(goal.text, goal.criteria.filter((c) => c.status === "open"));
-					return text(`${report.lines.join("\n")}${advisories.length ? `\nAdvisory (never blocks): ${advisories.join(" ")}` : ""}\n${report.clear ? "Every step is settled; call goal complete." : `Open steps above: do the work, then record evidence with met/waive or check again.\n\n${verify}`}`);
+					const checking = goal;
+					const verification = await checkStatic(ctx.cwd, signal);
+					if (goal !== checking) return text("Goal changed during the check. Use its current criteria.");
+					const receipts = goalCompletionReceipts(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, uncounted })
+						.filter((receipt) => receipt.id === "writes");
+					const report = completionReport(goal.criteria, [...receipts, ...currentVerification(ctx), ...verification]);
+					return text(`${report.lines.join("\n")}\n${report.clear ? "Every step is settled; call goal complete." : "Resolve the open steps and use goal complete with the observed evidence."}`);
 				}
 				case "criteria": {
 					persist(setCriteria(goal, params.items ?? []), ctx);
@@ -567,36 +585,29 @@ export default function goalExtension(pi: ExtensionAPI): void {
 						if (outcome.error) return text(outcome.error);
 						persist(outcome.goal, ctx);
 					}
+					if (goal.criteria.some(criterion => criterion.status === "open")) {
+						return text(goalCompletionGate(goal, { unverifiedWrites: 0, refused }).reason!);
+					}
+					if (ctx.hasPendingMessages()) return text("Read the queued messages before completing the goal.");
 					const closing = goal;
 					const verification = await checkStatic(ctx.cwd, signal);
 					signal?.throwIfAborted();
-					if (goal !== closing) return text("Goal changed during completion; use its current criteria and verification.");
+					if (goal !== closing || ctx.hasPendingMessages()) return text("Goal or queued input changed during completion. Use the current instructions.");
 					// Unopened intermediate files (stems, previews, QA builds) stay in the user's verification
 					// footer; gating on them paged three at a time through every refusal.
-					const receipts = collectVerificationReceipts(32, ctx.sessionManager).filter((receipt) => receipt.source !== "deliverables");
-					const gated = [...receipts, ...verification];
+					const gated = [...currentVerification(ctx), ...verification];
 					const decision = goalCompletionGate(goal, { unverifiedWrites: debt(), writeRevision: goal.verification?.revision, uncounted, refused, verification: gated });
 					const why = String(params.reason ?? "").trim();
-					// After one refusal, a reasoned call closes the goal even when the list of
-					// gaps changed: checks that unfold one after another (capture, review,
-					// interaction) kept a finished film open for nine more minutes. Open
-					// criteria and failed media review never waive.
-					const reasoned = why.length >= 12 && refused.size > 0 && !goal.criteria.some((criterion) => criterion.status === "open") && !gated.some((receipt) => receipt.requiresUserWaiver);
-					if (decision.block && !reasoned) {
+					if (decision.block) {
 						refused.add(decision.key);
 						return text(decision.reason ?? "Completion refused: verification is unresolved.");
 					}
-					if (decision.block) decision.waived = true;
 					// A repeated call used to waive silently, and models repeated it on their
 					// own. A waiver needs the reason each gap cannot close here; it is
 					// recorded on the goal and shown to the user.
 					if (decision.waived && why.length < 12) return text("The same checks are still unresolved. Resolve the ones that bear on the requested deliverable, or call complete again with reason naming each remaining item and why. That waiver is recorded and shown to the user.");
-					// A waiver is spent by the call that used it. The refusal keys on the
-				// shape of the gaps, so keeping a spent key for the whole session let
-				// any later gap of the same shape auto-waive — a fresh unverified edit
-				// then closed the goal as though the user had approved that one too.
-				if (decision.waived) refused.delete(decision.key);
-				const done = decision.waived ? { ...complete(goal, true), note: `Completed with a recorded waiver: ${why.slice(0, 380)}` } : complete(goal, false);
+					refused.clear();
+					const done = decision.waived ? { ...complete(goal, true), note: `Completed with a recorded waiver: ${why.slice(0, 380)}` } : complete(goal, false);
 					persist(done, ctx);
 					noteSessionStopped(ctx, `goal:${done.id}:achieved`);
 					ctx.ui?.notify?.(`Goal ${done.id} achieved${decision.waived ? " with recorded waiver" : ""}.`, "info");

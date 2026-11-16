@@ -328,6 +328,7 @@ export const classifyEffortRequest = (text, { source = "human", priorFailures = 
 	if (priorFailures >= 2) return { kind: "ceiling", reasons: [`previous turn had ${priorFailures} tool failures`] };
 	if (!flat) return { kind: "ceiling", reasons: ["no text (attachment-only)"] };
 	if (EFFORT_ACK.test(flat) && flat.length <= 80) return { kind: "inherit", reasons: ["short acknowledgement"] };
+	if (EXPLICIT_DEEPER.some(pattern => pattern.test(flat))) return { kind: "ceiling", reasons: ["explicit deeper request"] };
 	if (EFFORT_CRITICAL.test(flat)) return { kind: "ceiling", reasons: ["critical-area cue"] };
 	if (EFFORT_COMPLEX.test(flat)) return { kind: "ceiling", reasons: ["complexity cue"] };
 	// A subagent's assignment is a written brief: its length and code say how

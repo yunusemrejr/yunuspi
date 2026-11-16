@@ -27,6 +27,11 @@ export function isPromptRefusal(prompt: string): boolean {
   return refusal.test(intentText(prompt.slice(0, 1024)));
 }
 
+/** An explicit addition or correction to what the user was just asking for. */
+export function isPromptAmendment(prompt: string): boolean {
+  return /^(?:also\b|additionally\b|actually\b|instead\b|and\s+(?:also|then)\b|(?:wait|correction|no)\s*[:,])/i.test(intentText(prompt.slice(0, 1024)).trim());
+}
+
 /** A one-line request whose whole deliverable is the reply text ("Reply with
  * exactly: OK"). Planning, orientation and maintenance nudges have nothing to
  * act on there and only invite tool calls; they wait for the next prompt. */
@@ -42,6 +47,7 @@ export function isDirectReplyPrompt(prompt: unknown): boolean {
 export function isReferentialFollowup(prompt: string): boolean {
   const text = intentText(prompt.slice(0,1024)).trim();
   if (text.length > 240 || pivot.test(text) || refusal.test(text)) return false;
+  if (isPromptAmendment(text)) return true;
   if (/\b(?:continue|resume|same task|keep going|next step|switch (?:it |this |that )?to)\b|\bmake\s+(?:it|this|that|them)\b|\b(?:improve|refine|polish|fix|animate|rework)\s+(?:it|this|that|them)(?:\s+(?:more|less|too|again)\b|[.!?]|$)/i.test(text)) return true;
   // Compound instructions inherit their subject the same way a bare "make it
   // better" does; the caller still treats the inherited text as evidence only.

@@ -39,13 +39,12 @@ import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { createReadToolDefinition } from "@yunuspi/coding-agent";
-import { clampThinkingLevel } from "@yunuspi/ai";
+import { clampThinkingLevel, isFlatPlanProvider } from "@yunuspi/ai";
 import { Type } from "typebox";
 import {
 	assignmentExcerpt,
 	classifyEffortRequest,
 	createEffortController,
-	EFFORT_SWITCH_BUDGET_TOKENS,
 	effortLevelForTier,
 	effortMissTokens,
 	gateEffortSwitch,
@@ -63,13 +62,11 @@ import {
 	capText,
 	createFold,
 	estimateMessagesTokens,
-	messageKey,
 	type FoldState,
 	type GovernedMessage,
 } from "./lib/context-governor.ts";
 
 const FOLD_ENTRY = "context-fold-v1";
-const DIGEST_TYPE = "context-fold";
 const NOTICE_TYPE = "cost-governor-notice";
 /** Whole-state snapshot of the Jev effort router (ceiling/manual/auto), so a
  * reopened session can restore the user's ceiling instead of inheriting an
@@ -77,8 +74,8 @@ const NOTICE_TYPE = "cost-governor-notice";
 const EFFORT_ENTRY = "jev-effort-v1";
 /** One typed judgment per human turn may take at most this long; a slow judge
  * fails open to the configured ceiling rather than delaying the request. */
-const EFFORT_JUDGE_TIMEOUT_MS = 3500;
-/** Only steps below `low` are worth a judged call; lower ceilings stay put. */
+const EFFORT_JUDGE_TIMEOUT_MS = 2000;
+/** Below a low ceiling there is no eligible graded step down. */
 const EFFORT_MIN_CEILING_RANK = levelRank("low");
 
 const DEFAULT_CONTEXT_BUDGET = 100_000;
@@ -186,13 +183,14 @@ const flat = (value: unknown, limit = 1_200): string =>
 		.trim()
 		.slice(0, limit);
 
-function usageTotals(usage: any): { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number; cost: number; inputCost: number; outputCost: number; cacheCost: number } {
+function usageTotals(usage: any, provider: unknown): { input: number; output: number; cacheRead: number; cacheWrite: number; reasoning: number; cost: number; inputCost: number; outputCost: number; cacheCost: number } {
 	const input = num(usage?.input);
 	const output = num(usage?.output);
 	const cacheRead = num(usage?.cacheRead);
 	const cacheWrite = num(usage?.cacheWrite);
 	const reasoning = num(usage?.reasoning);
-	const cost = usage?.cost && typeof usage.cost === "object" ? usage.cost : {};
+	const billed = usage?.cost;
+	const cost = billed && typeof billed === "object" && billed.billing !== "subscription" && !isFlatPlanProvider(provider) ? billed : {};
 	return {
 		input,
 		output,
@@ -202,12 +200,12 @@ function usageTotals(usage: any): { input: number; output: number; cacheRead: nu
 		cost: num(cost.total),
 		inputCost: num(cost.input),
 		outputCost: num(cost.output),
-		cacheCost: num(cost.cacheRead),
+		cacheCost: num(cost.cacheRead) + num(cost.cacheWrite),
 	};
 }
 
-function addUsage(totals: Totals, usage: any): void {
-	const row = usageTotals(usage);
+function addUsage(totals: Totals, usage: any, provider: unknown): void {
+	const row = usageTotals(usage, provider);
 	totals.turns += 1;
 	totals.input += row.input;
 	totals.output += row.output;
@@ -345,8 +343,6 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	let budgetOverride: number | undefined;
 	let economy = false;
 	let noticeLevel = 0;
-	let lastViewSignature = "";
-	let lastView: GovernedMessage[] | undefined;
 	let resumed = false;
 	let initialized = false;
 	let effortCeiling: string | undefined;
@@ -424,8 +420,6 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		budgetOverride = undefined;
 		economy = false;
 		noticeLevel = 0;
-		lastViewSignature = "";
-		lastView = undefined;
 		resumed = false;
 		initialized = false;
 		effortCeiling = undefined;
@@ -535,7 +529,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 			}
 		})();
 		for (const entry of entries) {
-			if (entry?.type === "message" && entry.message?.role === "assistant" && entry.message.usage) addUsage(totals, entry.message.usage);
+			if (entry?.type === "message" && entry.message?.role === "assistant" && entry.message.usage) addUsage(totals, entry.message.usage, entry.message.provider);
 			if (entry?.type === "custom" && entry.customType === FOLD_ENTRY && isFoldState(entry.data)) latest = entry.data;
 			if (entry?.type === "custom" && entry.customType === EFFORT_ENTRY && entry.data?.version === 1) savedEffort = entry.data;
 		}
@@ -572,8 +566,6 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		fold = undefined;
 		foldCount = 0;
 		foldedTotalTokens = 0;
-		lastView = undefined;
-		lastViewSignature = "";
 		// The rewritten prefix has no provider cache: a level change is free.
 		effortCacheCold = true;
 	});
@@ -584,8 +576,6 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	pi.on("model_select", (_event: any, ctx: any) => {
 		// A smaller window can make the cached view illegal; re-evaluate the
 		// fold against the new effective budget on the next request.
-		lastView = undefined;
-		lastViewSignature = "";
 		effortMarks.clear();
 		effortCacheCold = true;
 		effortTurnErrors = 0;
@@ -650,12 +640,14 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 			assignmentJudged = true;
 		}
 		if (!effortInitialized) initEffort();
-		if (!effort || !effortCeiling || !jevEffortEnabled() || effortManual || economy) return;
+		if (!effort || !effortCeiling || !jevEffortEnabled() || effortManual || economy || event?.signal?.aborted) return;
+		const ceiling = effortCeiling;
+		const model = ctx?.model;
 		// A forked or resumed child replays history that is cached at its launch level: it keeps that level.
 		if (assignment && resumed) return;
 		// A child launches at the ceiling its role allows and steps down here
 		// like a main-session turn, judged on its assignment.
-		if (ctx?.model?.reasoning === false) return;
+		if (model?.reasoning === false) return;
 		// The judge reads what the caller wrote; the task context and sibling lines the harness appends are not the assignment.
 		const raw = typeof event?.prompt === "string" ? event.prompt : "";
 		const prompt = assignment ? ownBrief(raw) : raw;
@@ -665,23 +657,10 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		try { current = String(pi.getThinkingLevel()); } catch { return; }
 		if (levelRank(current) < 0) return;
 		effortLevelUsed = current;
-		// Restoring the ceiling is a level change like any other: on routes where
-		// a thinking change re-bills the cached prefix (DeepSeek, Anthropic,
-		// Qwen templates) an ungated step back up pays the full re-read the
-		// step-down gate exists to avoid, so the same miss budget applies. On
-		// other routes the level travels outside the cached prefix and quality
-		// wins immediately. A held restore is retried every turn and lands as
-		// soon as the prefix is cold or the growth since the ceiling mark is
-		// small; the tool-error burst restore stays immediate (work is failing).
-		const cacheBreaking = thinkingChangeBreaksPromptCache(ctx?.model);
+		// The cache budget limits optional demotions. The configured level
+		// still applies when this task needs it, even on a warm route.
 		const restoreCeiling = (message: string): void => {
-			if (current === effortCeiling) return;
-			if (cacheBreaking && !effortCacheCold) {
-				const promptTokens = Math.ceil((prompt.length + String(event?.systemPrompt ?? "").length) / 3.5);
-				const miss = effortMissTokens(effortCeiling, effortMarks, Math.max(totals.lastPromptTokens, promptTokens));
-				if (miss > EFFORT_SWITCH_BUDGET_TOKENS) return;
-			}
-			applyEffort(effortCeiling, ctx, message, "jev");
+			applyEffort(ceiling, ctx, message, "jev");
 		};
 		const classification = classifyEffortRequest(prompt, { assignment });
 		if (classification.kind === "ceiling") {
@@ -691,6 +670,33 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		if (classification.kind === "inherit") return;
 		const flat = prompt.replace(/\s+/g, " ").trim();
 		const shortPlain = flat.length <= 400;
+		const onOff = !!model && levelInForce("minimal", model) !== "off" && levelInForce("minimal", model) === levelInForce("high", model);
+		const targetFor = (tier: "easy" | "moderate") => levelInForce(
+			tier === "easy" && onOff ? "off" : effortLevelForTier(tier, ceiling, { shortPlain }),
+			model,
+		);
+		const promptTokens = Math.ceil((prompt.length + String(event?.systemPrompt ?? "").length) / 3.5);
+		const contextTokens = Math.max(totals.lastPromptTokens, promptTokens);
+		const cacheBreaking = !effortCacheCold && thinkingChangeBreaksPromptCache(model);
+		const gateFor = (target: string) => cacheBreaking
+			? gateEffortSwitch(target, current, effortMissTokens(target, effortMarks, contextTokens))
+			: { level: target };
+		const reportHeld = (target: string) => {
+			try {
+				sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("effort.held", {
+					to: current,
+					reason: `jev step to ${target} would re-read ~${Math.round(effortMissTokens(target, effortMarks, contextTokens))} tokens uncached`,
+				});
+			} catch { /* visibility only */ }
+		};
+		const targets = [targetFor("easy"), targetFor("moderate")];
+		if (current === levelInForce(ceiling, model) && targets.every(target => gateFor(target).level === current)) {
+			const held = targets.find(target => target !== current);
+			if (held) reportHeld(held);
+			return;
+		}
+		const deadline = AbortSignal.timeout(EFFORT_JUDGE_TIMEOUT_MS);
+		const signal = event?.signal ? AbortSignal.any([event.signal, deadline]) : deadline;
 		const judged = await askTypedDecision(
 			assignment ? "assignment-tier" : "effort-tier",
 			{ state: { request: assignment ? assignmentExcerpt(prompt) : flat.slice(0, 3000) } },
@@ -700,38 +706,20 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 					signal: options?.signal,
 					timeoutMs: EFFORT_JUDGE_TIMEOUT_MS,
 				}),
-				signal: event?.signal,
+				signal,
 			},
 		);
-		if (event?.signal?.aborted) return;
+		if (event?.signal?.aborted || effortManual || economy || ceiling !== effortCeiling
+			|| ctx?.model !== model || String(pi.getThinkingLevel()) !== current) return;
 		const verdictTier = judged.verdict?.tier;
 		const tier = judged.ok && (verdictTier === "easy" || verdictTier === "moderate") ? verdictTier : undefined;
 		if (!tier) {
 			restoreCeiling(`jev effort ${String(judged.reason ?? "abstained")}; configured level kept`);
 			return;
 		}
-		// On an on/off model every level is the same full thinking, so an easy request runs
-		// without it; the next message restores the configured level.
-		const onOff = !!ctx?.model && levelInForce("minimal", ctx.model) !== "off" && levelInForce("minimal", ctx.model) === levelInForce("high", ctx.model);
-		const target = tier === "easy" && onOff ? "off" : effortLevelForTier(tier, effortCeiling, { shortPlain });
-		// The current request's own prompt text is not yet in totals; include it
-		// so a first turn with a large paste cannot be judged cheap.
-		const promptTokens = Math.ceil((prompt.length + String(event?.systemPrompt ?? "").length) / 3.5);
-		const contextTokens = Math.max(totals.lastPromptTokens, promptTokens);
-		const miss = effortMissTokens(target, effortMarks, contextTokens);
-		// On a cold prefix no provider cache is lost by moving level; only a warm
-		// one pays the re-read. The first request of a session starts cold even
-		// though its system prompt and tool schemas are large.
-		const gate: { level: string; gated?: string; missTokens?: number } = effortCacheCold ? { level: target } : gateEffortSwitch(target, current, miss);
-		if (gate.gated) {
-			try {
-				sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("effort.held", {
-					to: current,
-					reason: `jev step to ${target} would re-read ~${Math.round(Number(gate.missTokens) || 0)} tokens uncached`,
-				});
-			} catch { /* visibility only */ }
-			return;
-		}
+		const target = targetFor(tier);
+		const gate = gateFor(target);
+		if (target !== current && gate.level === current) reportHeld(target);
 		if (gate.level === current) return;
 		applyEffort(gate.level, ctx, `jev: ${tier} request${shortPlain ? " (short)" : ""}`, "jev");
 	};
@@ -795,7 +783,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		} catch {
 			/* diagnostics never break a turn */
 		}
-		addUsage(totals, message.usage);
+		addUsage(totals, message.usage, message.provider);
 		// The request just sent at `effortLevelUsed` cached this prefix at that
 		// level; a later step back to it only re-reads what grew since.
 		if (effortLevelUsed && totals.lastPromptTokens > 0) effortMarks.set(effortLevelUsed, totals.lastPromptTokens);
@@ -803,13 +791,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 		const modelKey = `${message.provider ?? ""}/${message.model ?? ""}`;
 		if (modelKey !== lastModelKey) lastModelKey = modelKey;
 		const activated = maybeEconomy(ctx);
-		if (activated) {
-			lastView = undefined;
-			lastViewSignature = "";
-		}
 		if (!activated && economy && noticeLevel === 1 && totals.cost >= currentBudget() * 2) {
-			lastView = undefined;
-			lastViewSignature = "";
 			noticeLevel = 2;
 			notify(ctx, `Cost governor: session spend ${fmtUsd(totals.cost)} is now more than twice the soft budget. Keep the work moving with targeted reads and batched commands; verification still applies.`);
 		}
@@ -829,8 +811,6 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 	pi.on("context", (event: any, ctx: any) => {
 		if (!initialized) restore(ctx);
 		const messages = event.messages as GovernedMessage[];
-		const signature = `${messages.length}:${messageKey(messages[messages.length - 1])}`;
-		if (signature === lastViewSignature && lastView) return { messages: lastView };
 		const budget = effectiveContextBudget(ctx?.model);
 		resumed = false;
 		const keep = effectiveKeep(budget);
@@ -843,8 +823,6 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 				const tailGrew = viewTokens > budget + HYSTERESIS;
 				if (!tailGrew) {
 					const result = withNotice(view);
-					lastView = result;
-					lastViewSignature = signature;
 					return { messages: result };
 				}
 				const next = createFold(messages, { budgetTokens: budget, keepRecentTokens: keep, digestTokens });
@@ -858,13 +836,9 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 						/* persistence is useful, not required for this turn */
 					}
 					const result = withNotice(next.messages);
-					lastView = result;
-					lastViewSignature = signature;
 					return { messages: result };
 				}
 				const result = withNotice(view);
-				lastView = result;
-				lastViewSignature = signature;
 				return { messages: result };
 			}
 			fold = undefined;
@@ -872,14 +846,10 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 
 		const total = estimateMessagesTokens(messages);
 		if (total <= budget) {
-			lastViewSignature = signature;
-			lastView = undefined;
 			return undefined;
 		}
 		const result = createFold(messages, { budgetTokens: budget, keepRecentTokens: keep, digestTokens });
 		if (!result) {
-			lastViewSignature = signature;
-			lastView = undefined;
 			return undefined;
 		}
 		fold = result.fold;
@@ -891,8 +861,6 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 			/* persistence is useful, not required for this turn */
 		}
 		const view = withNotice(result.messages);
-		lastView = view;
-		lastViewSignature = signature;
 		return { messages: view };
 	});
 
@@ -933,8 +901,6 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 					budgetOverride = 0;
 					economy = false;
 					noticeLevel = 0;
-					lastView = undefined;
-					lastViewSignature = "";
 					restoreEffort(ctx);
 					notify(ctx, "Cost governor: soft budget disabled for this session; context/tool caps remain active and the configured thinking level is restored.");
 					return;
@@ -944,8 +910,6 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 					budgetUsd = defaultBudgetUsd();
 					economy = totals.cost >= budgetUsd && budgetUsd > 0;
 					noticeLevel = economy ? 1 : 0;
-					lastView = undefined;
-					lastViewSignature = "";
 					if (!economy) restoreEffort(ctx);
 					notify(ctx, `Cost governor: soft budget reset to ${budgetUsd > 0 ? fmtUsd(budgetUsd) : "off"}.`);
 					return;
@@ -958,8 +922,6 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 				budgetOverride = parsed;
 				economy = parsed > 0 && totals.cost >= parsed;
 				noticeLevel = economy ? 1 : 0;
-				lastView = undefined;
-				lastViewSignature = "";
 				if (!economy) restoreEffort(ctx);
 				notify(ctx, `Cost governor: soft budget set to ${parsed > 0 ? fmtUsd(parsed) : "off"} for this session.`);
 				return;
@@ -972,7 +934,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 			// session-facts.ts; each extension has its own module copy, so it is read
 			// from the shared symbol rather than imported.
 			const runState = (globalThis as any)[Symbol.for("yunus-pi.run.v1")];
-			const liveRun = typeof runState === "function" ? runState() : undefined;
+			const liveRun = typeof runState === "function" ? runState(ctx) : undefined;
 			const runCaps: string = liveRun?.budget ?? "";
 			const runLine = liveRun ? `Run: ${liveRun.minutes} min, ${liveRun.usd === undefined ? "$?" : `$${liveRun.usd.toFixed(3)}`}${runCaps ? ` of ${runCaps}` : ""}` : undefined;
 			const lines = [
@@ -985,7 +947,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 				`Context: budget ${fmtTokens(effectiveContextBudget(ctx?.model))} · ${cacheFirstRoute(ctx?.model) ? "cache-first, fold only near the window" : "fold at budget"} · keep ${fmtTokens(effectiveKeep(effectiveContextBudget(ctx?.model)))} · folds ${foldCount} (${fmtTokens(foldedTotalTokens)} folded)`,
 				`Tool caps: ${toolCaps} result(s), ${fmtTokens(Math.round(toolCharsSaved / 4))} estimated tokens kept out of the request`,
 				`Adaptive effort: ${adaptiveEffortEnabled ? "economy-only" : "off"}${effortAuto ? ` · auto ${effortAuto}${effortAutoSource ? ` (${effortAutoSource})` : ""}` : ""}${effortManual ? " · manual override" : ""} · ceiling ${effortCeiling ?? "?"}`,
-				`Jev effort: ${jevEffortEnabled() ? "on · one judged level decision per human turn" : "off"}${effortLevelUsed ? ` · current turn ${effortLevelUsed}` : ""}${effortMarks.size ? ` · levels seen ${[...effortMarks.keys()].join(", ")}` : ""}`,
+				`Jev effort: ${jevEffortEnabled() ? "on · up to one decision per eligible request" : "off"}${effortLevelUsed ? ` · current turn ${effortLevelUsed}` : ""}${effortMarks.size ? ` · levels seen ${[...effortMarks.keys()].join(", ")}` : ""}`,
 				"Policy: DeepSeek routes (any provider) are cache-first and fold only near the window so the automatic prefix cache stays warm; other routes fold at the budget. Folding is deterministic at a stable boundary; bash/search output is capped with a full-output spill; a soft budget tightens caps and, in economy mode only, lowers routine tool-continuation thinking while deep/error/large-change turns keep the configured ceiling. Outside economy mode Jev may lower the level once per human turn only when both typed scores say the request is simple and the cache miss fits the switch budget; ambiguous answers, goal rounds and tool-error bursts keep the configured ceiling. /budget off restores the configured level, PI_CONTEXT_GOVERNOR=off disables the governor, PI_ADAPTIVE_EFFORT=off disables economy thinking, PIJEV_EFFORT=off disables Jev effort routing.",
 			];
 			notify(ctx, lines.join("\n"));

@@ -2,7 +2,7 @@
 
 YunusPi owns its core source under `core/`. Pi 0.85.1 is its historical origin, not a runtime package or release authority. There is no upstream version check, background release notification, latest-Pi install, patch-after-install step or automatic compatibility probe against future Pi versions.
 
-A bare `yunuspi update` explains the policy without network access or mutation. To update, obtain and review a YunusPi release checkout, stop active sessions, then run:
+A bare `yunuspi update` explains the policy without network access or mutation. To update, obtain and review a YunusPi source checkout, stop active sessions, then run:
 
 ```sh
 yunuspi update --source /path/to/reviewed/yunuspi
@@ -12,7 +12,7 @@ The command invokes that explicitly selected checkout's installer with `--apply 
 
 Use `--offline --skip-needle` when all third-party dependencies are already cached. Offline mode never checks a registry or downloads optional model assets. A missing cache entry rejects the install before activation. Online mode downloads lockfile-selected third-party dependencies and optionally pinned Needle assets; it never downloads a Pi implementation.
 
-Updates carry forward private settings, credentials, provider state, sessions, memory, local helper data and custom source files inside the installation. Managed-file SHA256 hashes distinguish public source from local additions. A local change to a managed file is preserved when the incoming release leaves that file unchanged; conflicting incoming/local edits reject the update before activation. Locally deleted source stays deleted unless the incoming release also changes it, which requires review. Large private runtime directories such as `local-models`, `sessions`, and `worktrees` move intact from the renamed old installation into the staged replacement after source and build checks pass, so model weights and virtual environments are not copied. A move journal restores them if activation fails. The adjacent backup retains the previous managed source and configuration; active private state stays in the current installation. Symlinks outside those deferred directories and special files are rejected without reading their referents. Generated dependency links are recreated. Local changes inside `runtime/core` must first be ported into the reviewed source checkout; core source hashes reject an update that would discard those changes. Build outputs and dependencies are rebuilt from that source.
+Updates carry forward private settings, credentials, provider state, sessions, memory, local helper data and custom source files inside the installation. Managed-file SHA256 hashes distinguish public source from local additions. A local change to a managed file is preserved when the incoming source leaves that file unchanged; conflicting incoming/local edits reject the update before activation. Locally deleted source stays deleted unless the incoming source also changes it, which requires review. Large private runtime directories such as `local-models`, `sessions`, and `worktrees` move intact from the renamed old installation into the staged replacement after source and build checks pass, so model weights and virtual environments are not copied. A move journal restores them if activation fails. The adjacent backup retains the previous managed source and configuration; active private state stays in the current installation. Symlinks outside those deferred directories and special files are rejected without reading their referents. Generated dependency links are recreated. Local changes inside `runtime/core` must first be ported into the reviewed source checkout; core source hashes reject an update that would discard those changes. Build outputs and dependencies are rebuilt from that source.
 
 An installation without a valid managed-file receipt needs an explicit reviewed migration; the updater does not guess ownership. The standalone installer with `--backup-existing` retains its documented fresh-install semantics and initializes public settings/models. Private state is never copied into the public checkout. Validate the updated installation:
 
@@ -25,7 +25,7 @@ For rollback, stop sessions, move the new `~/.pi/agent` directory aside, and ren
 
 The old `auto-update.sh` entrypoint remains for existing user timers. It performs local verification only. It never modifies a core, resolves a version, installs packages, reapplies code patches or prunes session history. Optional old systemd update/repair watchers are no longer installed by the verifier; users may disable obsolete timers locally.
 
-Maintainers may deliberately review and port individual upstream changes using [the upstream porting policy](../UPSTREAM-PORTING.md). Such a change becomes a reviewed YunusPi commit with YunusPi tests and release identity. Upstream publication alone does nothing.
+Maintainers may deliberately review and port individual upstream changes using [the upstream porting policy](../UPSTREAM-PORTING.md). Such a change becomes a reviewed YunusPi commit with YunusPi tests and source identity. Upstream publication alone does nothing.
 
 ## Regression coverage
 

@@ -78,3 +78,28 @@ test('the real agent loop folds an oversized request view while keeping the dura
 	assert.equal(session.messages.filter((message) => message.role === 'toolResult').length, 10, 'the durable transcript still has every tool result');
 	assert.ok(session.messages.length > 10, 'the session history was not truncated');
 });
+
+test('a folded request keeps a prior hook change even when the message count and tail match', t => {
+	const prior = { budget: process.env.PI_CONTEXT_BUDGET, keep: process.env.PI_CONTEXT_KEEP, governor: process.env.PI_CONTEXT_GOVERNOR };
+	process.env.PI_CONTEXT_BUDGET = '8000';
+	process.env.PI_CONTEXT_KEEP = '2000';
+	delete process.env.PI_CONTEXT_GOVERNOR;
+	t.after(() => {
+		for (const [key, value] of Object.entries({ PI_CONTEXT_BUDGET: prior.budget, PI_CONTEXT_KEEP: prior.keep, PI_CONTEXT_GOVERNOR: prior.governor })) {
+			if (value === undefined) delete process.env[key]; else process.env[key] = value;
+		}
+	});
+	const hooks = new Map();
+	extension({ on: (event, handler) => hooks.set(event, handler), registerTool() {}, registerCommand() {}, appendEntry() {} });
+	const ctx = { model: { provider: 'fixture', id: 'fixture', contextWindow: 131072 } };
+	const history = Array.from({ length: 8 }, (_, i) => ({
+		role: 'assistant', content: [{ type: 'text', text: 'x'.repeat(6000) }], timestamp: i,
+	}));
+	const detail = { role: 'assistant', content: [{ type: 'text', text: 'Original constraint' }], timestamp: history.length };
+	const tail = { role: 'user', content: [{ type: 'text', text: 'Continue' }], timestamp: history.length + 1 };
+	const call = message => hooks.get('context')({ messages: [...history, message, tail] }, ctx).messages;
+	assert.match(JSON.stringify(call(detail)), /Original constraint/);
+	const changed = call({ ...detail, content: [{ type: 'text', text: 'Updated constraint' }] });
+	assert.match(JSON.stringify(changed), /Updated constraint/);
+	assert.doesNotMatch(JSON.stringify(changed), /Original constraint/);
+});

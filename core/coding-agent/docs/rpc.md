@@ -369,8 +369,10 @@ Control how steering messages (from `steer`) are delivered.
 ```
 
 Modes:
-- `"all"`: Deliver all steering messages after the current assistant turn finishes executing its tool calls
-- `"one-at-a-time"`: Deliver one steering message per completed assistant turn (default)
+- `"all"`: Deliver all pending steering messages in order before the next model request (default)
+- `"one-at-a-time"`: Deliver one steering message per model request
+
+User steering defers unstarted tool calls from the current assistant response. Running tools can finish. Use `follow_up` to let the current work finish before delivering an addition.
 
 Response:
 ```json

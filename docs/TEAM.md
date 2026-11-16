@@ -42,7 +42,7 @@ A value the settings cannot accept stops the launch with one line naming the fil
 
 ## Thinking level
 
-How hard a model thinks is decided for every model in the team, not chosen by the model itself. For the session, the decision model (Jev) reads each message from you and may lower the thinking level for that run, never above the level you set. For a child, it reads the assignment once, when the child starts, and may lower the level the child was launched with; that level then holds for the child's whole life, so its prompt cache is never disturbed by a change of level. A long brief or one with code in it no longer forces the top level. If the decision cannot be made (no key, no answer, an unclear answer), the launch level stays.
+Jev may lower thinking on an eligible request or on a fresh child's first assignment. The check takes at most two seconds. It skips cases where every possible result leaves the current level in place, including costly cache misses. Complex work and explicit requests to think carefully use the configured ceiling. A failed or unclear decision also uses the ceiling. Manual thinking selections take precedence.
 
 ## Forked children
 
@@ -58,7 +58,7 @@ A message from you that starts a run is followed by one line the model cannot ge
 
 `Now: Sat 14 Nov 2026, 16:02 (Europe/Istanbul). Session: $0.034, context 41k of 128k tokens, cache hits 96%. Last run: 12 min, $0.021.`
 
-A second line reminds it that the working notes apply to this message. Both are stored once and never rewritten, so they do not disturb the prompt cache. A figure that is not known (no price for the model, no earlier run) is left out. A message you send while a run is still working joins that run and gets no line of its own.
+The facts line and any matching guide hints are stored once. Unknown figures are omitted. Working notes live in the system prompt. Steering joins the current run and shares its cost and time budget.
 
 ## Free models
 
@@ -76,7 +76,7 @@ What counts as usable: a model whose name ends in `:free`, that takes tools, has
 
 ## Run budget
 
-A run is everything the session does after one message from you. When a run passes `softMinutes` or `softUsd` (the session's cost since your message, children included), the model gets one note, which you see in the conversation too, asking it to finish what is in hand, check every open demand and report. At twice a limit one closing note follows. Nothing is stopped. Only time the agent is at work counts: the wait for your next message does not, nor does a gap of more than 10 minutes between two events. `/budget` shows the run: `Run: 12 min, $0.021 of 60 min / $1.00`.
+A run starts with a request sent while the session is idle. Passing `softMinutes` or `softUsd` (including child costs) adds one note asking the model to focus on finishing and verifying the requested work. At twice a limit it gets one more note. The limits are advisory. Time spent waiting for you and gaps over ten minutes are excluded. `/budget` shows the run, for example `Run: 12 min, $0.021 of 60 min / $1.00`.
 
 ## Advisor
 

@@ -137,19 +137,3 @@ export class SuggestionBudget {
 	record(turn: number): void { this.shown++; this.lastTurn = turn; }
 	get used(): number { return this.shown; }
 }
-
-/** Same-model goal verification: compare criteria against recorded evidence only. */
-export function openCriteria<T extends { id: string; status: string }>(criteria: readonly T[]): T[] {
-	return criteria.filter((c) => c.status === "open");
-}
-
-export function selfVerificationPrompt(goalText: string, criteria: readonly { id: string; text?: string; label?: string }[]): string {
-	const list = criteria.map((c) => `- ${c.id}: ${c.text ?? c.label ?? ""}`).join("\n");
-	return [
-		"Verify your own work against the goal before finishing. Use the same model and this session's history — no external reviewer.",
-		`Goal: ${goalText}`,
-		"Criteria:",
-		list || "- (none recorded)",
-		"For each criterion, name the concrete evidence you observed (command + result, file + line, rendered output). Mark anything without evidence as open and keep working on it. Do not claim completion for unobserved work.",
-	].join("\n");
-}

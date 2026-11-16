@@ -40,5 +40,5 @@
     ]
   },
   "releaseAuthority": "yunusemrejr/yunuspi",
-  "updatePolicy": "explicit YunusPi source releases only; no upstream version queries"
+  "updatePolicy": "explicit YunusPi source checkouts only; no upstream version queries"
 }

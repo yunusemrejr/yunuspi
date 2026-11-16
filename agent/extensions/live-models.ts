@@ -183,7 +183,7 @@ function modelRows<T extends { id: string }>(value: unknown): T[] {
 }
 function validModels(value: unknown): LiveCatalogModel[] {
 	if (!Array.isArray(value)) return [];
-	return value.filter(
+	const models = value.filter(
 		(m): m is LiveCatalogModel =>
 			isRecord(m) &&
 			typeof m.id === "string" &&
@@ -203,6 +203,12 @@ function validModels(value: unknown): LiveCatalogModel[] {
 				return typeof cost === "number" && Number.isFinite(cost) && cost >= 0;
 			}),
 	);
+	const ids = new Set<string>();
+	return models.filter(model => {
+		if (ids.has(model.id)) return false;
+		ids.add(model.id);
+		return true;
+	});
 }
 function readCacheFile(): CacheFile {
 	const cache: CacheFile = { version: 1, providers: {} };
@@ -1644,7 +1650,7 @@ function publishModels(
 ): LiveCatalogModel[] {
 	const idOnly = ["cerebras", "deepseek", "ant-ling"].includes(provider);
     const officialDeepSeek = provider === "deepseek" && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""));
-    // Publish the documented canonical ID even when an old cache predates release.
+    // Keep the canonical ID available in older cached lists.
     if (officialDeepSeek && idOnlyFacts("deepseek")["deepseek-flash"] && !models.some(m => m.id === "deepseek-flash"))
         models = [...models, {...minimalModel("deepseek-flash", provider, 384_000), ...idOnlyFacts("deepseek")["deepseek-flash"]}];
 	const store = idOnly || provider === "together" ? storeModels(provider) : undefined;

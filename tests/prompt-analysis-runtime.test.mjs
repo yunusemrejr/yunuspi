@@ -26,22 +26,24 @@ function reply(prompt, extra = {}) {
 }
 
 for (const kind of ['initial', 'followup']) {
-	test(`${kind}: a 90-second preferred response survives the default deadline`, async t => {
+	const attemptMs = kind === 'initial' ? 4_000 : 2_000;
+	const responseMs = attemptMs - 500;
+	test(`${kind}: an advisory arriving within its short allowance is accepted`, async t => {
 		t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
 		const prompt = 'Preserve the endpoint behavior.';
 		const starts = [];
 		const pending = runtime.runPromptAnalysis({ prompt, kind,
 			candidates: [
-				{ route: 'xiaomi/primary', complete: () => new Promise(resolve => setTimeout(() => resolve({ text: reply(prompt) }), 90_000)) },
+				{ route: 'xiaomi/primary', complete: () => new Promise(resolve => setTimeout(() => resolve({ text: reply(prompt) }), responseMs)) },
 				{ route: 'meta/fallback', complete: async () => { throw new Error('Fallback should not run'); } },
 			], onStart: value => starts.push(value) });
 		await new Promise(resolve => setImmediate(resolve));
-		t.mock.timers.tick(90_000);
+		t.mock.timers.tick(responseMs);
 		const result = await pending;
 		assert.equal(result.status, 'model');
 		assert.equal(result.route, 'xiaomi/primary');
-		assert.equal(result.durationMs, 90_000);
-		assert.deepEqual(starts.map(value => value.timeoutMs), [120_000]);
+		assert.equal(result.durationMs, responseMs);
+		assert.deepEqual(starts.map(value => value.timeoutMs), [attemptMs]);
 	});
 
 	test(`${kind}: Meta still has a full allowance after Xiaomi times out`, async t => {
@@ -52,34 +54,34 @@ for (const kind of ['initial', 'followup']) {
 		const pending = runtime.runPromptAnalysis({ prompt, kind,
 			candidates: [
 				{ route: 'xiaomi/primary', complete: ({ signal }) => { firstSignal = signal; return new Promise(() => {}); } },
-				{ route: 'meta/fallback', complete: () => new Promise(resolve => setTimeout(() => resolve({ text: reply(prompt) }), 90_000)) },
+				{ route: 'meta/fallback', complete: () => new Promise(resolve => setTimeout(() => resolve({ text: reply(prompt) }), responseMs)) },
 			], onStart: value => starts.push(value), onAttempt: value => outcomes.push(value) });
 		await new Promise(resolve => setImmediate(resolve));
-		t.mock.timers.tick(120_000);
+		t.mock.timers.tick(attemptMs);
 		await new Promise(resolve => setImmediate(resolve));
 		assert.equal(firstSignal.aborted, true);
-		assert.deepEqual(starts.map(value => value.timeoutMs), [120_000, 120_000]);
-		t.mock.timers.tick(90_000);
+		assert.deepEqual(starts.map(value => value.timeoutMs), [attemptMs, attemptMs]);
+		t.mock.timers.tick(responseMs);
 		const result = await pending;
 		assert.equal(result.status, 'model');
 		assert.equal(result.route, 'meta/fallback');
-		assert.equal(result.durationMs, 210_000);
+		assert.equal(result.durationMs, attemptMs + responseMs);
 		assert.deepEqual(outcomes.map(value => value.outcome), ['timeout', 'complete']);
 	});
 
-	test(`${kind}: stalled providers remain bounded by the four-minute deadline`, async t => {
+	test(`${kind}: stalled providers fall back within the advisory deadline`, async t => {
 		t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
 		const signals = [];
 		const pending = runtime.runPromptAnalysis({ prompt: 'Preserve the endpoint behavior.', kind,
 			candidates: ['xiaomi/primary', 'meta/fallback', 'unused/third'].map(route => ({ route,
 				complete: ({ signal }) => { signals.push(signal); return new Promise(() => {}); } })) });
 		await new Promise(resolve => setImmediate(resolve));
-		t.mock.timers.tick(120_000);
+		t.mock.timers.tick(attemptMs);
 		await new Promise(resolve => setImmediate(resolve));
-		t.mock.timers.tick(120_000);
+		t.mock.timers.tick(attemptMs);
 		const result = await pending;
 		assert.equal(result.status, 'fallback');
-		assert.equal(result.durationMs, 240_000);
+		assert.equal(result.durationMs, attemptMs * 2);
 		assert.equal(signals.length, 2);
 		assert.ok(signals.every(signal => signal.aborted));
 	});

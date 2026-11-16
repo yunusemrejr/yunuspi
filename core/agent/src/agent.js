@@ -54,15 +54,18 @@ class PendingMessageQueue {
     constructor(mode) {
         this.mode = mode;
     }
-    enqueue(message) {
-        this.messages.push(message);
+    enqueue(message, interrupt = false) {
+        this.messages.push({ message, interrupt });
     }
     hasItems() {
         return this.messages.length > 0;
     }
+    hasInterrupt() {
+        return this.messages.some(entry => entry.interrupt);
+    }
     drain() {
         if (this.mode === "all") {
-            const drained = this.messages.slice();
+            const drained = this.messages.map(entry => entry.message);
             this.messages = [];
             return drained;
         }
@@ -71,7 +74,7 @@ class PendingMessageQueue {
             return [];
         }
         this.messages = this.messages.slice(1);
-        return [first];
+        return [first.message];
     }
     clear() {
         this.messages = [];
@@ -170,8 +173,8 @@ export class Agent {
         return this.followUpQueue.mode;
     }
     /** Queue a message to be injected after the current assistant turn finishes. */
-    steer(message) {
-        this.steeringQueue.enqueue(message);
+    steer(message, { interrupt = message.role === "user" } = {}) {
+        this.steeringQueue.enqueue(message, interrupt);
     }
     /** Queue a message to run only after the agent would otherwise stop. */
     followUp(message) {
@@ -313,6 +316,7 @@ export class Agent {
             convertToLlm: this.convertToLlm,
             transformContext: this.transformContext,
             getApiKey: this.getApiKey,
+            hasInterruptingSteering: () => this.steeringQueue.hasInterrupt(),
             getSteeringMessages: async () => {
                 if (skipInitialSteeringPoll) {
                     skipInitialSteeringPoll = false;

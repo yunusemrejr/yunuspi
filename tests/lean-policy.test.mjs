@@ -66,11 +66,3 @@ test('suggestions are capped at two and decay', () => {
   budget.record(20);
   assert.equal(budget.shouldShow(100, 1), false); // cap reached
 });
-
-test('goal self-verification prompt carries goal, criteria and evidence demand', () => {
-  const prompt = lean.selfVerificationPrompt('Ship the fix', [{ id: 'C1', text: 'Tests pass' }]);
-  assert.match(prompt, /Verify your own work/);
-  assert.match(prompt, /Ship the fix/);
-  assert.match(prompt, /C1: Tests pass/);
-  assert.deepEqual(lean.openCriteria([{ id: 'C1', status: 'open' }, { id: 'C2', status: 'met' }]).map(c => c.id), ['C1']);
-});

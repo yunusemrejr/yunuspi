@@ -34,6 +34,16 @@ Definite system/home/temp-root mutations are blocked even from a broadly rooted 
 
 ## Commands that reach beyond the project
 
+For eligible native writes outside the workspace, the interactive **Additional
+write scope** dialog shows the file, operation and session grant. An explicit
+`cp [--] source destination` can request **Confirm external file copy** when a
+regular workspace file is copied to a specific ordinary file under the user's
+home. The dialog shows the command and whether it would replace a file. The
+approval covers that invocation and is rechecked against the inspected paths
+and file metadata. In a headless session the agent should surface the exact
+action and reason to the user, or to the parent for a delegated task. Resume
+the action through an interactive approval or a user-authorized project session.
+
 Some commands are not dangerous to the files in front of them and still should not happen unasked. The hook names these from the parsed command (never from text inside quotes, comments or data), and each is settled by evidence instead of by a standing prompt:
 
 | The command | Examples | How it is settled |

@@ -199,15 +199,16 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
     /**
      * Returns steering messages to inject into the conversation mid-run.
      *
-     * Called after the current assistant turn finishes executing its tool calls, unless `shouldStopAfterTurn` exits first.
+     * Called at turn boundaries, unless `shouldStopAfterTurn` exits first.
      * If messages are returned, they are added to the context before the next LLM call.
-     * Tool calls from the current assistant message are not skipped.
      *
      * Use this for "steering" the agent while it's working.
      *
      * Contract: must not throw or reject. Return [] when no steering messages are available.
      */
     getSteeringMessages?: () => Promise<AgentMessage[]>;
+    /** Non-consuming check. Pending steering defers tool calls that have yet to start. Must not throw. */
+    hasInterruptingSteering?: () => boolean;
     /**
      * Returns follow-up messages to process after the agent would otherwise stop.
      *

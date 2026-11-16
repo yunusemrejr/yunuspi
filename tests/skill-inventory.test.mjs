@@ -42,7 +42,7 @@ test("every shipped skill has a unique routable manifest and resolvable referenc
       const start = line.indexOf("](");
       if (start < 0) continue;
       const target = line.slice(start + 2).split(")", 1)[0].split("#", 1)[0];
-      if (!target.startsWith("references/") && !target.startsWith("assets/")) continue;
+      if (!["references/", "assets/", "examples/"].some(prefix => target.startsWith(prefix))) continue;
       assert.ok(fs.existsSync(path.join(path.dirname(entry.file), target)), `${name}: missing ${target}`);
     }
   }

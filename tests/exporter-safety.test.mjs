@@ -230,6 +230,21 @@ test("video JSX/TSX source and named public SVG fixtures survive export without 
   } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
 });
 
+test("export keeps the shipped UI example without admitting other HTML in that directory", () => {
+  const f = fixture();
+  const examples = "skills/ui-design/examples";
+  try {
+    fs.mkdirSync(path.join(f.source, examples), { recursive: true });
+    const markup = "<!doctype html><title>Sample inventory</title>\n";
+    fs.writeFileSync(path.join(f.source, examples, "equipment-checkout.html"), markup);
+    fs.writeFileSync(path.join(f.source, examples, "other.html"), markup);
+    const result = f.run();
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(fs.readFileSync(path.join(f.output, "agent", examples, "equipment-checkout.html"), "utf8"), markup);
+    assert.equal(fs.existsSync(path.join(f.output, "agent", examples, "other.html")), false);
+  } finally { fs.rmSync(f.dir, { recursive: true, force: true }); }
+});
+
 test("JSX and TSX remain subject to executable home-path and exact credential guards", () => {
   for (const extension of ['jsx', 'tsx']) {
     const f = fixture();

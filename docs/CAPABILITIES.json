@@ -2797,12 +2797,12 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 927
+        "line": 895
       },
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1857
+        "line": 1863
       },
       {
         "name": "claude-cache",
@@ -2842,7 +2842,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 468
+        "line": 486
       },
       {
         "name": "google-account",
@@ -3077,7 +3077,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          482
+          500
         ]
       },
       {
@@ -3337,7 +3337,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 414,
+        "line": 415,
         "kind": "literal"
       },
       {
@@ -3391,7 +3391,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 260,
+        "line": 258,
         "kind": "literal"
       },
       {
@@ -3689,7 +3689,7 @@
       {
         "name": "micro_status",
         "source": "agent/extensions/micro-intelligence.ts",
-        "line": 414,
+        "line": 415,
         "kind": "literal"
       },
       {
@@ -3731,7 +3731,7 @@
       {
         "name": "read_many",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 260,
+        "line": 258,
         "kind": "literal"
       },
       {

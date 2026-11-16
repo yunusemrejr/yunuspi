@@ -95,7 +95,7 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: node scripts/check-public.mjs
-      - run: node scripts/version-release.mjs "$(node -p "require('./package.json').version")"
+      - run: node scripts/sync-versions.mjs "$(node -p "require('./package.json').version")"
       - run: npm ci --ignore-scripts --no-audit --no-fund --prefer-offline
       - run: npm run build:core
       - run: node agent/scripts/generate-capabilities-doc.mjs --root "$PWD" --check

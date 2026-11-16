@@ -337,8 +337,7 @@ async function executeToolCallsSequential(currentContext, assistantMessage, tool
             };
         }
         else {
-            const executed = await executePreparedToolCall(preparation, signal, emit);
-            finalized = await finalizeExecutedToolCall(currentContext, assistantMessage, preparation, executed, config, signal);
+            finalized = await executeOrDeferToolCall(currentContext, assistantMessage, preparation, config, signal, emit);
         }
         await emitToolExecutionEnd(finalized, emit);
         const toolResultMessage = createToolResultMessage(finalized);
@@ -387,8 +386,7 @@ async function executeToolCallsParallel(currentContext, assistantMessage, toolCa
                 await emitToolExecutionEnd(finalized, emit);
                 return finalized;
             }
-            const executed = await executePreparedToolCall(preparation, signal, emit);
-            const finalized = await finalizeExecutedToolCall(currentContext, assistantMessage, preparation, executed, config, signal);
+            const finalized = await executeOrDeferToolCall(currentContext, assistantMessage, preparation, config, signal, emit);
             await emitToolExecutionEnd(finalized, emit);
             return finalized;
         });
@@ -424,7 +422,13 @@ function prepareToolCallArguments(tool, toolCall) {
         arguments: preparedArguments,
     };
 }
+function deferredToolResult() {
+    return createErrorToolResult("Tool call deferred because a user steering message is waiting. Reconsider it after reading the new instruction.");
+}
 async function prepareToolCall(currentContext, assistantMessage, toolCall, config, signal) {
+    if (config.hasInterruptingSteering?.()) {
+        return { kind: "immediate", result: deferredToolResult(), isError: true };
+    }
     const tool = currentContext.tools?.find((t) => t.name === toolCall.name);
     if (!tool) {
         return {
@@ -483,6 +487,15 @@ async function prepareToolCall(currentContext, assistantMessage, toolCall, confi
             isError: true,
         };
     }
+}
+async function executeOrDeferToolCall(currentContext, assistantMessage, preparation, config, signal, emit) {
+    // Steering can arrive while a preflight hook or another set of tools is running.
+    // Keep a paired result for each call and leave already-started tools alone.
+    if (config.hasInterruptingSteering?.()) {
+        return { toolCall: preparation.toolCall, result: deferredToolResult(), isError: true };
+    }
+    const executed = await executePreparedToolCall(preparation, signal, emit);
+    return finalizeExecutedToolCall(currentContext, assistantMessage, preparation, executed, config, signal);
 }
 async function executePreparedToolCall(prepared, signal, emit) {
     const updateEvents = [];

@@ -241,7 +241,20 @@ test('a costly re-read holds the ceiling and is reported as an effort hold', asy
     await f.turn('what does the json flag mean');
     assert.equal(f.thinking(), 'high', 'a demotion that would re-read the whole warm prefix is refused');
     assert.ok(f.health.some(event => event.kind === 'effort.held' && /jev step to minimal/.test(event.data.reason)));
-    assert.equal(calls.length, 1, 'the judge still answered; only the change was gated');
+    assert.equal(calls.length, 0, 'no judge call when every possible demotion is unaffordable');
+  } finally { f.cleanup(); }
+});
+
+test('explicit deeper steering into the next request restores the ceiling despite a warm cache', async () => {
+  const calls = mockJev();
+  const f = await start();
+  try {
+    await f.turn('what does the json flag mean');
+    assert.equal(f.thinking(), 'minimal');
+    f.usage(60_000);
+    await f.turn('Think carefully about it.');
+    assert.equal(f.thinking(), 'high');
+    assert.equal(calls.length, 1, 'the explicit request never asks Jev to override it');
   } finally { f.cleanup(); }
 });
 

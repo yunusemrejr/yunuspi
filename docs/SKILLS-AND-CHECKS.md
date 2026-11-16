@@ -16,13 +16,14 @@ do not consume the queue. Suggestions are not evidence that a skill was read.
 
 A folder listed under `skills` in `settings.json` (for example `~/skills`) is loaded before the shipped catalogue, and when a skill has the same name in both, your copy wins without a warning. That is deliberate, so a customized skill is never overwritten. The cost is that a copy made earlier keeps hiding every later improvement to the shipped skill, including tool names that changed: on one machine 37 copies of an older library told the model to run raw `ffmpeg` and `libreoffice` while the shipped skills named `audio_analyze` and `office_doc`. `node scripts/skill-mirrors.mjs` lists the skills whose copy under your own paths differs from the shipped one and what differs, `--json` prints the same as data, and `--apply` brings them in step: the original directories are copied to `backups/skill-mirrors-<time>/` first, shipped files overwrite files of the same name, and files only you have and skills the harness does not ship are left alone. `verify-harness` prints the same finding as an informational line, so it is not a failure when a difference is intended.
 
-## Consult skill guides when useful
+## Read relevant guides and examples
 
-Skills are optional reference guides and documentation, not rules or prerequisites
-for using tools. The agent may consult a guide when it helps the next decision,
-adapt useful steps, and skip unrelated sections even when the guide uses mandatory
-wording. User instructions, actual tool contracts and safety boundaries take
-precedence. Skill text grants no permissions and does not expand the task.
+For a clear match, open the installed `SKILL.md` before choosing an approach.
+Batch that read with independent source inspection when possible. If a specific
+example helps, open it on the next call. Adapt the behavior to the project and
+its stack. Each guide can link to its own examples so those files stay out of
+the default prompt. User instructions, tool contracts and safety boundaries
+take precedence. There is no tool gate or call quota for reading a guide.
 
 The reminders owner still selects task and file references and offers bounded
 suggestions. `skill_review` supports grouped browsing, metadata search, inspecting
@@ -41,8 +42,8 @@ available independently of ambient suggestions.
 Read tracking stays evidence-based. Failed, truncated or unverified reads do not
 establish consumption; a suggestion and a deferral never count as reads. Compaction
 can retire consumed source text without creating an obligation to reload it.
-Parent, child, full-catalog and explicit `/skill:name` prompts all describe skills
-as references. Safety hooks and tool capability ceilings retain their own authority.
+Parent and child prompts use this same approach. A successful guide read is
+evidence of access to its contents. Verification comes from the result.
 
 ## Use tools throughout a workflow
 

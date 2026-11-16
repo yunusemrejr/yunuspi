@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { completionReport, createStaticCompletionCheck, staticAdvisories, staticCompletionSteps } from '../agent/extensions/lib/completion-check.ts';
+import { completionReport, createStaticCompletionCheck, staticCompletionSteps } from '../agent/extensions/lib/completion-check.ts';
 import { checkSourceText } from '../agent/extensions/lib/source-check.ts';
 import { createGoal, goalCompletionGate, goalCompletionReceipts } from '../agent/extensions/lib/goal-state.ts';
 
@@ -79,19 +79,6 @@ test('static steps gate goal completion once and a repeated call is a recorded w
   refused.add(first.key);
   const second = goalCompletionGate(goal, { unverifiedWrites: 0, refused, verification: [step] });
   assert.deepEqual([second.block, second.waived], [false, true]);
-});
-
-test('source-quality advisories name duplicated blocks in changed files and stay silent otherwise', async t => {
-  const dir = repo(t);
-  assert.deepEqual(await staticAdvisories(dir), [], 'a clean tree has nothing to say');
-  const block = name => `export function ${name}(items) {\n  let sum = 0;\n  for (const item of items) {\n    if (item.price > 0 && item.qty > 0) { sum += item.price * item.qty * (1 - (item.discount || 0)); }\n  }\n  return Math.round(sum * 100) / 100;\n}\n`;
-  fs.writeFileSync(path.join(dir, 'ok.js'), `${block('total')}\n${block('total2')}`);
-  const notes = await staticAdvisories(dir);
-  assert.ok(notes.some(note => /duplicated block group/.test(note)), JSON.stringify(notes));
-  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'completion-check-nogit-'));
-  t.after(() => fs.rmSync(bare, { recursive: true, force: true }));
-  fs.writeFileSync(path.join(bare, 'ok.js'), `${block('a')}\n${block('b')}`);
-  assert.deepEqual(await staticAdvisories(bare), [], 'no Git baseline, no advisories');
 });
 
 test('completion reuses current parse results but catches same-size same-mtime edits and cached failures', async t => {

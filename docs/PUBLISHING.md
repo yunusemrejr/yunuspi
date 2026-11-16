@@ -1,16 +1,16 @@
-# Public release boundary
+# Public source boundary
 
 Never initialize Git in the live `~/.pi` directory. Never publish a private backup ZIP or session HTML/JSON export: restore backups contain credentials; session exports can contain personal prose.
 
 The public exporter reads only reusable extensions, skills, runtime scripts, explicitly listed synthetic core compatibility checks and dependency manifests. It excludes live settings/authentication, provider caches, histories, memories, logs, sessions, experiments, private benchmark fixtures, backups, node_modules, model weights and environments. It substitutes the source fallback credential with an environment lookup and normalizes personal home-path examples. The working local installation is not modified.
 
-## Release identity
+## Source identity
 
-YunusPi is distributed as source rather than as a published npm package, so Git history and package metadata serve different purposes. The full Git commit SHA is the authoritative identity of a development build; `main`, branch names, dates and words such as "latest" are moving references. The root `package.json` version describes the current compatibility/release line and does not by itself mean a GitHub Release exists. Keep its `package-lock.json` synchronized.
+YunusPi is distributed as source rather than as a published npm package, so Git history and package metadata serve different purposes. The full Git commit SHA is the authoritative identity of a development build; `main`, branch names, dates and words such as "latest" are moving references. The root `package.json` version describes the current compatibility line and does not by itself mean a GitHub Release exists. Keep its `package-lock.json` synchronized.
 
 The YunusPi core has its own version lineage, starting at `0.1.0`, recorded in the owned workspace package manifests and `core/identity.json`. Its historical origin is Pi `0.85.1`; that attribution is immutable and is not an upgrade target. The product version, owned-core versions and source Git SHA describe different identities. Core changes are reviewed as YunusPi source changes and tested against the maintained harness. Upstream versions never update the lockfile, installed runtime or notifications automatically. See [manual upstream porting](../UPSTREAM-PORTING.md).
 
-Public export must preserve the reviewed `core/` source, root workspace metadata and build script from the YunusPi repository. These cannot be reconstructed from a private installation's upstream packages. Never publish an agent-only export as a complete release.
+Public export must preserve the reviewed `core/` source, root workspace metadata and build script from the YunusPi repository. These cannot be reconstructed from a private installation's upstream packages. Never publish an agent-only export as a complete source distribution.
 
 Publication is a push to `main`. There are no release tags and no GitHub Releases, and nothing waits on CI. Raise the root package version, with the lockfile, in the same commit as a change that is worth a new number.
 
@@ -18,7 +18,7 @@ Use Semantic Versioning according to intended public behavior, not commit count 
 
 ## Version consistency
 
-Run `node scripts/version-release.mjs X.Y.Z --write` to update the product, six owned packages, owned workspace dependency versions, lockfile and template metadata together. Without `--write`, the command checks consistency and fails on drift. It never changes the historical upstream attribution or third-party dependency versions.
+Run `node scripts/sync-versions.mjs X.Y.Z --write` to update the product, six owned packages, owned workspace dependency versions, lockfile and template metadata together. Without `--write`, the command checks consistency and fails on drift. It never changes the historical upstream attribution or third-party dependency versions.
 
 ## Export changes
 
@@ -51,7 +51,7 @@ npm run check:public
 git diff --cached --stat
 ```
 
-The pre-push hook blocks detected leaks before upload. Hooks must be enabled in each checkout and can be bypassed; CI runs the same checks after pushes/PRs but cannot retract already disclosed content. Enable GitHub secret scanning/push protection and protected-branch checks where your account supports them. Never use bypass flags to silence a real finding. Remediate the staged release, rerun the checks, and rotate credentials if they ever reached a remote.
+The pre-push hook blocks detected leaks before upload. Hooks must be enabled in each checkout and can be bypassed; CI runs the same checks after pushes/PRs but cannot retract already disclosed content. Enable GitHub secret scanning/push protection and protected-branch checks where your account supports them. Never use bypass flags to silence a real finding. Remediate the staged source, rerun the checks, and rotate credentials if they ever reached a remote.
 
 Do not commit a personal denylist containing actual secrets. Exact local credential comparison belongs in the private exporter process. Improve installation, docs and checks directly in this repository; exports read them from the repository root.
 

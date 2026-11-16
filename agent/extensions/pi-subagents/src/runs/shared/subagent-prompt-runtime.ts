@@ -50,7 +50,7 @@ const STRUCTURED_OUTPUT_INSTRUCTIONS = [
 	"Do not rely on prose-only completion; if you do not call `structured_output`, the parent will fail this step.",
 ].join("\n");
 
-const CHILD_CAPABILITY_INSTRUCTIONS = "At each new task phase, match the needed action to your active tool descriptions. Use relevant tools to inspect, execute and verify work before writing replacement scripts. Skills are optional reference guides and docs, not rules or tool prerequisites: consult and adapt them when useful, including mandatory wording. User instructions, tool contracts and safety boundaries take precedence. Parent tool availability does not imply child availability. Report a missing required capability to the parent without widening permissions. Tool or skill counts are not quotas; use what the assigned outcome needs.";
+const CHILD_CAPABILITY_INSTRUCTIONS = "Use active tools to inspect, execute and verify the assigned work. Read a clearly applicable skill before choosing the approach and adapt its relevant steps. Open a linked example when it helps. User instructions, tool contracts and safety boundaries take precedence. Report missing tools or needed scope approval to the parent.";
 
 export const CHILD_SUBAGENT_BOUNDARY_INSTRUCTIONS = [
 	"You are a child subagent, not the parent orchestrator.",

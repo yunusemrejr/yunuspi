@@ -1,7 +1,7 @@
 /**
  * Session facts — one stored, model-only line at each human message: local
  * time, session spend, context occupancy, prompt-cache hits and the last run's
- * time and cost, followed by one sentence of standing method. A message that
+ * time and cost. A message that
  * asks for speed adds the haste sentence to that same line, once; a request that
  * names a subject adds the installed guides that match it (at most three).
  *
@@ -35,10 +35,6 @@ const BUDGET_NOTE_TYPE = "run-budget";
 const HURRY_NOTE_TYPE = "session-hurry";
 /** Events further apart than this are idle time, not run time. */
 const GAP_MS = 10 * 60_000;
-const METHOD =
-	"For this message, the working notes apply: act on what the user means and meet every demand in it, sized to the ask; read the guide that fits before choosing an approach; see and verify with the tools instead of guessing; nothing a person looks at ships unseen or with a template look";
-/** Said only when the tool is on the wire: pointing at a tool the model cannot call costs it a failed call. */
-const DELEGATE = "; hand legwork to the subagent tool";
 
 /** A message asking for speed, in English or Turkish. */
 const HURRY_PATTERNS: RegExp[] = [
@@ -119,8 +115,6 @@ export interface SessionFactsInput {
 	lastRun?: { minutes: number; usd?: number };
 	/** Installed guides that match the request; the line is left out when there are none. */
 	guides?: readonly CatalogSkill[];
-	/** The subagent tool is active for this run. */
-	delegate?: boolean;
 }
 
 /** `name: description clipped at a word (file)`, as the facts line lists a guide. */
@@ -146,7 +140,7 @@ export function sessionFactsText(input: SessionFactsInput): string {
 	const guides = input.guides?.length
 		? `\nGuides that match this request (read the ones that bear on it before choosing the approach): ${input.guides.map(guideText).join("; ")}`
 		: "";
-	return `${line}\n${METHOD}${input.delegate ? DELEGATE : ""}.${guides}`;
+	return line + guides;
 }
 
 /**
@@ -175,7 +169,7 @@ export const limitText = (limits: RunBudget, joiner: string): string =>
 
 /** The one note per budget level; level 2 is twice the budget. */
 export function runBudgetNote(level: 1 | 2, minutes: number, usd: number | undefined, limits: RunBudget): string {
-	if (level === 2) return `[run budget] ${minutes} min and ${noteSpend(usd)} since the user's last message, twice the budget. End the run now: stop background work nobody needs, and report the state as it is, naming what is unverified.`;
+	if (level === 2) return `[run budget] ${minutes} min and ${noteSpend(usd)} since the user's last message, twice the soft budget. Focus on the remaining requested work and the checks it needs. Reuse current evidence and report any genuine blocker.`;
 	return `[run budget] You do not have much time left: this run has worked for ${minutes} min and spent ${noteSpend(usd)} since the user's last message (budget: ${limitText(limits, " or ")}). Finish the item in hand, complete and verify every demand of the user that is still open, start nothing new that was not asked for, and report what is done, what is not and the next step.`;
 }
 
@@ -197,6 +191,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	if (process.env.PI_SUBAGENT_CHILD === "1") return;
 
 	let run: Run | undefined;
+	let runOwner: object | undefined;
 	let lastRun: { minutes: number; usd?: number } | undefined;
 	/**
 	 * True while the last input was a human message that no run has started
@@ -204,7 +199,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	 * without a new start, and a refused prompt never starts one; neither may
 	 * leave its line behind for a message the harness sends later.
 	 */
-	let pending = false;
+	let pending: { signal?: AbortSignal } | undefined;
 	/** True once the speed note reached this run, on either path. */
 	let hurrySent = false;
 
@@ -222,88 +217,73 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	const sessionUsd = (entries: any[]): number | undefined => {
 		try {
 			const cost = collectSessionCost(entries);
-			return cost.seen && !cost.subscription ? cost.total : undefined;
+			return cost.seen ? cost.total : undefined;
 		} catch {
 			return undefined;
 		}
 	};
-	const refreshUsd = (ctx: any): number | undefined => {
+	const refreshUsd = (total: number | undefined): number | undefined => {
 		if (!run) return undefined;
-		const now = sessionUsd(entriesOf(ctx));
-		run.usd = now === undefined ? undefined : Math.max(0, now - run.startedUsd);
+		run.usd = total === undefined ? undefined : Math.max(0, total - run.startedUsd);
 		return run.usd;
 	};
 	/** Count the time since the last event of this run; a longer gap is idle. */
-	const touch = (ctx: any): void => {
+	const touch = (): void => {
 		if (!run) return;
 		const now = Date.now();
 		const gap = now - run.lastEventAt;
 		if (!run.resting && gap > 0 && gap <= GAP_MS) run.activeMs += gap;
 		run.lastEventAt = now;
-		refreshUsd(ctx);
 	};
 
 	// /budget reads the live run from here; each extension has its own copy of
 	// this module, so the symbol on globalThis is the one shared place.
-	(globalThis as any)[RUN_STATE] = () =>
-		run ? { minutes: wholeMinutes(run.activeMs), usd: run.usd, limits: run.limits, budget: limitText(run.limits, " / ") } : undefined;
+	const readRun = (ctx?: any) => {
+		if (!run || ctx && ctx.sessionManager !== runOwner) return undefined;
+		if (ctx) {
+			touch();
+			refreshUsd(sessionUsd(entriesOf(ctx)));
+		}
+		return { minutes: wholeMinutes(run.activeMs), usd: run.usd, limits: run.limits, budget: limitText(run.limits, " / ") };
+	};
+	(globalThis as any)[RUN_STATE] = readRun;
 
 	const reset = (): void => {
 		run = undefined;
+		runOwner = undefined;
 		lastRun = undefined;
-		pending = false;
+		pending = undefined;
 		hurrySent = false;
 	};
 	pi.on("session_start", reset);
 	pi.on("session_switch", reset);
+	pi.on("session_tree", reset);
 	pi.on("session_shutdown", () => {
 		reset();
 		try {
-			delete (globalThis as any)[RUN_STATE];
+			if ((globalThis as any)[RUN_STATE] === readRun) delete (globalThis as any)[RUN_STATE];
 		} catch {
 			/* a closing session leaves no state behind that matters */
 		}
 	});
 
-	pi.on("input", (event: any, ctx: any) => {
+	pi.on("input", (event: any) => {
 		try {
 			if (event?.source === "extension") {
-				pending = false;
+				pending = undefined;
 				return undefined;
 			}
-			// A message sent while the agent works closes the time up to it; after
-			// the agent stopped, the wait for this message was not run time.
-			touch(ctx);
-			if (run) {
-				const spend = run.usd;
-				lastRun = { minutes: wholeMinutes(run.activeMs), ...(spend === undefined ? {} : { usd: spend }) };
-			}
-			// Settings that cannot be read give the default budget, so the new run
-			// never inherits the limits or the clock of the one before it.
-			let limits: RunBudget = DEFAULT_TEAM_CONFIG.run;
-			try {
-				limits = loadTeamConfig(ctx?.cwd ?? process.cwd()).run;
-			} catch {
-				/* the launch that needs the team settings reports what is wrong with them */
-			}
-			// Before the first priced request nothing has been spent: the run starts
-			// at zero, and its spend appears with the first usage that carries a price.
-			// A steer joins the run in progress, so it does not reset the speed
-			// note; a message that starts a run clears it.
 			const steer = (event?.source === "interactive" || event?.source === "rpc") && Boolean(event?.streamingBehavior);
-			if (!steer) hurrySent = false;
-			run = { startedUsd: sessionUsd(entriesOf(ctx)) ?? 0, limits, activeMs: 0, lastEventAt: Date.now(), usd: undefined, noted: 0, resting: false };
-			pending = true;
-			// A speed request steered into the running run never reaches
-			// before_agent_start, so the note goes as its own message.
-			if (steer && !hurrySent && hurryRequested(event?.text)) {
-				hurrySent = true;
-				void Promise.resolve(
-					pi.sendMessage({ customType: HURRY_NOTE_TYPE, content: HURRY_NOTE, display: false }, { deliverAs: "steer" }),
-				).catch(() => {
-					/* a note that could not be queued changes nothing about the run */
-				});
+			if (steer) {
+				if (!hurrySent && hurryRequested(event?.originalText ?? event?.text)) {
+					hurrySent = true;
+					void Promise.resolve(
+						pi.sendMessage({ customType: HURRY_NOTE_TYPE, content: HURRY_NOTE, display: false }, { deliverAs: "steer" }),
+					).catch(() => { /* optional guidance */ });
+				}
+				return undefined;
 			}
+			pending = { signal: event?.signal };
 		} catch {
 			/* facts are advisory; a failure must not break the prompt */
 		}
@@ -312,11 +292,22 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 
 	pi.on("before_agent_start", (event: any, ctx: any) => {
 		try {
-			touch(ctx);
+			touch();
 			if (run) run.resting = false;
-			if (!pending) return undefined;
-			pending = false;
+			const input = pending;
+			pending = undefined;
+			if (!input || input.signal?.aborted) return undefined;
 			const entries = entriesOf(ctx);
+			const spend = sessionUsd(entries);
+			if (run) {
+				const lastSpend = refreshUsd(spend);
+				lastRun = { minutes: wholeMinutes(run.activeMs), ...(lastSpend === undefined ? {} : { usd: lastSpend }) };
+			}
+			let limits: RunBudget = DEFAULT_TEAM_CONFIG.run;
+			try { limits = loadTeamConfig(ctx?.cwd ?? process.cwd()).run; } catch { /* use defaults */ }
+			hurrySent = false;
+			run = { startedUsd: spend ?? 0, limits, activeMs: 0, lastEventAt: Date.now(), usd: undefined, noted: 0, resting: false };
+			runOwner = ctx?.sessionManager;
 			const usage = typeof ctx?.getContextUsage === "function" ? ctx.getContextUsage() : undefined;
 			const window = Number(ctx?.model?.contextWindow);
 			const tokens = usage?.tokens === null ? Number.NaN : Number(usage?.tokens);
@@ -333,12 +324,11 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 			const content = sessionFactsText({
 				now: new Date(),
 				zone: resolveTimeZone().zone,
-				usd: sessionUsd(entries),
+				usd: spend,
 				context,
 				cachePercent,
 				lastRun,
 				guides: matchingGuidesFor(event),
-				delegate: pi.getActiveTools().includes("subagent"),
 			});
 			const hurry = hurryRequested(event?.prompt) ? `\n${HURRY_NOTE}` : "";
 			if (hurry) hurrySent = true;
@@ -350,15 +340,16 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 
 	pi.on("turn_end", (_event: any, ctx: any) => {
 		try {
-			touch(ctx);
+			touch();
+			if (run) refreshUsd(sessionUsd(entriesOf(ctx)));
 		} catch {
 			/* timing is advisory */
 		}
 	});
-	pi.on("agent_end", (_event: any, ctx: any) => {
-		pending = false;
+	pi.on("agent_end", () => {
+		pending = undefined;
 		try {
-			touch(ctx);
+			touch();
 			if (run) run.resting = true;
 			// The run is over: a run the harness starts next may be hurried again.
 			hurrySent = false;
@@ -370,14 +361,17 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	pi.on("tool_result", (_event: any, ctx: any) => {
 		try {
 			if (!run) return undefined;
-			touch(ctx);
+			touch();
 			const limits = run.limits;
 			if (limits.softMinutes <= 0 && limits.softUsd <= 0) return undefined;
 			if (run.noted >= 2) return undefined;
+			const activeMs = run.activeMs;
 			const minutes = wholeMinutes(run.activeMs);
-			const usd = run.usd;
+			const usd = limits.softUsd > 0 || activeMs >= limits.softMinutes * 60_000
+				? refreshUsd(sessionUsd(entriesOf(ctx)))
+				: run.usd;
 			const passed = (factor: number): boolean =>
-				(limits.softMinutes > 0 && minutes >= limits.softMinutes * factor) ||
+				(limits.softMinutes > 0 && activeMs >= limits.softMinutes * factor * 60_000) ||
 				(limits.softUsd > 0 && usd !== undefined && usd >= limits.softUsd * factor);
 			let level: 1 | 2 | undefined;
 			if (passed(2)) level = 2;

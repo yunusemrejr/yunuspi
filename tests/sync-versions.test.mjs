@@ -9,11 +9,11 @@ const root = path.resolve(import.meta.dirname, '..');
 test('release metadata check detects lock drift and repairs only owned versions', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-version-'));
   try {
-    for (const file of ['package.json', 'package-lock.json', 'core/identity.json', 'scripts/version-release.mjs', ...['agent', 'ai', 'chord', 'coding-agent', 'telemetry', 'tui'].map(name => `core/${name}/package.json`)]) {
+    for (const file of ['package.json', 'package-lock.json', 'core/identity.json', 'scripts/sync-versions.mjs', ...['agent', 'ai', 'chord', 'coding-agent', 'telemetry', 'tui'].map(name => `core/${name}/package.json`)]) {
       fs.mkdirSync(path.dirname(path.join(dir, file)), { recursive: true });
       fs.copyFileSync(path.join(root, file), path.join(dir, file));
     }
-    const run = (...args) => spawnSync(process.execPath, ['scripts/version-release.mjs', ...args], { cwd: dir, encoding: 'utf8' });
+    const run = (...args) => spawnSync(process.execPath, ['scripts/sync-versions.mjs', ...args], { cwd: dir, encoding: 'utf8' });
     const current = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'))).version;
     assert.equal(run(current).status, 0);
     const before = fs.readFileSync(path.join(dir, 'core/identity.json'), 'utf8');

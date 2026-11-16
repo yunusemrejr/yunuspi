@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Equipment checkout</title>
+  <style>
+    :root {
+      color-scheme: light;
+      font-family: "Instrument Sans", system-ui, sans-serif;
+      --page: #eff2ed;
+      --surface: #fcfdfa;
+      --ink: #18322a;
+      --muted: #456157;
+      --line: #cbd6cd;
+      --accent: #18513e;
+      --focus: #915117;
+      --radius: 0.5rem;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; background: var(--page); color: var(--ink); }
+    h1, h2, p { margin: 0; }
+    :focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+    .frame { width: min(100% - 2rem, 66rem); margin-inline: auto; }
+    .masthead { background: var(--ink); color: white; }
+    .masthead .frame {
+      min-height: 4rem;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem 1rem;
+      padding-block: 0.75rem;
+    }
+    .desk { display: flex; align-items: center; gap: 0.75rem; font-weight: 650; }
+    .desk::before {
+      content: "";
+      width: 0.75rem;
+      height: 1.1rem;
+      border: 2px solid #cfe496;
+      border-radius: 0.15rem;
+    }
+    .sample { color: #d4e1d7; font-size: 0.875rem; }
+    main { padding-block: clamp(2rem, 5vw, 4rem); }
+    .overview {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: end;
+      gap: 1rem 2rem;
+      padding-bottom: 1.75rem;
+    }
+    h1 { font-size: clamp(2.2rem, 5vw, 3.75rem); line-height: 1.05; letter-spacing: -0.048em; }
+    h2 { font-size: 1.05rem; line-height: 1.3; }
+    .availability { font-variant-numeric: tabular-nums; color: var(--muted); }
+    .availability strong { color: var(--ink); font-size: 1.25rem; }
+    .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); }
+    .tools, .summary, .row, .empty { padding: 1rem clamp(0.875rem, 3vw, 1.5rem); }
+    .tools {
+      display: grid;
+      grid-template-columns: minmax(0, 2fr) minmax(10rem, 1fr) auto;
+      align-items: end;
+      gap: 0.75rem;
+      border-bottom: 1px solid var(--line);
+    }
+    label { display: grid; min-width: 0; gap: 0.35rem; font-size: 0.875rem; font-weight: 650; }
+    button, input, select {
+      min-height: 2.75rem;
+      min-width: 0;
+      border: 1px solid #7b9386;
+      border-radius: var(--radius);
+      padding: 0.55rem 0.75rem;
+      color: var(--ink);
+      background: var(--surface);
+      font: inherit;
+    }
+    button { cursor: pointer; font-weight: 650; }
+    button:hover { background: #e7eee6; }
+    button.primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+    button.primary:hover { background: var(--ink); }
+    .summary { font-size: 0.9rem; color: var(--muted); background: #e8eee7; }
+    ul { list-style: none; margin: 0; padding: 0; }
+    .row {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(6rem, 0.32fr) 7rem;
+      align-items: center;
+      gap: 0.5rem 1rem;
+      border-top: 1px solid var(--line);
+      overflow-wrap: anywhere;
+    }
+    .row button { justify-self: end; width: 100%; }
+    .location { margin-top: 0.18rem; color: var(--muted); font-size: 0.875rem; }
+    .state { font-size: 0.9rem; color: var(--muted); }
+    .state[data-status="ready"] { font-weight: 650; color: var(--accent); }
+    .empty { padding-block: 1.75rem; color: var(--muted); }
+    dialog {
+      width: min(100% - 2rem, 27rem);
+      padding: 1.5rem;
+      color: var(--ink);
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    dialog::backdrop { background: rgb(21 47 37 / 65%); }
+    dialog p { margin-top: 0.6rem; color: var(--muted); line-height: 1.55; }
+    .actions { margin-top: 1.5rem; display: flex; flex-wrap: wrap; justify-content: end; gap: 0.5rem; }
+    .visually-hidden {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      overflow: hidden;
+      clip-path: inset(50%);
+      white-space: nowrap;
+    }
+    @media (max-width: 38rem) {
+      .tools { grid-template-columns: minmax(0, 1fr) auto; }
+      .search-field { grid-column: 1 / -1; }
+      .row { grid-template-columns: minmax(0, 1fr) auto; }
+      .row > div { grid-column: 1 / -1; }
+      .row button { width: auto; }
+    }
+    @media (max-width: 26rem) {
+      .actions { flex-direction: column; }
+      .actions button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <header class="masthead">
+    <div class="frame">
+      <span class="desk">Field Library</span>
+      <span class="sample">Sample inventory</span>
+    </div>
+  </header>
+  <main class="frame">
+    <header class="overview">
+      <h1>Equipment checkout</h1>
+      <p class="availability"><strong id="ready-count">3</strong> ready to lend</p>
+    </header>
+
+    <section class="panel" aria-label="Inventory">
+      <form class="tools" id="filters">
+        <label class="search-field">Find equipment
+          <input id="search" type="search" placeholder="Name or shelf">
+        </label>
+        <label>Availability
+          <select id="availability">
+            <option value="">All equipment</option>
+            <option value="ready">Ready to lend</option>
+            <option value="out">On loan</option>
+            <option value="reserved">Reserved</option>
+          </select>
+        </label>
+        <button id="clear" type="button">Clear filters</button>
+      </form>
+      <p class="summary" id="results" role="status"></p>
+      <ul id="equipment"></ul>
+      <p class="empty" id="empty" hidden>Try another name or clear the filters.</p>
+      <noscript><p class="empty">Enable JavaScript to try the filters and reservation.</p></noscript>
+    </section>
+    <p class="visually-hidden" id="announcement" role="status"></p>
+  </main>
+
+  <dialog id="reservation" aria-labelledby="dialog-title" aria-describedby="dialog-description">
+    <form method="dialog">
+      <h2 id="dialog-title"></h2>
+      <p id="dialog-description">The item will be set aside in this demo until you reload the page.</p>
+      <div class="actions">
+        <button value="cancel" autofocus>Cancel</button>
+        <button class="primary" value="reserve">Confirm reservation</button>
+      </div>
+    </form>
+  </dialog>
+
+  <template id="equipment-row">
+    <li class="row">
+      <div><h2></h2><p class="location"></p></div>
+      <span class="state"></span>
+      <button type="button">Reserve</button>
+    </li>
+  </template>
+
+  <script>
+    const inventory = [
+      { name: "Folding survey tripod", location: "Shelf A2", status: "ready" },
+      { name: "Handheld weather meter", location: "Shelf B1", status: "ready" },
+      { name: "Soil temperature probe", location: "Shelf B3", status: "out" },
+      { name: "Water sampling kit", location: "Shelf C1", status: "ready" },
+    ];
+    const labels = { ready: "Ready to lend", out: "On loan", reserved: "Reserved" };
+    const search = document.querySelector("#search");
+    const availability = document.querySelector("#availability");
+    const equipment = document.querySelector("#equipment");
+    const row = document.querySelector("#equipment-row");
+    const dialog = document.querySelector("#reservation");
+    let selected;
+    let invoker;
+
+    function render() {
+      const query = search.value.trim().toLowerCase();
+      const visible = inventory.filter(item =>
+        `${item.name} ${item.location}`.toLowerCase().includes(query) &&
+        (!availability.value || item.status === availability.value));
+      equipment.replaceChildren(...visible.map(item => {
+        const entry = row.content.cloneNode(true);
+        entry.querySelector("h2").textContent = item.name;
+        entry.querySelector(".location").textContent = item.location;
+        const state = entry.querySelector(".state");
+        state.textContent = labels[item.status];
+        state.dataset.status = item.status;
+        const button = entry.querySelector("button");
+        if (item.status !== "ready") {
+          button.remove();
+        } else {
+          button.setAttribute("aria-label", `Reserve ${item.name}`);
+          button.addEventListener("click", () => {
+            selected = item;
+            invoker = button;
+            dialog.querySelector("h2").textContent = `Reserve ${item.name}?`;
+            dialog.returnValue = "";
+            dialog.showModal();
+          });
+        }
+        return entry;
+      }));
+      const count = visible.length;
+      document.querySelector("#results").textContent = count === 1 ? "1 item" : `${count} items`;
+      document.querySelector("#empty").hidden = count > 0;
+      document.querySelector("#ready-count").textContent = inventory.filter(item => item.status === "ready").length;
+    }
+
+    document.querySelector("#filters").addEventListener("submit", event => event.preventDefault());
+    search.addEventListener("input", render);
+    availability.addEventListener("change", render);
+    document.querySelector("#clear").addEventListener("click", () => {
+      search.value = "";
+      availability.value = "";
+      render();
+      search.focus();
+    });
+    dialog.addEventListener("close", () => {
+      if (dialog.returnValue === "reserve") {
+        selected.status = "reserved";
+        render();
+        document.querySelector("#announcement").textContent = `${selected.name} reserved.`;
+      }
+      (invoker.isConnected ? invoker : search).focus();
+    });
+    render();
+  </script>
+</body>
+</html>

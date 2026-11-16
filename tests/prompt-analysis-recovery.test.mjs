@@ -148,7 +148,7 @@ test('adaptive direct recovery fixture needs no inference, warmup, progress or a
     assert.ok(f.statuses.every(value => value === undefined), 'no analysis progress row is started');
     const rewritten = await f.context(task.event);
     assert.ok(!rewritten?.messages?.some(row => row.customType === 'prompt-analysis-context'), 'the literal request needs no auxiliary context');
-    assert.equal(f.rows[0]?.details.attempts.length, 0, 'bookkeeping cannot invent a model attempt');
+    assert.deepEqual(f.rows, [], 'a skipped advisory produces no transcript row');
   } finally { process.env.PI_ADAPTIVE_EXECUTION = 'off'; }
 });
 
@@ -255,7 +255,7 @@ test('cancelled registry and legacy streams clear progress without publishing fa
     const pending = task.run();
     await bounded(began, `${mode} stream startup`);
     assert.match(f.status(), /Intent analysis/);
-    assert.match(f.status(), /0s \/ 240s allowed/);
+    assert.match(f.status(), /0s \/ 8s allowed/);
     controller.abort();
     await pending;
     await tick();

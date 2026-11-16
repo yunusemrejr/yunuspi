@@ -37,6 +37,7 @@ import {
 import type { PromptAnalysisAttempt, PromptAnalysisCandidate } from "./lib/prompt-analysis-runtime.ts";
 import { packetRequirements } from "./lib/requirement-ledger.ts";
 import { classifyExecution, currentExecutionProfile, adaptiveExecutionEnabled } from "./lib/adaptive-execution.ts";
+import { isPromptPivot } from "./lib/intent-context.ts";
 
 const HEALTH_SINK = Symbol.for("yunus-pi.health.v1");
 const PROMPT_ANALYSIS_EVENT = "guardian:prompt-analysis:v1";
@@ -97,9 +98,8 @@ interface PendingPromptAnalysis {
   route?: string;
   status: "model" | "fallback";
   attempts: PromptAnalysisAttempt[];
-  /** Set when adaptive admission chose not to spend a model on this prompt, so
-   * the notice reports a decision instead of an unavailable route. */
-  skipped?: "direct-task";
+  skipped?: "direct-task" | "steering";
+  topicStart: boolean;
   advisory: string;
   /** Design-direction guidance also injected when the analysis fell back. */
   designGuidance: string;
@@ -130,7 +130,7 @@ export function lastMicroRequest(owner?: string): MicroRequestState | undefined 
 }
 
 /** Preserve the checkpoint API while deriving its advisory from the one
- * mandatory prompt-analysis request. The deterministic fallback never
+ * optional prompt-analysis request. The deterministic fallback never
  * masquerades as an ML judgment. */
 export function microRequestAdvice(prompt: string, owner?: string): AdvisoryResult | undefined {
   const state = scopedStates(owner).at(-1);
@@ -231,12 +231,13 @@ function analysisCandidates(
   ctx: any,
   prompt: string,
   kind: PromptAnalysisKind,
+  topicStart: boolean,
   metrics: ReturnType<typeof microMetrics>,
   completePromptAnalysis: MicroDependencies["completePromptAnalysis"],
 ): AnalysisSelection {
   try {
     const maxOutputTokens = kind === "initial" ? 768 : 320;
-    const requirements = packetRequirements(prompt, ctx.sessionManager?.getBranch?.() ?? [], 1200);
+    const requirements = packetRequirements(prompt, topicStart ? [] : ctx.sessionManager?.getBranch?.() ?? [], 1200);
     const model = ctx.model;
     const capable = typeof model?.provider === "string" && typeof model?.id === "string"
       && Number.isSafeInteger(model.maxTokens) && model.maxTokens >= maxOutputTokens;
@@ -584,7 +585,11 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
 
       // Preflight may finish analysis and then be rejected by a later hook,
       // auth validation or cancellation. Such requests are not prior tasks.
-      const validPrior = [...pendingContext.values()].filter((entry) => !entry.signal.aborted);
+      const topicStart = isPromptPivot(prompt);
+      const preceding = topicStart ? [] : [...pendingContext.values()].filter((entry) => !entry.signal.aborted);
+      const lastPivot = preceding.findLastIndex(entry => entry.topicStart);
+      const validPrior = lastPivot < 0 ? preceding : preceding.slice(lastPivot);
+      const restoredPrevious = topicStart || lastPivot >= 0 ? undefined : resumedAnalysisContext;
       const priorAnalysis = validPrior.at(-1)?.analysis;
       // Keep the first accepted task and a bounded recent history visible.
       // Otherwise A -> small addition B -> correction C sees only B and loses
@@ -592,7 +597,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       const history = [...new Set([validPrior[0], ...validPrior.slice(-5)])]
         .filter((entry): entry is PendingPromptAnalysis => !!entry)
         .map(({ analysis }) => ({ taskLabel: analysis.taskLabel, explicitConstraints: analysis.explicitConstraints, subtasks: analysis.subtasks }));
-      const kind: PromptAnalysisKind = priorAnalysis || initialPromptSeen ? "followup" : "initial";
+      const kind: PromptAnalysisKind = !topicStart && (priorAnalysis || initialPromptSeen) ? "followup" : "initial";
       const deterministic = deterministicRequestPass(prompt);
       const metrics = microMetrics();
       metrics.offer("llm");
@@ -617,16 +622,12 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       // never cleared its 0.02 margin (max 0.009), and occupied the serial
       // Needle worker at the moment tool and skill ranking needed it.
 
-      const selected = analysisCandidates(ctx, prompt, kind, metrics, deps.completePromptAnalysis);
-      const execution = classifyExecution({ task: prompt });
-      const priorNeedsAnalysis = priorAnalysis && classifyExecution({ task: priorAnalysis.taskLabel }).features.analysis;
       let skipped: PendingPromptAnalysis["skipped"];
-      if (adaptiveExecutionEnabled() && !execution.features.analysis && !priorNeedsAnalysis) {
-        // Reuse the literal fallback, preserving constraints and provenance
-        // without presenting it as a model judgment or spending a turn.
-        selected.routes = [];
-        skipped = "direct-task";
-        metrics.skip('llm', 'direct-task');
+      if (event.streamingBehavior === "steer") skipped = "steering";
+      else if (adaptiveExecutionEnabled() && !classifyExecution({ task: prompt }).features.analysis) skipped = "direct-task";
+      const selected = skipped ? { routes: [], requirements: "" } : analysisCandidates(ctx, prompt, kind, topicStart, metrics, deps.completePromptAnalysis);
+      if (skipped) {
+        metrics.skip('llm', skipped);
       } else try { deps.warmup(); } catch { /* optional */ }
       const attempts: PromptAnalysisAttempt[] = [];
       let progress: { attempt: number; route: string; recovery?: string; startedAt: number; timeoutMs: number } | undefined;
@@ -647,8 +648,8 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
           taskLabel: priorAnalysis.taskLabel,
           explicitConstraints: priorAnalysis.explicitConstraints,
           subtasks: priorAnalysis.subtasks,
-          history: resumedAnalysisContext ? [resumedAnalysisContext, ...history].slice(-6) : history,
-        } : resumedAnalysisContext,
+          history: restoredPrevious ? [restoredPrevious, ...history].slice(-6) : history,
+        } : restoredPrevious,
         candidates: selected.routes,
         signal,
         onStart: detail => { progress = { ...detail, startedAt: Date.now() }; showProgress(); },
@@ -695,13 +696,13 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
       // Follow-ups inherit the scope, so only the first request qualifies
       // unless the follow-up itself starts new visual work.
       const designBrief = detectDesignBrief(prompt, kind === "initial" || analysis.visualDesign ? analysis : { ...analysis, source: "model", visualDesign: false, openEnded: false });
-      const designGuidance = designDirectionGuidance(designBrief);
+      const designGuidance = skipped === "steering" ? "" : designDirectionGuidance(designBrief);
       // Prior-art scouting: one bounded advisory paragraph when the prompt
       // qualifies (comparison, open-ended improvement, new software). The
       // intent classifier already excludes fixes, reviews and operations.
       let scoutGuidance = "", scoutSummary = "";
       try {
-        const scout = priorArtIntent(prompt);
+        const scout = skipped === "steering" ? undefined : priorArtIntent(prompt);
         if (scout) {
           scoutGuidance = priorArtDirective(scout);
           scoutSummary = `Scouting staged · prior art · ${scout.mode} — ${scout.reason}.`;
@@ -715,6 +716,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
         sessionId,
         source: event.source,
         promptHash: promptAnalysisHash(prompt),
+        topicStart,
         analysis,
         ...(result.route ? { route: result.route } : {}),
         status: result.status,
@@ -847,6 +849,7 @@ export default function (pi: any, deps: MicroDependencies = { warmup: needleWarm
 
       if (!pending.displayed && !pending.signal.aborted && !ctx.signal?.aborted) {
         pending.displayed = true;
+        if (pending.skipped && !pending.advisory) continue;
         const reasons = pending.attempts.map((attempt) => `${attempt.route} ${attempt.outcome === "timeout" && attempt.timeoutMs ? `timed out after ${(attempt.timeoutMs / 1000).toFixed(1)}s` : attempt.outcome === "truncated" ? `output limit reached${attempt.reasoningTokens ? ` (${attempt.reasoningTokens} reasoning tokens)` : ""}` : attempt.outcome === "empty" ? "returned no answer" : attempt.outcome}${attempt.recovery ? "; retrying with compact response" : ""}${attempt.failureCategory ? ` (${attempt.failureCategory})` : ""}`);
         const concise = pending.status === "fallback" ? [
           pending.skipped === "direct-task"

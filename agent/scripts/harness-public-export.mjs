@@ -169,11 +169,8 @@ const publicSvgFixture = /^tests\/fixtures\/expert-svg-(?:good|mediocre)\.svg$/;
 // an exception the extension allowlist silently drops them and the suite
 // fails in the exported tree while passing in the checkout.
 const publicSeoFixture = /^tests\/fixtures\/seo\/(?:clean|conflicting)-page\.html$/;
-// Three skills ship worked static examples/kits as part of their public
-// contract; tests build and inspect them from the exported tree. Keep this
-// scoped to those skills: HTML under any other skill's assets (for example
-// a saved session page) must never enter a public release.
-const publicSkillStaticAsset = /^agent\/skills\/(?:anatomy\/(?:examples|kit)|anatomy-reveal\/template|cinetic\/(?:assets|scripts\/test\/lint-fixtures))\/.*\.(?:html|css)$/;
+// Shipped static examples and kits. Private session HTML is outside the allowlist.
+const publicSkillStaticAsset = /^agent\/skills\/(?:(?:anatomy\/(?:examples|kit)|anatomy-reveal\/template|cinetic\/(?:assets|scripts\/test\/lint-fixtures))\/.*\.(?:html|css)|ui-design\/examples\/equipment-checkout\.html)$/;
 // The desktop shell ships its renderer page, stylesheet and brand mark from
 // the repository desktop tree; the extension allowlist otherwise drops all three.
 const publicDesktopRenderer = /^desktop\/renderer\/(?:index\.html|styles\.css|assets\/[^/]+\.svg)$/;

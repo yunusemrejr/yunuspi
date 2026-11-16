@@ -10,10 +10,6 @@ const root = path.resolve(import.meta.dirname, '..');
 const extensionUrl = pathToFileURL(path.join(root, 'agent/extensions/session-facts.ts')).href;
 const { default: registerSessionFacts, hurryRequested, HURRY_NOTE } = await import(extensionUrl);
 
-const METHOD = 'For this message, the working notes apply: act on what the user means and meet every demand in it, sized to the ask; read the guide that fits before choosing an approach; see and verify with the tools instead of guessing; nothing a person looks at ships unseen or with a template look';
-const DELEGATE = '; hand legwork to the subagent tool';
-const METHOD_SENTENCE = `${METHOD}${DELEGATE}.`;
-
 /** An assistant message entry with usage, as the session file stores it. */
 const assistantEntry = ({ input = 4000, output = 200, cacheRead = 96000, total = 0.012 } = {}) => ({
 	type: 'message',
@@ -24,7 +20,7 @@ const assistantEntry = ({ input = 4000, output = 200, cacheRead = 96000, total =
 });
 
 /** The event shapes the core emits, plus the session state each handler reads. */
-function fixture(t, { settings, entries = [], activeTools = ['bash', 'subagent'] } = {}) {
+function fixture(t, { settings, entries = [] } = {}) {
 	const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-session-facts-'));
 	const saved = { ...process.env };
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-session-facts-cwd-'));
@@ -62,7 +58,6 @@ function fixture(t, { settings, entries = [], activeTools = ['bash', 'subagent']
 		registerTool() {},
 		appendEntry() {},
 		sendMessage(message, options) { sent.push({ message, options }); },
-		getActiveTools: () => activeTools,
 		getThinkingLevel: () => 'off',
 		setThinkingLevel() {},
 	};
@@ -99,18 +94,6 @@ function fixture(t, { settings, entries = [], activeTools = ['bash', 'subagent']
 	return { pi, hooks, emit, ctx, humanMessage, store, stored, manager, notifications, entries, toolResult, sent };
 }
 
-test('the delegation clause is said only when the subagent tool is on the wire', async (t) => {
-	const without = fixture(t, { activeTools: ['bash', 'read'] });
-	registerSessionFacts(without.pi);
-	const [bare] = await without.humanMessage('Add a retry to the uploader.');
-	assert.ok(bare.message.content.endsWith(`\n${METHOD}.`), 'the rest of the sentence stays');
-	assert.ok(!/subagent/.test(bare.message.content));
-	const withTool = fixture(t, { activeTools: ['bash', 'subagent'] });
-	registerSessionFacts(withTool.pi);
-	const [full] = await withTool.humanMessage('Add a retry to the uploader.');
-	assert.ok(full.message.content.endsWith(`\n${METHOD_SENTENCE}`));
-});
-
 const NOW_SHAPE = /^Now: [A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2} \d{4}, \d{2}:\d{2} \([A-Za-z/_+0-9]+\)\./;
 
 test('one stored model-only facts message per human message, byte-stable on later requests', async (t) => {
@@ -121,7 +104,6 @@ test('one stored model-only facts message per human message, byte-stable on late
 	assert.equal(first.message.customType, 'session-facts');
 	assert.equal(first.message.display, false, 'the message is model-only');
 	assert.match(first.message.content, NOW_SHAPE);
-	assert.ok(first.message.content.endsWith(`\n${METHOD_SENTENCE}`));
 	assert.match(first.message.content, /Session: \$0\.012, context 41k of 128k tokens, cache hits 96%\./);
 	assert.doesNotMatch(first.message.content, /Last run/, 'the first message has no finished run to report');
 	f.store(first.message);
@@ -154,8 +136,7 @@ test('unknown figures are left out: no price, no cache data, no context usage', 
 	bare.ctx.model = { provider: 'fixture', id: 'fixture-model' };
 	registerSessionFacts(bare.pi);
 	const [plain] = await bare.humanMessage('Say hello.');
-	assert.equal(plain.message.content, `${plain.message.content.split('\n')[0]}\n${METHOD_SENTENCE}`);
-	assert.doesNotMatch(plain.message.content, /Session:/, 'nothing is invented when no figure is known');
+	assert.doesNotMatch(plain.message.content, /Session:|\n/, 'nothing is invented when no figure is known');
 
 	const unpricedRun = fixture(t, { entries: [assistantEntry({ total: null })] });
 	registerSessionFacts(unpricedRun.pi);
@@ -178,7 +159,7 @@ test('the line goes with a human message that starts a run, never with one the h
 	// A steering message joins the running agent: the core emits its input
 	// event, but no new before_agent_start. Its line must not wait for the
 	// next message the harness sends.
-	await f.emit('input', { type: 'input', text: 'Also keep the old name.', source: 'interactive' });
+	await f.emit('input', { type: 'input', text: 'Also keep the old name.', source: 'interactive', streamingBehavior: 'steer' });
 	await f.emit('agent_end', { type: 'agent_end', messages: [] });
 	assert.equal((await harnessMessage()).length, 0, 'a steered run leaves no line behind');
 
@@ -248,15 +229,16 @@ test('the run budget notes, active minutes and run reset', async (t) => {
 
 	clock.at += 60_000;
 	assert.equal(await call('c1'), undefined, 'nothing is sent before the budget is reached');
+	await f.emit('input', { source: 'interactive', text: 'Also check Unicode.', streamingBehavior: 'steer' });
 
 	clock.at += 60_000;
-	assert.equal(await call('c2'), '[run budget] You do not have much time left: this run has worked for 2 min and spent $0.002 since the user\'s last message (budget: 2 min or $0.50). Finish the item in hand, complete and verify every demand of the user that is still open, start nothing new that was not asked for, and report what is done, what is not and the next step.');
+	assert.match(await call('c2'), /2 min and spent \$0\.002/, 'steering preserves the current run time, cost and budget');
 
 	clock.at += 60_000;
 	assert.equal(await call('c3'), undefined, 'the first note is sent once');
 
 	clock.at += 60_000;
-	assert.equal(await call('c4'), '[run budget] 4 min and $0.002 since the user\'s last message, twice the budget. End the run now: stop background work nobody needs, and report the state as it is, naming what is unverified.');
+	assert.equal(await call('c4'), '[run budget] 4 min and $0.002 since the user\'s last message, twice the soft budget. Focus on the remaining requested work and the checks it needs. Reuse current evidence and report any genuine blocker.');
 
 	clock.at += 60_000;
 	assert.equal(await call('c5'), undefined, 'twice-the-budget is sent once too');
@@ -306,6 +288,8 @@ test('a gap longer than 10 minutes is idle time, not run time', async (t) => {
 	assert.equal(await f.toolResult('c1'), undefined, 'the 11-minute gap counts as zero active minutes');
 
 	clock.at += 119_000;
+	assert.equal(await f.toolResult('early'), undefined, 'rounded display minutes do not trigger a budget early');
+	clock.at += 1000;
 	assert.match(await f.toolResult('c2'), /^\[run budget\] You do not have much time left: this run has worked for 2 min /);
 });
 
@@ -469,6 +453,24 @@ test('/budget prints the live run line', async (t) => {
 	assert.match(await budgetLine({ run: { softMinutes: 0, softUsd: 0.0015 } }), /Run: 1 min, \$0\.001 of \$0\.0015\n/, 'a limit below one cent is shown as it was set');
 });
 
+test('a flat-plan response neither hides metered spend nor consumes the dollar budget', async (t) => {
+	const billed = assistantEntry({ total: 0.002 });
+	const flat = assistantEntry({ total: 1000 });
+	flat.message.usage.cost.billing = 'subscription';
+	const f = fixture(t, { entries: [billed, flat] });
+	registerSessionFacts(f.pi);
+	const commands = new Map();
+	f.pi.registerCommand = (name, options) => commands.set(name, options);
+	const { default: registerCostGovernor } = await import(pathToFileURL(path.join(root, 'agent/extensions/cost-governor.ts')).href);
+	registerCostGovernor(f.pi);
+	await f.emit('session_start', { type: 'session_start' });
+	const [facts] = await f.humanMessage('Check the build.');
+	assert.match(facts.message.content, /Session: \$0\.002,/);
+	await commands.get('budget').handler('', f.ctx);
+	assert.match(f.notifications.at(-1).text, /Cost split:.* · total \$0\.0020/);
+	assert.doesNotMatch(f.notifications.at(-1).text, /economy mode.*\nRun:/);
+});
+
 test('a request that names a subject gets the installed guides that match it, once and stored', async (t) => {
 	const skills = [
 		{ name: 'motion-graphics-production', description: 'Produce timed motion graphics for video, including title sequences, kinetic typography, lower thirds, explainers and audio-reactive visuals.', filePath: '/fixture/skills/motion-graphics-production/SKILL.md' },
@@ -485,8 +487,7 @@ test('a request that names a subject gets the installed guides that match it, on
 	};
 	const withLine = await ask('Make a motion graphics video with kinetic typography and captions for the launch.');
 	const lines = withLine.split('\n');
-	assert.equal(lines[1], METHOD_SENTENCE, 'the guides follow the method sentence');
-	assert.equal(lines[2], 'Guides that match this request (read the ones that bear on it before choosing the approach): motion-graphics-production: Produce timed motion graphics for video, including title sequences, kinetic typography, lower thirds,… (/fixture/skills/motion-graphics-production/SKILL.md); video-captions: Burn captions into video and check their timing. (/fixture/skills/video-captions/SKILL.md)', 'a long description is clipped at a word, a short one kept whole');
+	assert.equal(lines[1], 'Guides that match this request (read the ones that bear on it before choosing the approach): motion-graphics-production: Produce timed motion graphics for video, including title sequences, kinetic typography, lower thirds,… (/fixture/skills/motion-graphics-production/SKILL.md); video-captions: Burn captions into video and check their timing. (/fixture/skills/video-captions/SKILL.md)', 'a long description is clipped at a word, a short one kept whole');
 	assert.doesNotMatch(withLine, /database-migration|git-github/, 'only skills that bear on the request');
 
 	for (const plain of ['be quick', 'commit and push', 'why did that test fail?', 'thanks', 'continue']) {

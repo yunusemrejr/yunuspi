@@ -42,8 +42,11 @@ export interface FoldState {
 	digest: string;
 	/** Stable key of the first kept message. */
 	cutoffKey: string;
+	/** Position hints for the append-only case. Always check the key. */
+	cutoffIndex?: number;
 	/** Latest user message kept verbatim when it precedes the cutoff. */
 	lastUserKey?: string;
+	lastUserIndex?: number;
 	/** Estimated tokens removed from the request view. */
 	foldedTokens: number;
 	/** Estimated tokens in the request view after folding. */
@@ -425,26 +428,21 @@ function digestMessage(digest: string): GovernedMessage {
  * fold from the new history instead of guessing.
  */
 export function applyFold(messages: readonly GovernedMessage[], fold: FoldState): GovernedMessage[] | undefined {
-	let cutoff = -1;
-	let lastUser = -1;
-	for (let index = 0; index < messages.length; index++) {
-		const key = messageKey(messages[index]);
-		if (key === fold.cutoffKey) {
-			cutoff = index;
-			break;
+	const locate = (key: string, hint: number | undefined, end: number) => {
+		if (hint !== undefined && hint >= 0 && hint < end && messageKey(messages[hint]) === key) return hint;
+		for (let i = 0; i < end; i++) {
+			if (messageKey(messages[i]) === key) return i;
 		}
-	}
+		return -1;
+	};
+	const cutoff = locate(fold.cutoffKey, fold.cutoffIndex, messages.length);
 	if (cutoff < 0) return undefined;
-	if (fold.lastUserKey) {
-		for (let index = 0; index < cutoff; index++) {
-			if (messageKey(messages[index]) === fold.lastUserKey) {
-				lastUser = index;
-				break;
-			}
-		}
-	}
 	const view: GovernedMessage[] = [digestMessage(fold.digest)];
-	if (lastUser >= 0) view.push(messages[lastUser]!);
+	if (fold.lastUserKey) {
+		const lastUser = locate(fold.lastUserKey, fold.lastUserIndex, cutoff);
+		if (lastUser < 0) return undefined;
+		view.push(messages[lastUser]!);
+	}
 	view.push(...messages.slice(cutoff));
 	return view;
 }
@@ -472,7 +470,8 @@ export function createFold(messages: readonly GovernedMessage[], options: FoldOp
 		version: 1,
 		digest,
 		cutoffKey: messageKey(cutoffMessage),
-		...(lastUserMessage ? { lastUserKey: messageKey(lastUserMessage) } : {}),
+		cutoffIndex: choice.cutoff,
+		...(lastUserMessage ? { lastUserKey: messageKey(lastUserMessage), lastUserIndex: choice.lastUserIndex } : {}),
 		foldedTokens,
 		keptTokens,
 		budget: options.budgetTokens,

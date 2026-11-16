@@ -11,3 +11,5 @@ description: "Code, systems, APIs, data and ML — one short method for building
 - Profile before optimizing; report p95/p99, never averages alone.
 - Git: never commit/push/rewrite history unless asked. Databases: safe migrations, explicit transactions.
 - ML: leakage-safe splits, calibrated metrics, no silent model swaps — the picked model runs the work.
+
+For work shared with another session, open the [change handoff](examples/change-handoff.md) and keep only the fields that save the next person a read or a check.

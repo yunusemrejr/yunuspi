@@ -141,7 +141,7 @@ const open = (goal: GoalState) => goal.criteria.filter((criterion) => criterion.
 
 /** Fingerprint of everything that counts as progress: evidence state, not chatter. */
 export function progressMark(goal: GoalState): string {
-	return JSON.stringify(goal.criteria.map((criterion) => [criterion.id, criterion.status, criterion.evidence ?? ""]));
+	return JSON.stringify([goal.verification?.checked ?? 0, goal.criteria.map((criterion) => [criterion.id, criterion.status, criterion.evidence ?? ""])]);
 }
 
 /** Replace the open criteria (met and waived ones keep their record). The verification criterion always remains. */
@@ -233,7 +233,15 @@ export function goalCompletionReceipts(goal: GoalState, context: Pick<Completion
 
 /** Completion is refused once per distinct set of gaps; the same call repeated is a recorded waiver so the user is never deadlocked. */
 export function goalCompletionGate(goal: GoalState, context: CompletionContext): GateDecision {
-	return completionGateReceipts("plan-complete", [...goalCompletionReceipts(goal, context), ...(context.verification ?? [])], context.refused);
+	const receipts = [...goalCompletionReceipts(goal, context), ...(context.verification ?? [])];
+	// Every goal criterion needs its own result, including an explicit waiver.
+	const criteria = open(goal);
+	if (!criteria.length) return completionGateReceipts("plan-complete", receipts, context.refused);
+	const decision = completionGateReceipts("plan-complete", receipts, new Set());
+	return { ...decision, reason: [
+		"Completion refused: these goal criteria still need their own observed evidence or a criterion-specific waiver.",
+		...criteria.map(criterion => "- " + criterion.id + ": " + criterion.text),
+	].join("\n") };
 }
 
 export function complete(goal: GoalState, waived: boolean, now = Date.now()): GoalState {
@@ -244,7 +252,11 @@ export function complete(goal: GoalState, waived: boolean, now = Date.now()): Go
  * questions and unrelated new tasks do not silently create or resume goals. */
 export function reopenRejectedGoal(goal: GoalState | undefined, correction: string, now = Date.now()): GoalState | undefined {
   if (goal?.status !== 'achieved' || !rejectsCompletedWork(correction)) return undefined;
-  return { ...goal, status: 'active', text: clip(`${goal.text}\nLatest user correction: ${correction}`, MAX_GOAL_TEXT),
+  const note = verbatim(correction).slice(0, 2_000);
+  const suffix = "\n\nLatest user correction:\n" + note;
+  const room = MAX_GOAL_TEXT - suffix.length;
+  const original = goal.text.length <= room ? goal.text : goal.text.slice(0, room - 1) + "…";
+  return { ...goal, status: 'active', text: original + suffix,
     criteria: goal.criteria.map(({evidence, ...criterion}) => ({ ...criterion, status: 'open' as const })), nudges: 0, stalls: 0, progressMark: '', note: undefined, updatedAt: now };
 }
 export function rejectsCompletedWork(correction: string): boolean {
@@ -296,8 +308,7 @@ function continuationPrompt(goal: GoalState): string {
 	const remaining = open(goal);
 	const lines = remaining.length
 		? [`The goal is not finished: ${remaining.length} criteria have no evidence yet.`, ...remaining.map((criterion) => `- ${criterion.id}: ${criterion.text}`),
-			"Do the remaining work now. Verify each criterion with a real check (run the tests or the program, open the rendered output, read the diff), then record it with goal({action:\"met\", id, evidence}) quoting what you observed.",
-			"If a criterion is unnecessary or impossible, goal({action:\"waive\", id, evidence}) with the reason. If only the user can unblock you, call goal({action:\"blocked\", reason}) and stop."]
+			"Use the latest user instructions. Finish the open work, reuse current checks, and submit all evidence in one goal complete call. Use goal blocked only when the user must act."]
 		: ["Every criterion has evidence. Call goal({action:\"complete\", summary}) to close the goal; it re-checks that nothing changed since the last verification."];
 	return `[goal ${goal.id}, continuation ${goal.nudges}/${MAX_NUDGES}] ${lines.join("\n")}`;
 }

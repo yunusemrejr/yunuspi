@@ -39,6 +39,8 @@ synthetic data and local fixtures; it makes no model calls.
 
 ## Original and processed prompts
 
+The optional prompt-analysis helper is enabled with `PI_LEAN_GATES=on`. It uses the selected session model and budgets up to eight seconds on a new task and four on a follow-up. Queued steering and routine requests proceed without an extra interpretation request. Explicit changes of topic start fresh. Skipped analysis stays out of the transcript unless there is local guidance to show.
+
 The main agent receives the user's message unchanged. When the helper analysis
 succeeds, a separate block follows it, headed "Auxiliary interpretation
 (advisory only; the literal user prompt is authoritative)", which states that

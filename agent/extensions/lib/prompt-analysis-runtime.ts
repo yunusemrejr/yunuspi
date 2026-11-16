@@ -50,13 +50,12 @@ export interface PromptAnalysisRun {
   attempts: number;
 }
 
-// Account-backed providers can spend tens of seconds queued or reasoning.
-// Follow-ups need the same transport allowance as initial requests, even
-// though their answer budget is smaller. Preserve room for a full fallback.
-const INITIAL_BUDGET_MS = 240_000;
-const FOLLOWUP_BUDGET_MS = 240_000;
-const INITIAL_ATTEMPT_MS = 120_000;
-const FOLLOWUP_ATTEMPT_MS = 120_000;
+// Advisory work holds the first provider request. Give it a short window,
+// then let the session model handle the user's full request directly.
+const INITIAL_BUDGET_MS = 8_000;
+const FOLLOWUP_BUDGET_MS = 4_000;
+const INITIAL_ATTEMPT_MS = 4_000;
+const FOLLOWUP_ATTEMPT_MS = 2_000;
 const MAX_ROUTE_ATTEMPTS = 4;
 
 function aborted(signal?: AbortSignal): boolean {
@@ -128,9 +127,9 @@ export async function runPromptAnalysis(input: {
   const totalBudget = input.budget?.totalMs ?? (input.kind === "initial" ? INITIAL_BUDGET_MS : FOLLOWUP_BUDGET_MS);
   const perAttempt = input.budget?.perAttemptMs ?? (input.kind === "initial" ? INITIAL_ATTEMPT_MS : FOLLOWUP_ATTEMPT_MS);
   const maxTokens = input.budget?.maxTokens ?? (input.kind === "initial" ? 768 : 320);
-  const request = buildPromptAnalysisRequest(input.prompt, input.kind, input.previous, input.requirements);
   const maxAttempts = input.budget?.maxAttempts ?? MAX_ROUTE_ATTEMPTS;
   const candidates = input.candidates.slice(0, maxAttempts).map(candidate => ({ ...candidate, repair: false }));
+  const request = candidates.length ? buildPromptAnalysisRequest(input.prompt, input.kind, input.previous, input.requirements) : "";
   let repaired = false;
   const usageStates = new Map<number, "known" | "unknown" | "pending">();
   let attempts = 0;

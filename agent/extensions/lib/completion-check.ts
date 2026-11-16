@@ -13,7 +13,7 @@ import path from "node:path";
 import { realpath } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { auditable, auditSource, type AuditFinding } from "./code-audit.ts";
-import { changedFiles, codeQuality } from "./code-quality.ts";
+import { changedFiles } from "./code-quality.ts";
 import { checkSourceText, sourceCheckSupported } from "./source-check.ts";
 import { readSourceFiles } from "../pi-lens/context-code.mjs";
 import type { GateReceipt } from "./completion-gate.ts";
@@ -108,31 +108,6 @@ export function createStaticCompletionCheck(check = checkSourceText) {
 
 /** Standalone callers get a fresh check; goal owns one checker for its session. */
 export const staticCompletionSteps = (cwd: string, signal?: AbortSignal) => createStaticCompletionCheck()(cwd, signal);
-
-/** Non-blocking source-quality notes for the files changed since HEAD (duplicated blocks, flagged patterns,
- * import cycles), from the local deterministic baseline. They inform `goal check`; they never gate completion. */
-export async function staticAdvisories(cwd: string, signal?: AbortSignal): Promise<string[]> {
-	const bounded = signal ? AbortSignal.any([signal, AbortSignal.timeout(STATIC_DEADLINE_MS)]) : AbortSignal.timeout(STATIC_DEADLINE_MS);
-	if (!await hasGitBaseline(cwd, bounded)) return [];
-	try {
-		const files = (await changedFiles(cwd, "HEAD", bounded)).filter(file => auditable(file));
-		if (!files.length) return [];
-		// Post-edit hooks already compare bounded project neighbours. Diagnostic completion notes inspect the change,
-		// rather than walking 1,500 unchanged files and rebuilding a project-wide duplicate index just to close a goal.
-		const report: any = await codeQuality({ operation: "baseline", changed: true, paths: files.slice(0, MAX_STATIC_FILES), limit: 20 }, cwd, bounded);
-		const notes: string[] = [];
-		const groups: any[] = report.duplicates?.groups ?? [];
-		if (groups.length) {
-			const sample = groups[0].occurrences?.slice(0, 2).map((spot: any) => `${spot.path}:${spot.start}-${spot.end}`).join(" ~ ");
-			notes.push(`${groups.length} duplicated block group(s) touch the changed files${sample ? ` (e.g. ${sample})` : ""}; reuse the existing owner unless the repetition is intended.`);
-		}
-		const rules = Object.entries(report.counts ?? {}).filter(([, count]) => typeof count === "number" && count > 0).sort((a: any, b: any) => b[1] - a[1]);
-		if (rules.length) notes.push(`${rules.reduce((sum, [, count]) => sum + (count as number), 0)} source-quality finding(s): ${rules.slice(0, 3).map(([rule, count]) => `${rule}×${count}`).join(", ")}.`);
-		const cycles: any[] = report.structure?.cycles ?? [];
-		if (cycles.length) notes.push(`${cycles.length} import cycle(s) among the changed files.`);
-		return notes;
-	} catch { return []; }
-}
 
 export interface CompletionReport {
 	/** One line per step, in the order a reader should fix them. */

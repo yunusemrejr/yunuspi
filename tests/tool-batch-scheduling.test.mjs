@@ -70,6 +70,35 @@ test('global sequential mode remains serial and abort prevents later barrier pre
   assert.deepEqual(started, ['a', 'b']); assert.deepEqual(preflight, ['a', 'b']);
 });
 
+test('steering defers unstarted calls and preserves results for each tool call', async () => {
+  for (const toolExecution of ['parallel', 'sequential']) {
+    const preflight = deferred(), began = deferred(), executed = [];
+    const names = ['edit', 'push'];
+    let steering = [];
+    const run = runBatch(names, names.map(name => tool(name, () => { executed.push(name); return result(); })), {
+      toolExecution,
+      hasInterruptingSteering: () => steering.length > 0,
+      getSteeringMessages: async () => steering.splice(0),
+      async beforeToolCall({ toolCall }) {
+        assert.equal(toolCall.name, 'edit', 'a queued correction bypasses stale preflight');
+        began.resolve();
+        await preflight.promise;
+      },
+    });
+    await began.promise;
+    steering = ['Keep the current code.', 'Do a read-only check instead.'].map(content => ({ role: 'user', content, timestamp: Date.now() }));
+    preflight.resolve();
+    await run.done;
+    assert.deepEqual(executed, []);
+    const messages = run.events.filter(event => event.type === 'message_end').map(event => event.message);
+    const results = messages.filter(message => message.role === 'toolResult');
+    assert.deepEqual(results.map(message => [message.toolName, message.isError]), [['edit', true], ['push', true]]);
+    assert.match(results[0].content[0].text, /steering message is waiting/);
+    assert.deepEqual(messages.filter(message => message.role === 'user').slice(1).map(message => message.content), ['Keep the current code.', 'Do a read-only check instead.']);
+    assert.equal(run.requests(), 2);
+  }
+});
+
 test('blocked barriers, tool failures, and terminate hints retain whole-batch semantics', async () => {
   for (const allTerminate of [false, true]) {
     const executed = [];

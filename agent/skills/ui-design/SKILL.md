@@ -21,6 +21,8 @@ Any one of these can be a real choice. The tell is several together with no argu
 
 If the user's own words ask for one of the looks above, build exactly that. Their instruction outranks this guide.
 
+For a filterable inventory, search results, or a confirmation step, open [Equipment checkout](examples/equipment-checkout.html). It combines labeled native filters, a responsive result list with an empty state, and a dialog with keyboard focus restoration. Adapt the component behavior to the existing design system. The page runs directly in a browser with sample data and no dependencies.
+
 ## While building
 
 - **Real content only.** No invented numbers, logos, testimonials or status. A figure with no source is a labelled placeholder or it is not there.

@@ -180,7 +180,7 @@ function carryState(previous, stage, incoming, incomingCore, incomingDesktop) {
 const [major, minor] = process.versions.node.split('.').map(Number);
 if (major < 22 || (major === 22 && minor < 19)) throw Error('Use Node.js 22.19 or newer; Node.js 24+ is recommended.');
 if (process.platform === 'win32') throw Error('Run this installer inside WSL2 Ubuntu. Native Windows parity is not supported; see docs/PLATFORMS.md.');
-if (!fs.existsSync(path.join(source, 'extensions', 'manifest.json'))) throw Error('Public agent tree missing; use a complete release checkout.');
+if (!fs.existsSync(path.join(source, 'extensions', 'manifest.json'))) throw Error('Public agent tree missing; use a complete source checkout.');
 assertTree(source);
 assertTree(path.join(repo, 'core'), new Set(['node_modules', '__pycache__', 'dist']));
 if (fs.existsSync(path.join(repo, 'docs'))) assertTree(path.join(repo, 'docs'));

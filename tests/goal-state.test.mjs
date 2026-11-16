@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
+import {tagGuardianRequestMessage} from '@yunuspi/coding-agent';
 
 // The completion check's static steps read the git change set of ctx.cwd, as the SDK always supplies it.
 // A clean one-commit repository gives them a real, deterministic input with nothing to report.
@@ -92,15 +93,15 @@ test('a full criteria list still keeps the verification criterion',()=>{
  assert.equal(new Set(trimmed.criteria.map(c=>c.id)).size,trimmed.criteria.length,'ids stay unique when the list is trimmed');
 });
 
-test('completion is refused once for open criteria and unverified writes, then becomes a recorded waiver',()=>{
+test('completion never waives open criteria when repeated',()=>{
  const goal=gs.createGoal('Ship the exporter');
  const refused=new Set();
  const first=gs.goalCompletionGate(goal,{unverifiedWrites:0,refused});
  assert.equal(first.block,true);
- assert.match(first.reason,/C1 open/);
+ assert.match(first.reason,/C1: Ship the exporter/);
  refused.add(first.key);
  const second=gs.goalCompletionGate(goal,{unverifiedWrites:0,refused});
- assert.equal(second.block,false);assert.equal(second.waived,true);
+ assert.equal(second.block,true);assert.equal(second.waived,false);
  const done=settleAll(goal);
  assert.equal(gs.goalCompletionGate(done,{unverifiedWrites:0,refused:new Set()}).block,false);
  const stale=gs.goalCompletionGate(done,{unverifiedWrites:3,refused:new Set()});
@@ -289,6 +290,47 @@ test('one settled run can issue only one goal continuation',async()=>{
  assert.equal(h.entries.at(-1).data.nudges,1);
 });
 
+test('only delivered corrections steer the current goal, and separate work does not add goal debt', async () => {
+ const h = harness();
+ await h.commands.goal.handler('Ship the exporter', h.ctx);
+ const queue = (id, text, streamingBehavior) => h.emit('input', { requestId: id, text, source: 'interactive', streamingBehavior });
+ const deliver = (id, text) => h.emit('message_start', { message: tagGuardianRequestMessage({ role: 'user', content: text }, { requestId: id }) });
+ const finish = async () => {
+  await h.emit('message_end', { message: { role: 'assistant', stopReason: 'stop' } });
+  await h.emit('agent_settled');
+ };
+ await queue('rejected', 'New task: explain this unrelated log.');
+ await queue('amend', "Also don't do a GitHub release.");
+ await deliver('amend', "Also don't do a GitHub release.");
+ assert.match((await h.emit('context', { messages: [] })).messages[0].content, /Ship the exporter/);
+ await finish();
+ assert.equal(h.sent.length, 2, 'an amendment keeps automatic pursuit');
+
+ await queue('pivot', 'New task: explain this unrelated log.', 'steer');
+ await deliver('pivot', 'New task: explain this unrelated log.');
+ assert.equal(await h.emit('context', { messages: [] }), undefined);
+ await h.emit('tool_result', { toolName: 'edit', input: { path: 'other.ts' } });
+ await finish();
+ assert.equal(h.sent.length, 2, 'explicit pivots can suspend automatic pursuit even mid-run');
+ assert.equal(h.entries.at(-1).data.verification?.revision ?? 0, 0);
+ await h.commands.goal.handler('resume', h.ctx);
+ await h.emit('message_start', { message: { role: 'user', content: h.sent.at(-1) } });
+ assert.match((await h.emit('context', { messages: [] })).messages[0].content, /Ship the exporter/);
+});
+
+test('an undelivered rejection does not reopen an achieved goal', async () => {
+ const h = harness();
+ await h.commands.goal.handler('Ship the exporter', h.ctx);
+ await h.commands.goal.handler('done', h.ctx);
+ const correction = 'The result is still broken.\nKeep the file names.';
+ await h.emit('input', { requestId: 'correction', text: correction, source: 'rpc' });
+ assert.equal(h.entries.at(-1).data.status, 'achieved');
+ await h.emit('message_start', { message: tagGuardianRequestMessage({ role: 'user', content: correction }, { requestId: 'correction' }) });
+ assert.equal(h.entries.at(-1).data.status, 'active');
+ assert.ok(h.entries.at(-1).data.text.endsWith(correction));
+ assert.ok(h.entries.at(-1).data.criteria.every(criterion => criterion.status === 'open'));
+});
+
 test('/goal drives a session: kickoff, evidence-gated completion, and a bounded continuation',async()=>{
  const h=harness();
  await h.commands.goal.handler('Make the exporter handle unicode and add tests',h.ctx);
@@ -384,15 +426,18 @@ test('an unfinished goal keeps its tool; a settled goal silences follow-ups unti
  assert.equal(isSessionStopped(h.ctx),false,'a new goal starts unstopped');
 });
 
-test('after one refusal a reasoned completion closes the goal although the gaps changed; open criteria never waive',async()=>{
+test('only the verification gaps actually reported can be waived on retry',async()=>{
  const h=harness();
  await h.commands.goal.handler('Ship the exporter',h.ctx);
  const state=()=>h.entries.at(-1).data;
- const reason='The viewer page is not part of the requested video.';
+ const reason='The test runner is unavailable in this fixture.';
  await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
  assert.match(await h.call({action:'complete',reason}),/refused/,'open criteria refuse even with a reason');
+ assert.match(await h.call({action:'complete',reason}),/refused/,'a second attempt still cannot bypass open criteria');
  for(const criterion of state().criteria)await h.call({action:'met',id:criterion.id,evidence:'npm test: 9 passed, exit 0'});
+ assert.match(await h.call({action:'complete',reason}),/1 file change/);
  await h.emit('tool_result',{toolName:'edit',input:{path:'b.ts'}});
+ assert.match(await h.call({action:'complete',reason}),/2 file change/,'an earlier refusal cannot authorize this new edit');
  assert.match(await h.call({action:'complete',reason}),/recorded waiver/);
  assert.equal(state().status,'achieved');
 });
@@ -451,7 +496,7 @@ test('goal check lists criteria and unverified edits, then reports every step se
  await h.commands.goal.handler('Ship the exporter',h.ctx);
  const open=await h.call({action:'check'});
  assert.match(open,/\[ \] C1 /);
- assert.match(open,/Open steps above/);
+ assert.match(open,/Resolve the open steps/);
  for(const c of h.entries.at(-1).data.criteria)await h.call({action:'met',id:c.id,evidence:'npm test: 9 passed, exit 0'});
  await h.emit('tool_result',{toolName:'edit',input:{path:'a.ts'}});
  const edited=await h.call({action:'check'});

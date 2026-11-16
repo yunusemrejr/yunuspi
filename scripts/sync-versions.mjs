@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-/** Keep the product, six owned packages, and workspace lock in one release.
+/** Keep the product, six owned packages, and workspace lock in sync.
  * Historical forkOrigin and third-party versions are deliberately untouched. */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const args=process.argv.slice(2),versions=args.filter(a=>!a.startsWith('--')),version=versions[0];
 const semver=/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/;
-if(versions.length!==1||!semver.test(version)||args.filter(a=>a==='--write').length>1||args.some(a=>a.startsWith('--')&&a!=='--write'))throw Error('Usage: node scripts/version-release.mjs X.Y.Z [--write]; defaults to a consistency check');
+if(versions.length!==1||!semver.test(version)||args.filter(a=>a==='--write').length>1||args.some(a=>a.startsWith('--')&&a!=='--write'))throw Error('Usage: node scripts/sync-versions.mjs X.Y.Z [--write]; defaults to a consistency check');
 const read=file=>JSON.parse(fs.readFileSync(path.join(root,file),'utf8'));
 const updates=new Map();
 const product=read('package.json');product.version=version;updates.set('package.json',product);

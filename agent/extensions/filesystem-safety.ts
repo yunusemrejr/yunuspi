@@ -78,6 +78,8 @@ type ShellRisk = {
 	consequence?: Consequence;
 	/** Where the command runs, for the snapshot a local loss needs. */
 	workdir?: string;
+	/** Bind consent for a workspace export to the inspected files. */
+	copy?: { source: string; revision: string[] };
 	/** The other reviews the same command line needs. Each is cleared on its
 	 * own: a snapshot settles one effect, the user's request another. */
 	also?: ShellRisk[];
@@ -679,6 +681,7 @@ function assessShell(
 		recursive = false,
 		broad = false,
 		unlinkLeaf = false,
+		copySource?: string,
 	) => {
 		const expanded = shellValue(raw, state);
 		if (expanded === undefined) {
@@ -720,6 +723,13 @@ function assessShell(
 			followLeaf,
 		);
 		if (harnessDenial || isPathProtected(physical, cwd, followLeaf, recursive || broad)) {
+			if (!harnessDenial && copySource && mutationCwd && !glob && !expanded.endsWith("/") && physical === path.resolve(mutationCwd, expanded)) {
+				const copy = externalCopyReview(copySource, physical, mutationCwd, cwd);
+				if (copy) {
+					note({ level: "review", target: physical, resolved: true, ...copy });
+					return;
+				}
+			}
 			note({
 				level: "block",
 				target: raw,
@@ -1337,7 +1347,10 @@ function assessShell(
 		if (name === "cp" || name === "install") {
 			// Copy sources are reads; -t names the destination explicitly.
 			const dest = destination ?? targets.at(-1);
-			if (dest) check(dest, false, false);
+			// Only a plain two-file copy (optionally with --) has approval semantics.
+			const plainCopy = name === "cp" && !elevated && !destination && targets.length === 2 &&
+				(operands.length === 2 || operands.length === 3 && values[0] === "--");
+			if (dest) check(dest, false, false, false, plainCopy ? shellValue(targets[0], state) : undefined);
 			return;
 		}
 		if (name === "sed" || name === "perl") {
@@ -1635,6 +1648,30 @@ function sensitiveExternalPath(file: string): boolean {
 		file,
 	);
 }
+
+function externalCopyReview(sourcePath: string, target: string, workdir: string, cwd: string) {
+	if (!within(target, HOME) || scopeTooBroad(target) || sensitiveExternalPath(target) ||
+		path.relative(HOME, target).split(path.sep).some(segment => segment.startsWith(".")) ||
+		/[*?\[\]{}]/.test(sourcePath)) return undefined;
+	try {
+		const workspace = canonicalMutationPath(cwd);
+		const source = canonicalMutationPath(sourcePath, workdir);
+		if (scopeTooBroad(workspace) || !within(source, workspace) || sensitiveExternalPath(source)) return undefined;
+		const from = fs.statSync(source, { bigint: true });
+		const parent = fs.statSync(path.dirname(target), { bigint: true });
+		const to = fs.lstatSync(target, { bigint: true, throwIfNoEntry: false });
+		if (!from.isFile() || from.nlink !== 1n || !parent.isDirectory() || to && (!to.isFile() || to.nlink !== 1n)) return undefined;
+		const identify = (stat: fs.BigIntStats) => `${stat.dev}:${stat.ino}`;
+		const version = (stat: fs.BigIntStats) => `${identify(stat)}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+		return {
+			reason: `Copy ${JSON.stringify(source)} ${to ? "over" : "to"} ${JSON.stringify(target)} outside this workspace`,
+			copy: { source, revision: [version(from), identify(parent), to ? version(to) : "absent"] },
+		};
+	} catch {
+		return undefined;
+	}
+}
+
 function automaticWriteRoot(
 	file: string,
 	cwd: string,
@@ -2015,7 +2052,8 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 		 * refusal, or nothing when the command may go on. */
 		const decided = async (asks: ShellRisk[]) => {
 			const readings = new Map<ShellRisk, IntentReading>();
-			if (process.env.PI_COMMAND_JUDGE !== "off" && asks.length <= MAX_JUDGED) {
+			const copy = asks.find(one => one.copy);
+			if (!copy && process.env.PI_COMMAND_JUDGE !== "off" && asks.length <= MAX_JUDGED) {
 				let words: string[] = [];
 				try { words = child ? [] : userWords(ctx.sessionManager?.getBranch?.()); } catch { words = []; }
 				for (const one of asks) {
@@ -2038,24 +2076,31 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 			}
 			const named = asks.every((one) => one.consequence);
 			const effects = open.filter((one) => one.consequence).map((one) => one.consequence!.effect);
-			if (ctx.hasUI && !ctx.signal?.aborted) {
+			if (ctx.hasUI && !(copy && child) && !ctx.signal?.aborted) {
 				const unasked = (one: ShellRisk) => readings.get(one)?.intent === "unrequested";
 				const body = asks.length === 1
 					? named
 						? `${sentence(asks[0])}${unasked(asks[0]) ? "\nYour messages do not ask for that." : ""}\n\n${command}\n\nWorking directory: ${ctx.cwd}`
 						: `${describe(asks[0])}\n\nWorking directory: ${ctx.cwd}\n${command}`
 					: `This command line does ${asks.length} things that need your say:\n${asks.map((one) => `- ${sentence(one)}${unasked(one) ? " Your messages do not ask for that." : ""}`).join("\n")}\n\n${command}\n\nWorking directory: ${ctx.cwd}`;
-				const allowed = await confirmAccounted(ctx, named ? "Run this command?" : "Review destructive operation", body);
+				const title = copy ? "Confirm external file copy" : named ? "Run this command?" : "Review destructive operation";
+				const allowed = await confirmAccounted(ctx, title, body);
 				if (allowed && current()) {
 					each("confirmed");
 					return undefined;
 				}
 				each(allowed ? "stale" : "declined");
+				if (copy) return { block: true, reason: allowed
+					? "The external copy changed while approval was pending. Read the current target before asking again."
+					: "The external copy was declined. Continue within scope." };
 				if (!allowed && effects.length)
 					return { block: true, reason: `Not run: the user said no to this command (it ${effects.join("; it ")}). Do not retry it or reach the same effect another way; carry on with the rest, or ask what they would like instead.` };
 				return { block: true, reason: describe(open.find((one) => !one.consequence) ?? asks[0]) + narrow };
 			}
 			each("refused");
+			if (copy) return { block: true, reason: `Approval needed to ${copy.reason}. ${child
+				? "Return the exact copy to the parent for approval."
+				: "Tell the user the exact destination and why the copy is needed. An interactive session can present approval."}` };
 			const plain = open.find((one) => !one.consequence);
 			if (plain || !effects.length) return { block: true, reason: describe(plain ?? asks[0]) + narrow };
 			return {
@@ -2173,12 +2218,9 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 
 		if (isPathProtected(target, cwd)) {
 			if (automaticWriteRoot(target, cwd)) return undefined;
-			const eligible =
-				within(target, HOME) &&
-				!sensitiveExternalPath(target) &&
-				!PROTECTED_DIRS.includes(target);
+			const eligible = within(target, HOME) && !sensitiveExternalPath(target) && !PROTECTED_DIRS.includes(target);
+			if (!eligible) return { block: true, reason: `Blocked: ${target} is protected outside the writable scope. This target requires its authorized operator or a session with the correct launch scope.` };
 			if (
-				eligible &&
 				[...approved].some(([root, kind]) =>
 					kind === "file" ? target === root : within(target, root),
 				)
@@ -2188,9 +2230,9 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 				kind = scopeTooBroad(parent) ? "file" : "directory";
 			const scope = kind === "file" ? target : parent,
 				epoch = generation;
+			if (process.env.PI_SUBAGENT_CHILD === "1") return { block: true, reason: `Approval needed to write ${target} outside the workspace. Return the exact write to the parent for approval.` };
+			if (!ctx.hasUI) return { block: true, reason: `Approval needed to write ${target} outside the workspace. Ask the user about this exact write and continue independent work. An interactive session can present approval.` };
 			if (
-				eligible &&
-				ctx.hasUI &&
 				!denied.has(scope) &&
 				approved.size < 32 &&
 				!ctx.signal?.aborted
@@ -2200,7 +2242,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 					decision = confirmAccounted(
 						ctx,
 						"Additional write scope",
-						`Allow write/edit ${kind === "file" ? "of this file" : "under this directory"}: ${scope} for this session? This does not permit shell deletion, system paths or credentials.`,
+						`The tool requests ${event.toolName} on ${target}. Allow native writes ${kind === "file" ? "to this file" : `under ${scope}`} for this session?`,
 						() => pendingWaiters.get(scope) ?? 1,
 					);
 					pending.set(scope, decision);
@@ -2222,7 +2264,9 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 			}
 			return {
 				block: true,
-				reason: `Blocked: ${filePath} is outside the verified writable scope. Use a session rooted in that project or approve a narrow directory interactively; headless approval is disabled.`,
+				reason: denied.has(scope)
+					? `The extra write scope for ${scope} was declined. Continue within scope.`
+					: `Approval is still required to write ${target}. Recheck the destination before resuming.`,
 			};
 		}
 

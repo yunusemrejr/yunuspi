@@ -47,7 +47,8 @@ test('child skill isolation recognizes current and legacy catalog headers withou
     const child=rewriteSubagentPrompt(prompt,{inheritProjectContext:true,inheritGlobalContext:true,inheritSkills:false});
     assert.ok(child.includes('Inspect the fixture.') && child.includes('Current date:'));
     assert.ok(!child.includes('fixture-guide') && !child.includes('<available_skills>'));
-    assert.match(child,/Skills are optional reference guides/);
+    assert.match(child,/Read a clearly applicable skill before choosing the approach/);
+    assert.match(child,/Open a linked example when it helps/);
     const project='Inspect the fixture.\n\n# Project Context\n\nProject-specific instructions and guidelines:\n\nproject guidance'+catalog+'\nCurrent date: 2026-10-06';
     assert.equal(stripProjectContext(project),prompt,'legacy project stripping retains either skill catalog');
   }

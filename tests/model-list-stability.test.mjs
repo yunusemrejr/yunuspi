@@ -74,7 +74,7 @@ test('B: a failing upstream catalog does not skip the extension refresh, and its
 test('D: DeepSeek publishes only what the vendor lists; facts for retired ids stay for pricing', async () => {
   globalThis.fetch = async url => {
     assert.equal(url, 'https://api.deepseek.com/v1/models');
-    return new Response(JSON.stringify({ object: 'list', data: [{ id: 'deepseek-flash' }, { id: 'deepseek-v4-pro' }] }));
+    return new Response(JSON.stringify({ object: 'list', data: [{ id: 'deepseek-flash' }, { id: 'deepseek-v4-pro' }, { id: 'deepseek-flash' }] }));
   };
   const models = await liveProviders.deepseek.refreshModels({ allowNetwork: true, force: true, signal: new AbortController().signal, credential: { type: 'api_key', key: 'synthetic-key' } });
   assert.deepEqual(models.map(model => model.id).sort(), ['deepseek-flash', 'deepseek-v4-pro']);

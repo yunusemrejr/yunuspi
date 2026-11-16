@@ -295,8 +295,9 @@ test("parallel calls sharing one scope dialog emit one receipt counting every wa
     hasUI: true,
     ui: {
       notify() {},
-      async confirm() {
+      async confirm(_title, body) {
         dialogs++;
+        assert.ok(body.includes(scopeFile));
         await new Promise((resolve) => setTimeout(resolve, 30));
         return true;
       },
@@ -316,6 +317,55 @@ test("parallel calls sharing one scope dialog emit one receipt counting every wa
   assert.equal(waits.length, 1);
   assert.equal(waits[0].data.title, "Additional write scope");
   assert.equal(waits[0].data.waiters, 2, "the receipt counts both hook records the dialog held");
+  ctx.hasUI = false;
+  const anotherFile = path.join(home, `yunuspi-other-scope-${process.pid}.txt`);
+  const headlessCall = { toolName: "write", input: { path: anotherFile, content: "fixture\n" } };
+  for (const hook of handlers) {
+    const result = await hook(headlessCall, ctx);
+    if (!result) continue;
+    assert.match(result.reason, /Ask the user about this exact write/);
+    assert.ok(result.reason.includes(anotherFile));
+    return;
+  }
+  assert.fail("The headless request should wait for operator approval");
+});
+
+test("a resolved workspace file copy requests exact approval and leaves protected operations blocked", async () => {
+  const source = path.join(cwd, "work", "artifact.txt");
+  const destination = path.join(home, `yunuspi-policy-copy-${process.pid}.txt`);
+  fs.writeFileSync(source, "fixture\n");
+  const command = `cp -- ${JSON.stringify(source)} ${JSON.stringify(destination)}`;
+  assert.equal(risk(command)?.level, "review");
+  assert.equal(risk(`cp -r ${source} ${destination}`)?.level, "block");
+  assert.equal(risk(`cp ${source} "${home}/"`)?.level, "block");
+  assert.equal(risk(`cp ${source} "${home}/.ssh/example"`)?.level, "block");
+  assert.equal(risk(`cp ${source} "${home}/.bashrc"`)?.level, "block");
+  assert.equal(risk(`cp ${source} /etc/fixture`)?.level, "block");
+  assert.equal(risk(`rm -f ${destination}`)?.level, "block");
+  const alias = path.join(cwd, "work", "artifact-alias.txt");
+  fs.linkSync(source, alias);
+  assert.equal(risk(command)?.level, "block", "the source must have a single link");
+  fs.unlinkSync(alias);
+
+  const hooks = [];
+  safety.default({ on: (name, fn) => { if (name === "tool_call") hooks.push(fn); } });
+  const prompts = [];
+  let answer = () => true;
+  const ctx = {
+    cwd, hasUI: true,
+    ui: { async confirm(title, body) { prompts.push([title, body]); return answer(); } },
+  };
+  const call = (toolName = "bash") => hooks[0]({ toolName, input: { command } }, ctx);
+  assert.equal(await call(), undefined);
+  assert.equal(prompts[0][0], "Confirm external file copy");
+  assert.ok(prompts[0][1].includes(command) && prompts[0][1].includes(destination));
+  answer = () => false;
+  assert.match((await call("bg_run")).reason, /declined/);
+  answer = () => { fs.appendFileSync(source, "changed while waiting\n"); return true; };
+  assert.match((await call()).reason, /changed while approval was pending/);
+  ctx.hasUI = false;
+  assert.match((await call()).reason, /exact destination and why/);
+  assert.equal(prompts.length, 3);
 });
 
 test("ordinary repetitions pass while large degeneration and accidental truncation are identified", () => {

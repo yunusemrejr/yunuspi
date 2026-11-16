@@ -1015,7 +1015,7 @@ export class AgentSession {
                     await this._queueFollowUp(expandedText, currentImages, requestMessageMeta);
                 }
                 else {
-                    await this._queueSteer(expandedText, currentImages, requestMessageMeta);
+                    await this._queueSteer(expandedText, currentImages, requestMessageMeta, source !== "extension");
                 }
                 this._guardian?.acceptRequest(requestId);
                 this._pendingInputControllers.delete(inputAbortController);
@@ -1195,8 +1195,8 @@ export class AgentSession {
     }
     /**
      * Queue a steering message while the agent is running.
-     * Delivered after the current assistant turn finishes executing its tool calls,
-     * before the next LLM call.
+     * Delivered before the next LLM call. Already-running tools can finish;
+     * unstarted calls are deferred so the model can reconsider them.
      * Expands skill commands and prompt templates. Errors on extension commands.
      * @param images Optional image attachments to include with the message
      * @throws Error if text is an extension command
@@ -1253,7 +1253,7 @@ export class AgentSession {
             const accepted = { ...meta };
             delete accepted.originalText;
             delete accepted.signal;
-            if (behavior === "steer") await this._queueSteer(expandedText, currentImages, accepted);
+            if (behavior === "steer") await this._queueSteer(expandedText, currentImages, accepted, source !== "extension");
             else await this._queueFollowUp(expandedText, currentImages, accepted);
             this._guardian?.acceptRequest(requestId);
         }
@@ -1267,7 +1267,7 @@ export class AgentSession {
     /**
      * Internal: Queue a steering message (already expanded, no extension command check).
      */
-    async _queueSteer(text, images, requestMeta) {
+    async _queueSteer(text, images, requestMeta, interrupt) {
         this._steeringMessages.push(text);
         this._emitQueueUpdate();
         const content = [{ type: "text", text }];
@@ -1278,7 +1278,7 @@ export class AgentSession {
             role: "user",
             content,
             timestamp: Date.now(),
-        }, requestMeta));
+        }, requestMeta), { interrupt });
     }
     /**
      * Internal: Queue a follow-up message (already expanded, no extension command check).

@@ -115,7 +115,7 @@ Follow the [installation guide](docs/INSTALL.md) for prerequisites, the installe
 
 This is a standalone source distribution with six owned runtime packages under `core/` and maintained extensions. Upstream Pi releases have no automatic effect. Stop active YunusPi sessions before installation or updates. Existing installations require an explicit backup step. Use the documented update path so compatibility checks run before a new core is activated. [Core updates and recovery](docs/CORE-UPDATES.md)
 
-The exact source identity is the Git commit SHA; the package version names the compatibility line rather than every commit. `main` is what is published: there are no release tags to wait for. [Versioning policy](docs/PUBLISHING.md#release-identity)
+The exact source identity is the Git commit SHA; the package version names the compatibility line rather than every commit. `main` is what is published: there are no release tags to wait for. [Versioning policy](docs/PUBLISHING.md#source-identity)
 
 The public repository contains reusable code and clean configuration examples. Accounts, sessions, memories, private settings and local model environments stay on your machine. Private harness backups can contain credentials; never publish them or conversation exports. [Public release procedure](docs/PUBLISHING.md)
 

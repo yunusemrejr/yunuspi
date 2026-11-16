@@ -226,11 +226,7 @@ test('adaptive SDK dispatch skips helpers and auxiliary context for a direct tas
   const firstMessages = f.calls[0].context.messages;
   assert.ok(firstMessages.some(message => message.role === 'user' && message.content.some(part => part.text === direct)));
   assert.ok(!firstMessages.some(message => message.customType === 'prompt-analysis-context' || message.content?.some?.(part => /Auxiliary interpretation \(advisory only|Request identity:/.test(part.text ?? ''))), 'a skipped helper contributes no auxiliary model context');
-  const directAnalysis = f.session.sessionManager.getEntries().find(entry => entry.customType === 'prompt-analysis');
-  assert.equal(directAnalysis.details.attempts.length, 0, 'deterministic bookkeeping must not be presented as an inference attempt');
-  assert.equal(directAnalysis.details.skipped, 'direct-task', 'an admission decision is recorded as a decision');
-  assert.match(directAnalysis.content, /Intent analysis · initial · skipped — a direct task needs no model interpretation/);
-  assert.doesNotMatch(directAnalysis.content, /unavailable|no eligible analysis route/, 'a deliberate skip must not read as a failed route');
+  assert.ok(!f.session.sessionManager.getEntries().some(entry => entry.customType === 'prompt-analysis'), 'skipping optional analysis leaves the transcript quiet');
   const complex = 'Investigate cross-file race conditions and compare architectural alternatives in the Node.js parser.';
   await f.session.prompt(complex);
   assert.deepEqual(f.calls.map(call => call.id), ['main', 'main', 'main']);
@@ -241,6 +237,46 @@ test('adaptive SDK dispatch skips helpers and auxiliary context for a direct tas
   assert.deepEqual(analyzed.details.attempts.map(attempt => attempt.outcome), ['complete']);
   assert.equal(analyzed.details.skipped, undefined, 'an analysed prompt carries no skip reason');
   assert.deepEqual(f.errors, []);
+});
+
+test('pending steers reach one model turn in order without analysis', async t => {
+  let finish, started;
+  const firstRequest = new Promise(resolve => { started = resolve; });
+  const f = await fixture(t, { complete: (selected, context) => {
+    if (isAnalysis(context) || finish) return;
+    const stream = new AssistantMessageEventStream();
+    finish = () => stream.push({ type: 'done', reason: 'stop', message: {
+      role: 'assistant', api: selected.api, provider: selected.provider, model: selected.id,
+      content: [{ type: 'text', text: 'First turn.' }], stopReason: 'stop', usage, timestamp: Date.now(),
+    } });
+    started();
+    return stream;
+  } });
+  const running = f.session.prompt('Inspect the original task.');
+  await Promise.race([firstRequest, running.then(() => assert.fail('initial model request did not start'))]);
+  const steers = ['Investigate the cross-file race instead.', 'Actually restrict this to the parser.'];
+  try {
+    for (const steer of steers) await f.session.steer(steer);
+  } finally { finish(); }
+  await running;
+  assert.equal(analysisCalls(f).length, 1);
+  assert.equal(turnCalls(f).length, 2);
+  const request = JSON.stringify(turnCalls(f).at(-1).context.messages);
+  const [first, second] = steers.map(steer => request.indexOf(steer));
+  assert.ok(first >= 0 && second > first, 'both instructions reach the model in arrival order');
+  assert.equal(f.session.sessionManager.getEntries().filter(entry => entry.customType === 'prompt-analysis').length, 1);
+});
+
+test('explicit topic switches exclude the prior advisory from the interpretation packet', async t => {
+  const f = await fixture(t);
+  await f.session.prompt('Use architecture A and preserve the old schema.');
+  await f.session.prompt('New task: compare two export file formats.');
+  const pivot = analysisCalls(f).at(-1);
+  const packet = JSON.parse(pivot.context.messages[0].content[0].text.split('\n').at(-1));
+  assert.match(packet.currentPrompt, /New task/);
+  assert.equal(packet.priorTask, undefined);
+  assert.equal(packet.priorHistory, undefined);
+  assert.doesNotMatch(JSON.stringify(packet), /architecture A|old schema/);
 });
 
 test('a comparison prompt carries the prior-art paragraph to the main model; ordinary work does not', async t => {

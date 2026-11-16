@@ -26,20 +26,30 @@ test('the built-in notes cover every area a session needs judgment in', () => {
   }
   // The notes ride in every request, so their size is a budget, not an accident.
   assert.ok(WORKING_NOTES.length < 10_900, `notes are ${WORKING_NOTES.length} chars`);
+  for (const notes of [WORKING_NOTES, DELEGATED_NOTES]) {
+    assert.match(notes, /Be quick and pragmatic\. Time, tokens and quality all matter/);
+  }
 });
 
 test('a session with no personal notes gets the built-in ones', t => {
   assert.equal(loadWorkingNotes(agentDir(t), {}), WORKING_NOTES);
+  assert.match(WORKING_NOTES, /use read or read_symbol on the current target/);
+  assert.match(WORKING_NOTES, /scoped approval with the exact action and destination/);
 });
 
 test('the guide index lists only guides that are installed', t => {
   const dir = agentDir(t);
   installGuide(dir, 'ui-design');
   installGuide(dir, 'research');
+  installGuide(dir, 'build');
+  installGuide(dir, 'operate');
   const text = loadWorkingNotes(dir, {});
   const index = text.slice(WORKING_NOTES.length);
   assert.match(index, /ui-design/);
   assert.match(index, /research/);
+  assert.match(index, /shared checkout handoff: build/);
+  assert.match(index, /cost and routing comparison: operate/);
+  assert.match(index, /open that on a second call and adapt it/);
   assert.doesNotMatch(index, /cinetic|anatomy|browser/);
   assert.ok(index.includes(`${dir.replace(/\\/g, '/')}/skills/<name>/SKILL.md`), 'the index says where a guide lives');
   assert.equal(guideIndex(path.join(dir, 'skills'), () => false), '');
