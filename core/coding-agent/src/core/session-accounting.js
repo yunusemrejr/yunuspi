@@ -1,4 +1,6 @@
 /** Pure session accounting shared by the owned footer and harness reports. */
+import { addUsageToTotals, createUsageTotals } from './usage-totals.js';
+import { isFlatPlanProvider } from '@yunuspi/ai';
 /** Compact accounting facts; no prompt, endpoint, credential or response text. */
 export function readCostEvidence(usage, provider) {
   const valid = n => typeof n === 'number' && Number.isFinite(n) && n >= 0;
@@ -8,20 +10,24 @@ export function readCostEvidence(usage, provider) {
     return {reported:details.reported, estimated:details.estimated, unknown:details.unknown, subscription:details.subscription, seen:details.seen, estimatedUsage:details.estimatedUsage === true || details.estimated > 0};
   }
   const cost = usage?.cost;
-  if (provider === 'openai-codex' || cost?.billing === 'subscription')
+  if (provider === 'openai-codex' || isFlatPlanProvider(provider ?? cost?.provider) || cost?.billing === 'subscription')
     return {reported:0, estimated:0, unknown:false, subscription:true, seen:false, estimatedUsage:false};
   const n = typeof cost === 'number' ? cost : cost?.total;
   const reported = cost?.source === 'provider-reported';
   const provided = reported || cost?.source === 'provider-estimate';
+  // OpenRouter credits are USD-denominated. BYOK separately bills upstream;
+  // on ordinary routed calls upstream cost is already included in the total.
+  const byok = reported && cost.byok === true && (provider ?? cost.provider) === 'openrouter';
+  const upstream = byok && valid(cost.upstreamInferenceCost) ? cost.upstreamInferenceCost : undefined;
   // Initial child counters are zero before a response arrives. Only a price
   // receipt or explicitly complete pricing can establish a zero charge.
   const seen = valid(n) && (n > 0 || provided || cost?.complete === true);
   return {
-    reported:seen && reported ? n : 0,
+    reported:(seen && reported ? n : 0) + (upstream ?? 0),
     estimated:seen && !reported ? n : 0,
-    unknown:!seen || !reported && cost?.complete === false || Boolean(details),
+    unknown:!seen || !reported && cost?.complete === false || Boolean(details) || byok && upstream === undefined,
     subscription:false,
-    seen,
+    seen:seen || upstream !== undefined,
     estimatedUsage:seen && !reported,
   };
 }
@@ -29,6 +35,15 @@ export function readCostEvidence(usage, provider) {
 export function mergeCostEvidence(left, right) {
   return {reported:left.reported + right.reported, estimated:left.estimated + right.estimated,
     unknown:left.unknown || right.unknown, subscription:left.subscription || right.subscription, seen:left.seen || right.seen, estimatedUsage:Boolean(left.estimatedUsage || right.estimatedUsage || left.estimated > 0 || right.estimated > 0)};
+}
+
+// A provider receipt can correct a model-price estimate down to zero. An
+// incomplete or stale snapshot must never replace measured billing evidence.
+function costEvidenceQuality(evidence) {
+  if (evidence.subscription) return 5;
+  if (!evidence.seen) return 0;
+  if (evidence.estimatedUsage) return evidence.unknown ? 1 : 2;
+  return evidence.unknown ? 3 : 4;
 }
 
 /** Zero-initialized counters alone are not a measurement of a launched child. */
@@ -48,7 +63,6 @@ export function collectAuxiliaryModelUsage(entries) {
   const identity = (value, limit) => typeof value === 'string' && value.length > 0 && value.length <= limit && /^[a-zA-Z0-9_.:-]+$/.test(value);
   const routePart = (value, limit) => typeof value === 'string' && value.length > 0 && value.length <= limit && !/[\s\x00-\x1f\x7f]/.test(value);
   const valid = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
-  const costQuality = evidence => evidence.unknown ? 0 : evidence.subscription ? 3 : evidence.estimatedUsage ? 1 : evidence.seen ? 2 : 0;
   let truncated = false;
   for (const entry of Array.isArray(entries) ? entries : []) {
     if (entry?.type !== 'custom' || entry.customType !== 'auxiliary-model-usage-v1') continue;
@@ -69,7 +83,7 @@ export function collectAuxiliaryModelUsage(entries) {
     if (old) {
       // Provider billing may correct an earlier estimate down to zero. Missing
       // or replayed estimate receipts cannot erase already measured usage.
-      if (costQuality(evidence) < costQuality(old.evidence) || !evidence.seen && old.evidence.seen) next.evidence = old.evidence;
+      if (costEvidenceQuality(evidence) < costEvidenceQuality(old.evidence)) next.evidence = old.evidence;
       if (!usageRecorded || old.usageRecorded && tokens < old.tokens) {
         next.usage = old.usage; next.usageRecorded = old.usageRecorded; next.tokens = old.tokens;
       }
@@ -86,12 +100,17 @@ export function collectSessionCost(entries, subscription = false) {
   const empty = () => ({reported:0, estimated:0, unknown:false, subscription:false, seen:false});
   const valid = n => typeof n === 'number' && Number.isFinite(n) && n >= 0;
   const rows = new Map(), nodes = new Map(), aliases = new Map();
-  const pending = new Set(), settled = new Set(), seenEntries = new Set();
+  const pending = new Set(), settled = new Set(), seenEntries = new Set(), responses = new Map();
   let main = empty(), children = empty(), auxiliary = empty(), truncated = false;
   const addRow = (scope, route, evidence) => {
     const key = `${scope}:${route}`;
     const previous = rows.get(key) ?? {scope, route, ...empty()};
     rows.set(key, {...previous, ...mergeCostEvidence(previous,evidence)});
+  };
+  const addDirect = (scope, route, evidence) => {
+    if (scope === 'main') main = mergeCostEvidence(main,evidence);
+    else auxiliary = mergeCostEvidence(auxiliary,evidence);
+    addRow(scope,route,evidence);
   };
   const mergeNode = (old, next, key = next.key) => {
     if (!old) return {...next, key};
@@ -206,17 +225,25 @@ export function collectSessionCost(entries, subscription = false) {
     const isMain = m?.role === 'assistant';
     const isAuxiliary = m?.role === 'toolResult' && !['subagent','bg_wait'].includes(m.toolName) && m.usage || ['compaction','branch_summary'].includes(entry.type);
     if (!isMain && !isAuxiliary) continue;
-    const id = m?.responseId ? `response:${m.provider}:${m.responseId}` : entry.id ? `entry:${entry.id}` : undefined;
-    if (id && seenEntries.has(id)) continue;
-    if (id) seenEntries.add(id);
     const usage = m ? m.usage : entry.usage;
-    const evidence = readCostEvidence(usage, m?.provider ?? usage?.cost?.provider);
-    if (isMain) main = mergeCostEvidence(main,evidence);
-    else auxiliary = mergeCostEvidence(auxiliary,evidence);
     const provider = m?.provider ?? usage?.cost?.provider;
     const model = m?.model ?? usage?.cost?.model;
-    addRow(isMain ? 'main' : 'auxiliary', provider && model ? `${provider}/${model}` : 'unattributed usage', evidence);
+    const evidence = readCostEvidence(usage, provider);
+    const scope = isMain ? 'main' : 'auxiliary';
+    const route = provider && model ? `${provider}/${model}` : 'unattributed usage';
+    if (typeof m?.responseId === 'string' && m.responseId) {
+      const id = JSON.stringify([provider, m.responseId]);
+      const existing = responses.get(id);
+      if (!existing || costEvidenceQuality(evidence) > costEvidenceQuality(existing.evidence)) {
+        responses.set(id, {scope, route, evidence});
+      }
+      continue;
+    }
+    if (entry.id && seenEntries.has(entry.id)) continue;
+    if (entry.id) seenEntries.add(entry.id);
+    addDirect(scope,route,evidence);
   }
+  for (const {scope,route,evidence} of responses.values()) addDirect(scope,route,evidence);
   const auxiliaryRequests = collectAuxiliaryModelUsage(entries);
   truncated ||= auxiliaryRequests.truncated;
   for (const row of auxiliaryRequests.rows) {
@@ -269,6 +296,48 @@ export function collectSessionCost(entries, subscription = false) {
   const amount = total > 0 && total < 0.000001 ? total.toExponential(3) : total > 0 && total < 1 ? total.toFixed(6) : total.toFixed(3);
   const formatted = evidence.seen ? `$${evidence.estimatedUsage ? '~' : ''}${amount}${evidence.unknown ? '+?' : ''}${evidence.subscription ? ' (sub)' : ''}` : evidence.subscription ? `sub${evidence.unknown ? '+?' : ''}` : '$?';
   return {total, ...evidence, main, children, auxiliary, pending:pending.size + auxiliaryRequests.rows.filter(row=>row.status === 'pending').length, rows:[...rows.values()], formatted};
+}
+
+/** Shared by live RPC and the offline desktop history reader. The whole
+ * transcript counts toward spend, including branches absent from the page. */
+export function collectSessionStats(entries, subscription = false) {
+  const counts = {userMessages:0, assistantMessages:0, toolCalls:0, toolResults:0, totalMessages:0};
+  const usageTotals = createUsageTotals();
+  for (const entry of entries) {
+    if (!entry) continue;
+    let usage;
+    if (entry.type === 'compaction' || entry.type === 'branch_summary') usage = entry.usage;
+    if (entry.type === 'message' && entry.message) {
+      counts.totalMessages++;
+      const message = entry.message;
+      if (message.role === 'user') counts.userMessages++;
+      if (message.role === 'assistant') {
+        counts.assistantMessages++;
+        if (Array.isArray(message.content)) {
+          for (const part of message.content) if (part?.type === 'toolCall') counts.toolCalls++;
+        }
+        usage = message.usage;
+      }
+      if (message.role === 'toolResult') {
+        counts.toolResults++;
+        usage = message.usage;
+      }
+    }
+    if (usage) addUsageToTotals(usageTotals, usage);
+  }
+  const accounting = collectSessionCost(entries, subscription);
+  const spent = row => row.reported + row.estimated;
+  const byRoute = new Map();
+  for (const row of accounting.rows) byRoute.set(row.route, (byRoute.get(row.route) ?? 0) + spent(row));
+  const {input, output, cacheRead, cacheWrite} = usageTotals;
+  return {
+    ...counts,
+    tokens: {input, output, cacheRead, cacheWrite, total: input + output + cacheRead + cacheWrite},
+    cost: accounting.total,
+    costLabel: accounting.formatted,
+    costParts: {main:spent(accounting.main), delegated:spent(accounting.children), helpers:spent(accounting.auxiliary)},
+    costRoutes: [...byRoute].filter(([, cost]) => cost > 0).sort((a, b) => b[1] - a[1]).map(([route, cost]) => ({route, cost})),
+  };
 }
 
 /** Pure, transcript-backed accounting shared by the terminal and report views.

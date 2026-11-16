@@ -19,11 +19,12 @@ test('automatic image preflight sends one correctly routed native request and re
   mock(t, async (url, options) => {
     const listing = catalog(url); if (listing) return Response.json(listing);
     posts.push([url, JSON.parse(options.body)]);
-    return Response.json({ data: [{ b64_json: bytes.toString('base64') }], usage: { cost: .02 } });
+    return Response.json({ data: [{ b64_json: bytes.toString('base64') }], usage: { cost: .02, is_byok: true, cost_details: { upstream_inference_cost: .04 } } });
   });
   await assert.rejects(planImageModel({ model: 'auto', transparent: true }), /No compatible/);
   const result = await imageGenerateRun({ model: 'auto', prompt: 'A red tile', maxCostUsd: .03 }, dir, undefined, undefined, { PI_IMAGE_BACKEND: 'openrouter', OPENROUTER_API_KEY: 'test-key' });
   assert.equal(posts.length, 1); assert.equal(posts[0][0], 'https://openrouter.ai/api/v1/images');
   assert.equal(posts[0][1].model, imageModel.id); assert.deepEqual(posts[0][1].provider, { only: ['test'], allow_fallbacks: false });
   assert.equal(result.model, imageModel.id); assert.equal(result.usage.cost.total, .02); assert.equal(result.decodeVerified, true);
+  assert.equal(result.usage.cost.byok, true); assert.equal(result.usage.cost.upstreamInferenceCost, .04);
 });

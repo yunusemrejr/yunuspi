@@ -387,8 +387,12 @@ function validEntry(value: unknown): value is ProviderHealthEntry {
 
 /** Tolerant read: missing/corrupt state reads as empty (fail-open attribution). */
 export function readHealth(): ProviderHealthState {
+	return readHealthFile(healthFilePath());
+}
+
+function readHealthFile(file: string): ProviderHealthState {
 	try {
-		const parsed = JSON.parse(fs.readFileSync(healthFilePath(), "utf8"));
+		const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
 		if (!parsed || typeof parsed !== "object" || parsed.version !== 1) return emptyState();
 		const providers: Record<string, ProviderHealthEntry> = Object.create(null);
 		for (const [provider, entry] of Object.entries(parsed.providers ?? {})) {
@@ -411,6 +415,25 @@ export function readHealth(): ProviderHealthState {
 		return { version: 1, updatedAt: parsed.updatedAt ?? 0, providers, pending };
 	} catch {
 		return emptyState();
+	}
+}
+
+// Admission polling sees a sibling's atomic replacement immediately, while
+// unchanged polls avoid reading and parsing the fleet's recovery history.
+// The cached state is private and read-only. Lock owners always read fresh.
+let admissionSnapshot: { file: string; revision: string; state: ProviderHealthState } | undefined;
+function readAdmissionSnapshot(): ProviderHealthState {
+	const file = healthFilePath();
+	try {
+		const { dev, ino, size, mtimeNs, ctimeNs } = fs.statSync(file, { bigint: true });
+		const revision = `${dev}:${ino}:${size}:${mtimeNs}:${ctimeNs}`;
+		if (admissionSnapshot?.file !== file || admissionSnapshot.revision !== revision) {
+			admissionSnapshot = { file, revision, state: readHealthFile(file) };
+		}
+		return admissionSnapshot.state;
+	} catch {
+		admissionSnapshot = undefined;
+		return readHealthFile(file);
 	}
 }
 
@@ -476,7 +499,7 @@ async function acquireLockAsync(lockDir: string, signal?: AbortSignal): Promise<
 }
 
 function commitHealth<T>(file: string, mutator: (state: ProviderHealthState) => T): T {
-	const state = readHealth();
+	const state = readHealthFile(file);
 	const result = mutator(state);
 	state.updatedAt = Date.now();
 	expireStaleFailures(state, state.updatedAt);
@@ -881,7 +904,10 @@ export async function gateRequest(input: GateRequestInput): Promise<GateOutcome>
 	input.signal?.throwIfAborted();
 	const now = input.now ?? Date.now();
 	const route = `${input.provider}/${input.model ?? ""}`;
-	const evaluate = (at: number) => evaluateRoute({ provider: input.provider, model: input.model, endpoints: input.endpoints, now: at });
+	const evaluate = (at: number) => evaluateRoute(
+		{ provider: input.provider, model: input.model, endpoints: input.endpoints, now: at },
+		readAdmissionSnapshot(),
+	);
 	let decision = evaluate(now);
 	const admit = async (deferredMs: number): Promise<GateOutcome | undefined> => {
 		let admission: { decision: RouteDecision; admittedAt: number } | undefined;

@@ -7,7 +7,7 @@ import { studioFolder } from "./design-studio.ts";
 import { containsPath, selfMutationDenial } from "./self-mutation-guard.ts";
 import { runGuarded, type Progress } from "./guarded-process.ts";
 import { memoryBudgetMb } from "./memory-guard.ts";
-import { elevenStatus, elevenSpeech, elevenVoices, narrationBackend, speechRequest, writeSpeechCaptions, retainedSpeechError, elevenRecover } from './elevenlabs.ts';
+import { elevenStatus, elevenSpeech, elevenVoices, narrationBackend, speechRequest, writeSpeechCaptions, retainedSpeechError, elevenRecover, type ElevenUsageSink } from './elevenlabs.ts';
 import { fileDigest, videoFingerprint } from './video-segments.ts';
 import { sampledColorEvidence } from './video-color-evidence.ts';
 import { videoMotion, videoLoopBoundary } from './video-motion.ts';
@@ -451,7 +451,7 @@ async function narrationFallback(params: any, cwd: string, signal: AbortSignal |
   return { ...delivery, backend: 'piper', fallbackFrom: fallback.from, note: `${fallback.from.reason}, so this narration used the local Piper voice ${delivery.voice}; ${fallback.advice}. ${delivery.note}` };
 }
 
-export async function narrationSpeak(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
+export async function narrationSpeak(params: any, cwd: string, signal?: AbortSignal, progress?: Progress, onUsage?: ElevenUsageSink) {
   if (narrationBackend(params) !== 'elevenlabs') return narrationPiper(params, cwd, signal, progress);
   const automatic = automaticBackend(params), voice = params.voice ?? 'en_US-ryan-high';
   if (automatic && !elevenStatus().configured) {
@@ -460,7 +460,7 @@ export async function narrationSpeak(params: any, cwd: string, signal?: AbortSig
   }
   const plan = planNarration(params), dir = await studioFolder(params.outputDir, cwd, 'narration');
   try {
-    const made = await elevenSpeech({ ...params, text: plan.spoken.text }, dir, signal, progress);
+    const made = await elevenSpeech({ ...params, text: plan.spoken.text }, dir, signal, progress, undefined, onUsage);
     const file = path.join(dir, 'narration.wav');
     const mastered = await masterNarration(made.raw, file, signal);
     const seconds = Number((await probe(file, signal)).format?.duration);
@@ -505,7 +505,7 @@ async function narrationPiper(params: any, cwd: string, signal?: AbortSignal, pr
   finally { await fs.rm(requestPath, { force: true }); }
 }
 
-export async function narrationTts(params: any, cwd: string, signal?: AbortSignal, progress?: Progress) {
+export async function narrationTts(params: any, cwd: string, signal?: AbortSignal, progress?: Progress, onUsage?: ElevenUsageSink) {
   const action = params.action ?? "status";
   if (action === 'recover') {
     if (typeof params.dir !== 'string' || !params.dir) throw Error('recover requires dir of the retained narration cache');
@@ -518,7 +518,7 @@ export async function narrationTts(params: any, cwd: string, signal?: AbortSigna
     return { ...made, artifact: await produced(made.raw), captions: await writeSpeechCaptions(dir, made.words.map(w => w.w).join(' '), made.seconds, made.words), decodeVerified: true,
       note: 'Recovered decoded speech from saved responses only. Use the artifact as a voice track; words/captions describe cached spoken text before display-lexicon mapping. No new generation or mastering occurs.' };
   }
-  if (action === "speak") return narrationSpeak(params, cwd, signal, progress);
+  if (action === "speak") return narrationSpeak(params, cwd, signal, progress, onUsage);
   let voice = params.voice ?? "en_US-ryan-high";
   if (action === "status") return { ...await piperStatus(), preferredBackend: narrationBackend(params), elevenlabs: elevenStatus() };
   if (action === 'voices') return elevenVoices(signal);

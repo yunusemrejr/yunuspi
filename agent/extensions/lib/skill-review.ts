@@ -81,8 +81,7 @@ export function matchingGuides(skills: CatalogSkill[], request: string): Catalog
 export function registerSkillReview(pi: any): void {
 	let skills: CatalogSkill[] = [];
 	pi.on?.("before_agent_start", (event: any) => {
-		const next = catalogSkills(event);
-		if (next.length && JSON.stringify(next) !== JSON.stringify(skills)) skills = next;
+		skills = catalogSkills(event);
 	});
 	const search = (query: string, group: string, limit: number, offset: number) => {
 		const unique = rankCatalog(skills, query, (skill) => !group || capabilityGroup(skill.name, skill.description) === group);

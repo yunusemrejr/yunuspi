@@ -27,10 +27,11 @@ const server = http.createServer(async (req, res) => {
   const input = JSON.parse(body), user = [...input.messages].reverse().find(m => m.role === 'user');
   const prompt = typeof user?.content === 'string' ? user.content : (user?.content ?? []).map(p => p.text || '').join('');
   requests.push(prompt);
+  const responseId = `synthetic-desktop-${requests.length}`;
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
-  const chunk = delta => res.write(`data: ${JSON.stringify({ id: 'synthetic-desktop', object: 'chat.completion.chunk', model: 'desktop-fixture', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
+  const chunk = delta => res.write(`data: ${JSON.stringify({ id: responseId, object: 'chat.completion.chunk', model: 'desktop-fixture', choices: [{ index: 0, delta, finish_reason: null }] })}\n\n`);
   const finish = reason => {
-    res.write(`data: ${JSON.stringify({ id: 'synthetic-desktop', choices: [{ index: 0, delta: {}, finish_reason: reason }], usage: { prompt_tokens: 25, completion_tokens: 30, total_tokens: 55 } })}\n\ndata: [DONE]\n\n`); res.end();
+    res.write(`data: ${JSON.stringify({ id: responseId, choices: [{ index: 0, delta: {}, finish_reason: reason }], usage: { prompt_tokens: 25, completion_tokens: 30, total_tokens: 55 } })}\n\ndata: [DONE]\n\n`); res.end();
   };
   // A turn of several steps: narration and one read per request, the second read failing, then the answer.
   if (prompt.includes('STEPS')) {
@@ -54,7 +55,7 @@ const server = http.createServer(async (req, res) => {
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const baseUrl = `http://127.0.0.1:${server.address().port}/v1`;
 fs.writeFileSync(path.join(agentDir, 'settings.json'), JSON.stringify({ packages: [], skills: [], defaultProvider: 'desktop-example', defaultModel: 'desktop-fixture', defaultThinkingLevel: 'off', retry: { enabled: false } }));
-fs.writeFileSync(path.join(agentDir, 'models.json'), JSON.stringify({ providers: { 'desktop-example': { api: 'openai-completions', baseUrl, apiKey: 'synthetic-example-key', models: [{ id: 'desktop-fixture', name: 'Local fixture', contextWindow: 100_000, maxTokens: 2000, reasoning: true, thinkingLevelMap: { max: 'high', ultra: 'high' }, input: ['text', 'image'], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] } } }));
+fs.writeFileSync(path.join(agentDir, 'models.json'), JSON.stringify({ providers: { 'desktop-example': { api: 'openai-completions', baseUrl, apiKey: 'synthetic-example-key', models: [{ id: 'desktop-fixture', name: 'Local fixture', contextWindow: 100_000, maxTokens: 2000, reasoning: true, thinkingLevelMap: { max: 'high', ultra: 'high' }, input: ['text', 'image'], cost: { input: 4, output: 30, cacheRead: 0, cacheWrite: 0 } }] } } }));
 fs.writeFileSync(path.join(agentDir, 'extensions/desktop-fixture.ts'), `import {spawn} from 'node:child_process';
 import fs from 'node:fs';
 export default function(pi) {
@@ -62,6 +63,12 @@ export default function(pi) {
   pi.registerCommand('desktop-job', {description:'Synthetic background ownership coverage',handler:async()=>{
     job=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
     fs.writeFileSync(${JSON.stringify(path.join(scratch, 'job.pid'))},String(job.pid));
+  }});
+  pi.registerCommand('desktop-charge', {description:'Synthetic detached billing coverage',handler:async()=>{
+    setTimeout(()=>pi.appendEntry('auxiliary-model-usage-v1',{
+      id:'fixture-detached',owner:'fixture',provider:'desktop-example',model:'metered-helper',status:'completed',
+      usage:{cost:{total:0.25,source:'provider-reported'}}
+    }),50);
   }});
   pi.on('session_shutdown',()=>{job?.kill();});
   pi.registerCommand('desktop-timeout', {description:'Synthetic background dialog timeout',handler:async(_args,ctx)=>{
@@ -88,8 +95,10 @@ const store = new SessionStore(dataDir), pa = store.addProject(alpha), pb = stor
 const first = store.create(pa.id), second = store.create(pa.id), third = store.create(pb.id), history = store.create(pa.id);
 for (const [session, title] of [[first, 'Alpha one'], [second, 'Alpha two'], [third, 'Beta one'], [history, 'Long history']]) store.update(session.id, { title });
 const manager = SessionManager.create(alpha, store.transcriptDirectory(history.id), { id: history.id });
-const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 for (let index = 0; index < 90; index++) {
+  const amount = index === 0 ? 0.25 : 0;
+  const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+    cost: { input: 0, output: amount, cacheRead: 0, cacheWrite: 0, total: amount, source: 'provider-reported' } };
   manager.appendMessage({ role: 'user', content: `History request ${index}`, timestamp: Date.now() });
   manager.appendMessage({ role: 'assistant', content: [{ type: 'text', text: `History response ${index}\n\n${'Some measured history with enough content to scroll. '.repeat(10)}\n\n\`\`\`js\n${'x'.repeat(300)}\n\`\`\`` }], api: 'openai-completions', provider: 'desktop-example', model: 'desktop-fixture', stopReason: 'stop', usage, timestamp: Date.now() });
 }
@@ -131,7 +140,11 @@ try {
   await open(first.id); await done();
   assert.match(await page.locator('#messages').innerText(), /alpha-session-one/);
   assert.doesNotMatch(await page.locator('#messages').innerText(), /alpha-session-two/);
+  await page.waitForFunction(() => document.getElementById('usage-caption').textContent.includes('$~0.001000 total'));
   check('same-project simultaneous streams remain independent');
+  await page.evaluate(id => window.yunuspi.prompt(id, '/desktop-charge'), first.id);
+  await page.waitForFunction(() => document.getElementById('usage-caption').textContent.includes('$~0.251000 total'));
+  check('detached billing refreshes the live total while the session is idle');
   await page.locator('#prompt').fill('unsent alpha draft');
   await open(third.id); await send('beta-project-three'); await done();
   await open(first.id); assert.equal(await page.locator('#prompt').inputValue(), 'unsent alpha draft');
@@ -191,6 +204,12 @@ try {
   await page.evaluate(id => window.yunuspi.prompt(id, '/desktop-job'), first.id);
   const jobPid = Number(fs.readFileSync(path.join(scratch, 'job.pid'), 'utf8'));
   await open(history.id);
+  assert.match(await page.locator('#usage-caption').innerText(), /\$0\.250000 total/);
+  await send('/cost');
+  await page.waitForFunction(() => document.getElementById('context-content').textContent.includes('$0.250000 total') && !document.getElementById('workbench').hidden);
+  assert.ok(!(await page.evaluate(() => window.yunuspi.snapshot())).runtime.some(worker => worker.id === history.id));
+  await page.locator('#workbench-close').click();
+  check('live cost refresh and passive reopen show the recorded total, including /cost on a dormant session');
   await page.waitForSelector('#load-earlier:not([hidden])');
   let gap = await page.locator('#conversation').evaluate(node => node.scrollHeight - node.scrollTop - node.clientHeight);
   assert.ok(gap < 3, `initial history bottom gap ${gap}`);

@@ -24,9 +24,21 @@ function fixture(skillNames = names, systemPromptOptions) {
   const systemPrompt = `<available_skills>${skillNames.map(name =>
     `<skill><name>${name}</name><description>${name.replaceAll("-", " ")}</description><location>/fixture/skills/${name}/SKILL.md</location></skill>`).join("")}</available_skills>`;
   registerSkillReview(pi);
-  hooks.get("before_agent_start")({prompt: "Explain the available workflows", systemPrompt, systemPromptOptions});
-  return {review: tools.get("skill_review"), entries};
+  const refresh = (event) => hooks.get("before_agent_start")(event);
+  refresh({prompt: "Explain the available workflows", systemPrompt, systemPromptOptions});
+  return {review: tools.get("skill_review"), entries, refresh};
 }
+
+test("skill_review drops the previous catalogue when skills are disabled", async () => {
+  const f = fixture();
+  const browse = () => f.review.execute("browse", {action: "browse"});
+  const countSkills = (result) => result.details.groups.reduce((total, group) => total + group.count, 0);
+  assert.ok(countSkills(await browse()) > 0);
+  f.refresh({systemPromptOptions: {skills: []}, systemPrompt: "The current project has no skills."});
+  assert.equal(countSkills(await browse()), 0);
+  f.refresh({systemPromptOptions: {skills: [{name: "private", description: "Disabled", filePath: "/fixture/skills/private/SKILL.md", disableModelInvocation: true}]}});
+  assert.equal(countSkills(await browse()), 0);
+});
 
 test("capability grouping is total, deterministic and compact", () => {
   const items = names.map(name => ({name, description: name === "misc-thing" ? "misc capability" : name.replaceAll("-", " ")}));

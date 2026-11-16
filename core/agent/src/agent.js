@@ -63,6 +63,20 @@ class PendingMessageQueue {
     hasInterrupt() {
         return this.messages.some(entry => entry.interrupt);
     }
+    select() {
+        const count = this.mode === "all" ? this.messages.length : Math.min(1, this.messages.length);
+        const first = this.messages[0];
+        const selected = this.messages.slice(0, count).map(entry => entry.message);
+        return {
+            messages: selected,
+            consume: () => {
+                // A clear during turn preparation revokes this selection.
+                if (this.messages[0] !== first) return [];
+                this.messages.splice(0, count);
+                return selected;
+            },
+        };
+    }
     drain() {
         if (this.mode === "all") {
             const drained = this.messages.map(entry => entry.message);
@@ -94,6 +108,7 @@ export class Agent {
     convertToLlm;
     transformContext;
     streamFunction;
+    getStreamTimeoutMs;
     getApiKey;
     onPayload;
     onResponse;
@@ -120,6 +135,7 @@ export class Agent {
         this.convertToLlm = runtimeOptions.convertToLlm ?? defaultConvertToLlm;
         this.transformContext = runtimeOptions.transformContext;
         this.streamFunction = runtimeOptions.streamFn ?? getDefaultStreamFn();
+        this.getStreamTimeoutMs = runtimeOptions.getStreamTimeoutMs;
         this.getApiKey = runtimeOptions.getApiKey;
         this.onPayload = runtimeOptions.onPayload;
         this.onResponse = runtimeOptions.onResponse;
@@ -289,6 +305,11 @@ export class Agent {
     }
     createLoopConfig(options = {}) {
         let skipInitialSteeringPoll = options.skipInitialSteeringPoll === true;
+        let selected;
+        const poll = (queue) => {
+            selected = queue.select();
+            return selected.messages;
+        };
         const shouldStopAfterTurn = this.shouldStopAfterTurn;
         return {
             model: this._state.model,
@@ -297,6 +318,7 @@ export class Agent {
             onPayload: this.onPayload,
             onResponse: this.onResponse,
             transport: this.transport,
+            timeoutMs: this.getStreamTimeoutMs?.(),
             thinkingBudgets: this.thinkingBudgets,
             maxRetryDelayMs: this.maxRetryDelayMs,
             toolExecution: this.toolExecution,
@@ -322,9 +344,14 @@ export class Agent {
                     skipInitialSteeringPoll = false;
                     return [];
                 }
-                return this.steeringQueue.drain();
+                return poll(this.steeringQueue);
             },
-            getFollowUpMessages: async () => this.followUpQueue.drain(),
+            getFollowUpMessages: async () => poll(this.followUpQueue),
+            consumePendingMessages: () => {
+                const batch = selected;
+                selected = undefined;
+                return batch?.consume() ?? [];
+            },
         };
     }
     async runWithLifecycle(executor) {

@@ -532,6 +532,10 @@ export interface ContextEvent {
 export interface BeforeProviderRequestEvent {
     type: "before_provider_request";
     payload: unknown;
+    /** The selected transport route. Available when the provider passes its model to the payload hook. */
+    model?: Pick<Model<Api>, "provider" | "id" | "baseUrl">;
+    /** The request lifetime, including caller cancellation and stream deadlines. */
+    signal?: AbortSignal;
 }
 /**
  * Fired after request headers are assembled, before the provider HTTP call.
@@ -575,6 +579,7 @@ export interface AgentStartEvent {
 export interface AgentEndEvent {
     type: "agent_end";
     messages: AgentMessage[];
+    aborted?: boolean;
 }
 /** Fired after an agent run has fully settled and no automatic retry, compaction, or queued continuation will run. */
 export interface AgentSettledEvent {

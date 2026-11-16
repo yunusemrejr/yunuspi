@@ -1,3 +1,11 @@
+## 0.56.2 — Session cost on reopen and safer interruptions
+
+- Stop leaves a result for every tool call in a started batch and cancels the next model request. Goal completion waits for earlier calls in the same batch to settle.
+- Opening a saved desktop session shows its recorded cost without starting a worker. Provider billing evidence can replace an estimate, and the total identifies missing evidence.
+- Model request admission uses the route actually being requested. The provider gate reuses unchanged health data while a request waits.
+- Session context walks the active branch once. Cyclic parent links report an error instead of hanging.
+- Skill recommendations use a term index, and exact evidence takes precedence over fuzzy matches. Workspace reminders distinguish sibling Git worktrees and report each change once.
+
 ## 0.56.1 — Model lists that stay complete, and shorter waits on Ling
 
 This release answers the complaints of 16 Nov 2026: model pickers that showed a different list from one opening to the next, DeepSeek and Ling rows for models their vendors have withdrawn, a "Rate Limit Exceeded" error that looked like OpenAI's, and small tasks that took far too long on Ling.

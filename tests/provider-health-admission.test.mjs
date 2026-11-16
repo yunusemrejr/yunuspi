@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createServer } from 'node:http';
+import { syncBuiltinESMExports } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -105,6 +106,34 @@ test('denied attempts are not recorded as outgoing pressure, admitted ones are',
   assert.equal(health.readHealth().providers.p.requests.length, 0);
   await health.gateRequest({ provider: 'q', model: 'm', estTokens: 40 });
   assert.equal(health.readHealth().providers.q.requests.length, 1);
+});
+
+test('cooldown polls reuse unchanged state and see a sibling release before expiry', async (t) => {
+  reset();
+  let now = Date.now();
+  t.mock.method(Date, 'now', () => now);
+  health.recordFailure({ provider: 'p', model: 'm', errorMessage: '429 too many requests' });
+  const read = fs.readFileSync;
+  let reads = 0;
+  t.mock.method(fs, 'readFileSync', (file, ...args) => {
+    if (file === process.env.PI_PROVIDER_STATE_FILE) reads++;
+    return read(file, ...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  let polls = 0;
+  const outcome = await health.gateRequest({
+    provider: 'p',
+    model: 'm',
+    maxWaitMs: 30_000,
+    sleep: async (ms) => {
+      now += ms;
+      if (++polls === 12) health.recordSuccess({ provider: 'p', model: 'm' });
+    },
+  });
+  assert.equal(polls, 12);
+  assert.equal(outcome.deferredMs, 12 * health.GATE_POLL_MS);
+  assert.ok(reads > 0 && reads <= 6, `read provider state ${reads} times over ${polls} polls`);
 });
 
 test('a sibling cooldown published during admission lock wait prevents HTTP dispatch and pressure', async (t) => {

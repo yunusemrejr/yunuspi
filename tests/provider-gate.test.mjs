@@ -2,7 +2,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { AssistantMessageEventStream } from '@yunuspi/ai';
+import { ModelRuntime } from '../core/coding-agent/src/core/model-runtime.js';
+import { DefaultResourceLoader } from '../core/coding-agent/src/core/resource-loader.js';
+import { createAgentSession } from '../core/coding-agent/src/core/sdk.js';
+import { SessionManager } from '../core/coding-agent/src/core/session-manager.js';
+import { SettingsManager } from '../core/coding-agent/src/core/settings-manager.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const agentRoot = [path.join(root, 'agent'), path.resolve(root, '..')].find((candidate) =>
@@ -62,6 +69,14 @@ try {
     () => before({ payload: { model: 'shared-id' } }, context(second, available)),
     (error) => error?.code === 'PI_AUTONOMOUS_REQUEST_DENIED',
     'an active model context cannot hide a cooling duplicate provider',
+  );
+  await before({ payload: { model: 'shared-id' }, model: second }, context(first, available));
+  assert.equal(health.readHealth().providers[second.provider].requests.length, 1,
+    'the actual request route is admitted even with a cooling duplicate model id');
+  await assert.rejects(
+    () => before({ payload: { model: 'shared-id' }, model: first }, context(second, available)),
+    (error) => error?.code === 'PI_AUTONOMOUS_REQUEST_DENIED',
+    'the actual cooling route stays blocked regardless of the session model',
   );
 
   fs.rmSync(process.env.PI_PROVIDER_STATE_FILE, { force: true });
@@ -164,3 +179,90 @@ try {
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
 }
+
+test('a provider request timeout cancels its pending admission in the real SDK', { timeout: 10_000 }, async (t) => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-gate-timeout-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  process.env.PI_PROVIDER_STATE_FILE = path.join(cwd, 'health.json');
+  process.env.PI_PROVIDER_GATE_MAX_WAIT_MS = '5000';
+  const originalIdleOverride = process.env.PI_STREAM_IDLE_MS;
+  delete process.env.PI_STREAM_IDLE_MS;
+  t.after(() => {
+    if (originalIdleOverride !== undefined) process.env.PI_STREAM_IDLE_MS = originalIdleOverride;
+  });
+  const selected = {
+    ...model('gated-fixture', 'fixture'),
+    name: 'Fixture',
+    api: 'openai-completions',
+    input: ['text'],
+    reasoning: false,
+    contextWindow: 65_536,
+    maxTokens: 4096,
+  };
+  let dispatched = false;
+  let gateSignal;
+  let gateFinished;
+  const gateSettled = new Promise(resolve => { gateFinished = resolve; });
+  const runtime = await ModelRuntime.create({ authPath: path.join(cwd, 'auth.json'), modelsPath: null, refreshOnCreate: false });
+  const stream = (actual, _context, options) => {
+    const result = new AssistantMessageEventStream();
+    const message = {
+      role: 'assistant', api: actual.api, provider: actual.provider, model: actual.id,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+      timestamp: Date.now(),
+    };
+    void (async () => {
+      try {
+        await options.onPayload({ model: actual.id }, actual);
+        options.signal.throwIfAborted();
+        dispatched = true;
+        result.push({
+          type: 'done', reason: 'stop',
+          message: { ...message, stopReason: 'stop', content: [{ type: 'text', text: 'Fixture answer.' }] },
+        });
+      } catch (error) {
+        result.push({
+          type: 'error', reason: 'error',
+          error: { ...message, content: [], stopReason: 'error', errorMessage: error.message },
+        });
+      } finally {
+        gateFinished();
+      }
+    })();
+    return result;
+  };
+  runtime.registerNativeProvider({
+    id: selected.provider, name: selected.name, getModels: () => [selected],
+    auth: { apiKey: { name: 'Fixture', resolve: async () => ({ source: 'fixture', auth: { apiKey: 'synthetic-fixture' } }) } },
+    stream, streamSimple: stream,
+  });
+  await runtime.refresh({ allowNetwork: false });
+  const settingsManager = SettingsManager.inMemory({
+    httpIdleTimeoutMs: 120, retry: { enabled: false }, compaction: { enabled: false },
+  });
+  const loader = new DefaultResourceLoader({
+    cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true, noContextFiles: true,
+    extensionFactories: [pi => {
+      pi.on('before_provider_request', event => { gateSignal = event.signal; });
+      registerGate(pi);
+    }],
+  });
+  await loader.reload();
+  const { session } = await createAgentSession({
+    cwd, agentDir: cwd, resourceLoader: loader, settingsManager, modelRuntime: runtime, model: selected,
+    sessionManager: SessionManager.inMemory(cwd), noTools: 'all',
+  });
+  t.after(() => session.dispose());
+  health.recordFailure({ provider: selected.provider, model: selected.id, errorMessage: '429 too many requests; Retry-After: 2' });
+  await session.prompt('Make a synthetic provider request.');
+  assert.ok(gateSignal?.aborted, 'the provider deadline reaches the hook signal');
+  await gateSettled;
+  assert.equal(dispatched, false);
+  assert.match(session.messages.at(-1).errorMessage, /idle timeout after 120ms/);
+  const state = health.readHealth();
+  assert.equal(state.providers[selected.provider].requests.length, 0);
+  assert.equal(state.providers[selected.provider].models[selected.id]?.failure, undefined,
+    'a request cancelled in admission supplies no upstream failure evidence');
+  assert.equal(state.pending.length, 0);
+});

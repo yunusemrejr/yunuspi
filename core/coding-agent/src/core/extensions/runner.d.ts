@@ -156,7 +156,7 @@ export declare class ExtensionRunner {
     emitToolCall(event: ToolCallEvent): Promise<ToolCallEventResult | undefined>;
     emitUserBash(event: UserBashEvent): Promise<UserBashEventResult | undefined>;
     emitContext(messages: AgentMessage[], metadata?: Pick<ContextEvent, "requestMessages" | "requestId" | "turnId" | "requestMessageIndex">): Promise<AgentMessage[]>;
-    emitBeforeProviderRequest(payload: unknown): Promise<unknown>;
+    emitBeforeProviderRequest(payload: unknown, metadata?: Pick<BeforeProviderRequestEvent, "model" | "signal">): Promise<unknown>;
     emitBeforeProviderHeaders(headers: ProviderHeaders): Promise<ProviderHeaders>;
     emitBeforeAgentStart(prompt: string, images: ImageContent[] | undefined, systemPrompt: string, systemPromptOptions: BuildSystemPromptOptions, requestSignal?: AbortSignal): Promise<BeforeAgentStartCombinedResult | undefined>;
     emitResourcesDiscover(cwd: string, reason: ResourcesDiscoverEvent["reason"]): Promise<{

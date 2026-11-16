@@ -90,14 +90,15 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
     let config = initialConfig;
     let lastCompletedTurn;
     // Check for steering messages at start (user may have typed while waiting)
-    let pendingMessages = (await config.getSteeringMessages?.()) || [];
+    let pendingMessages = signal?.aborted ? [] : (await config.getSteeringMessages?.()) || [];
+    let hasMoreToolCalls = true;
     // Outer loop: continues when queued follow-up messages arrive after agent would stop
-    while (true) {
-        let hasMoreToolCalls = true;
+    while (!signal?.aborted) {
         // Inner loop: process tool calls and steering messages
-        while (hasMoreToolCalls || pendingMessages.length > 0) {
+        while (!signal?.aborted && (hasMoreToolCalls || pendingMessages.length > 0)) {
             if (lastCompletedTurn) {
                 const nextTurnSnapshot = await config.prepareNextTurn?.(lastCompletedTurn);
+                if (signal?.aborted) break;
                 if (nextTurnSnapshot) {
                     currentContext = nextTurnSnapshot.context ?? currentContext;
                     config = {
@@ -116,24 +117,27 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
                 if (pendingMessages.length === 0) {
                     pendingMessages = (await config.getSteeringMessages?.()) || [];
                 }
-                await emit({ type: "turn_start" });
             }
+            if (signal?.aborted) break;
+            const delivery = pendingMessages.length ? config.consumePendingMessages?.() ?? pendingMessages : [];
+            pendingMessages = [];
+            if (!hasMoreToolCalls && delivery.length === 0) break;
+            if (lastCompletedTurn) await emit({ type: "turn_start" });
             // Process pending messages (inject before next assistant response)
-            if (pendingMessages.length > 0) {
-                for (const message of pendingMessages) {
-                    await emit({ type: "message_start", message });
-                    await emit({ type: "message_end", message });
-                    currentContext.messages.push(message);
-                    newMessages.push(message);
-                }
-                pendingMessages = [];
+            for (const message of delivery) {
+                await emit({ type: "message_start", message });
+                await emit({ type: "message_end", message });
+                currentContext.messages.push(message);
+                newMessages.push(message);
             }
             // Stream assistant response
+            if (signal?.aborted) break;
             const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFunction);
             newMessages.push(message);
             if (message.stopReason === "error" || message.stopReason === "aborted") {
                 await emit({ type: "turn_end", message, toolResults: [] });
-                await emit({ type: "agent_end", messages: newMessages });
+                await emit({ type: "agent_end", messages: newMessages,
+                    ...(signal?.aborted || message.stopReason === "aborted" ? { aborted: true } : {}) });
                 return;
             }
             // Check for tool calls
@@ -145,9 +149,15 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
                 // every tool call in the message may carry truncated arguments. Fail
                 // them all instead of executing potentially borked calls.
                 const executedToolBatch = message.stopReason === "length"
-                    ? await failToolCallsFromTruncatedMessage(toolCalls, emit)
-                    : await executeToolCalls(currentContext, message, config, signal, emit);
+                    ? await rejectUnexecutedToolCalls(toolCalls, emit,
+                        call => `Tool call "${call.name}" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.`)
+                    : await executeToolCalls(currentContext, message, toolCalls, config, signal, emit);
                 toolResults.push(...executedToolBatch.messages);
+                if (signal?.aborted && toolResults.length < toolCalls.length) {
+                    const skipped = await rejectUnexecutedToolCalls(toolCalls.slice(toolResults.length), emit,
+                        () => "Tool call was not executed because the operation was aborted.");
+                    toolResults.push(...skipped.messages);
+                }
                 hasMoreToolCalls = !executedToolBatch.terminate;
                 for (const result of toolResults) {
                     currentContext.messages.push(result);
@@ -155,18 +165,22 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
                 }
             }
             await emit({ type: "turn_end", message, toolResults });
+            if (signal?.aborted) break;
             lastCompletedTurn = {
                 message,
                 toolResults,
                 context: currentContext,
                 newMessages,
             };
-            if (await config.shouldStopAfterTurn?.(lastCompletedTurn)) {
+            const shouldStop = await config.shouldStopAfterTurn?.(lastCompletedTurn);
+            if (signal?.aborted) break;
+            if (shouldStop) {
                 await emit({ type: "agent_end", messages: newMessages });
                 return;
             }
             pendingMessages = (await config.getSteeringMessages?.()) || [];
         }
+        if (signal?.aborted) break;
         // Agent would stop here. Check for follow-up messages.
         const followUpMessages = (await config.getFollowUpMessages?.()) || [];
         if (followUpMessages.length > 0) {
@@ -177,7 +191,7 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
         // No more messages, exit
         break;
     }
-    await emit({ type: "agent_end", messages: newMessages });
+    await emit({ type: "agent_end", messages: newMessages, ...(signal?.aborted ? { aborted: true } : {}) });
 }
 /**
  * Stream an assistant response from the LLM.
@@ -259,13 +273,10 @@ async function streamAssistantResponse(context, config, signal, emit, streamFunc
     return finalMessage;
 }
 /**
- * Fail all tool calls from an assistant message that was truncated by the
- * output token limit. Streamed tool-call arguments are finalized with a
- * best-effort JSON salvage parser, so a truncated message can yield tool calls
- * whose arguments parse and validate but are silently incomplete. None of them
- * are safe to execute; report each as an error so the model can re-issue them.
+ * Pair requests that could not run with durable tool results, in call order.
+ * A truncated response can contain apparently valid but incomplete arguments.
  */
-async function failToolCallsFromTruncatedMessage(toolCalls, emit) {
+async function rejectUnexecutedToolCalls(toolCalls, emit, reason) {
     const messages = [];
     for (const toolCall of toolCalls) {
         await emit({
@@ -276,7 +287,7 @@ async function failToolCallsFromTruncatedMessage(toolCalls, emit) {
         });
         const finalized = {
             toolCall,
-            result: createErrorToolResult(`Tool call "${toolCall.name}" was not executed: the response hit the output token limit, so its arguments may be truncated. Re-issue the tool call with complete arguments.`),
+            result: createErrorToolResult(reason(toolCall)),
             isError: true,
         };
         await emitToolExecutionEnd(finalized, emit);
@@ -289,8 +300,8 @@ async function failToolCallsFromTruncatedMessage(toolCalls, emit) {
 /**
  * Execute tool calls from an assistant message.
  */
-async function executeToolCalls(currentContext, assistantMessage, config, signal, emit) {
-    const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
+async function executeToolCalls(currentContext, assistantMessage, toolCalls, config, signal, emit) {
+    if (signal?.aborted) return { messages: [], terminate: false };
     const hasSequentialToolCall = toolCalls.some((tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential");
     if (config.toolExecution === "sequential") {
         return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);
@@ -426,6 +437,9 @@ function deferredToolResult() {
     return createErrorToolResult("Tool call deferred because a user steering message is waiting. Reconsider it after reading the new instruction.");
 }
 async function prepareToolCall(currentContext, assistantMessage, toolCall, config, signal) {
+    if (signal?.aborted) {
+        return { kind: "immediate", result: createErrorToolResult("Operation aborted"), isError: true };
+    }
     if (config.hasInterruptingSteering?.()) {
         return { kind: "immediate", result: deferredToolResult(), isError: true };
     }

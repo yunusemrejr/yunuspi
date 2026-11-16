@@ -14,9 +14,10 @@ const projectOf = session => workspace.projects.find(p => p.id === session?.proj
 const conversationOf = id => { if (!conversations.has(id)) conversations.set(id, createConversation()); return conversations.get(id); };
 const viewOf = id => { if (!views.has(id)) views.set(id, { pinned: true, top: 0, limit: 80, nodes: new Map(), widgets: new Map(), work: new Map() }); return views.get(id); };
 const strip = value => String(value ?? '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
+const statsCommand = /^\/(metrics|cost|self|session)\s*$/;
 // The core's cost label is a compact footer token ("sub", "$?", "$~1.20+?"); spell it out here.
 const costText = stats => {
-  const label = String(stats.costLabel || `$${Number(stats.cost || 0).toFixed(3)}`);
+  const label = String(stats.costLabel || '$?');
   if (label.startsWith('sub')) return `subscription${label.includes('+?') ? ', some cost unknown' : ''}`;
   if (label === '$?') return 'cost unknown';
   return `${label.replace(' (sub)', ' incl. subscription').replace('+?', ' + unknown')} total`;
@@ -165,7 +166,7 @@ async function openSession(id) {
     const state = result.messages ? createConversation([...result.messages, ...(result.streamingMessage ? [result.streamingMessage] : [])]) : previous;
     if (result.messages) { state.historyBefore = result.before; state.hasMore = result.hasMore; pendingView.savedGoal = result.goal ?? null; }
     state.loaded = true;
-    Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming, stats: previous.stats });
+    Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming, stats: result.stats ?? previous.stats });
     if (state.busy) {
       const last = [...state.messages].reverse().find(m => m.kind === 'assistant');
       if (last) state.streaming = last.key;
@@ -473,7 +474,7 @@ async function sendPrompt(event, { checked = false, later = false } = {}) {
   if (!message && !images.length) return;
   let reading = null;
   if (/^\/models?(?:\s|$)/.test(message)) { setEditorDraft(id, ''); return showModels(); }
-  if (/^\/(metrics|cost|self|session)\s*$/.test(message)) { setEditorDraft(id, ''); setWorkbench(true, 'context'); await api.warm(id); state.stats = await api.stats(id); renderContext(); return; }
+  if (statsCommand.test(message)) { setEditorDraft(id, ''); setWorkbench(true, 'context'); await refreshStats(id); return; }
   if (/^\/(skills|tools|help)\s*$/.test(message)) { setEditorDraft(id, ''); return showCommands(); }
   if (/^\/new\s*$/.test(message)) { setEditorDraft(id, ''); return newSession(session.projectId); }
   const rename = /^\/name(?:\s+([\s\S]+))?$/.exec(message);
@@ -580,7 +581,7 @@ function scheduleLens() {
   let same = 0; while (same < text.length && same < lensText.length && text[same] === lensText[same]) same++;
   drawLens(lensReading && /^\s*\//.test(text) ? { ...lensReading, marks: lensReading.marks.filter(mark => mark.end <= same) } : null, text);
   clearTimeout(lensTimer);
-  if (/^\s*\//.test(text)) lensTimer = setTimeout(() => void updateLens(), 140);
+  if (/^\s*\//.test(text) && !statsCommand.test(text.trim())) lensTimer = setTimeout(() => void updateLens(), 140);
 }
 async function updateLens() {
   const id = activeId, text = $('prompt').value, sequence = ++lensSequence;
@@ -1037,6 +1038,7 @@ $('prompt').oninput = () => {
   scheduleLens();
   if (!activeId) return;
   setEditorDraft(activeId, $('prompt').value);
+  if (statsCommand.test($('prompt').value.trim())) { closeCommandMenu(); return; }
   void updateCommandMenu();
   // Typing is intent to send: start a closed session's runtime now so the
   // send (and the model menu) does not wait for it. Browsing alone never does.

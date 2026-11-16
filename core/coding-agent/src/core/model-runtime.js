@@ -456,7 +456,7 @@ export class ModelRuntime {
         });
         if (!resolution)
             throw new ModelsError("auth", `Provider is not configured: ${model.provider}`);
-        const { transformHeaders, ...rawProviderOptions } = options ?? {};
+        const { transformHeaders, onPayload, ...rawProviderOptions } = options ?? {};
         const providerOptions = rawProviderOptions;
         let headers = mergeHeaders(resolution.auth.headers, providerOptions.headers);
         if (transformHeaders)
@@ -469,6 +469,7 @@ export class ModelRuntime {
             model: resolution.auth.baseUrl ? { ...model, baseUrl: resolution.auth.baseUrl } : model,
             options: {
                 ...providerOptions,
+                ...(onPayload ? { onPayload: (payload, requestModel) => onPayload(payload, requestModel, providerOptions.signal) } : {}),
                 apiKey: providerOptions.apiKey ?? resolution.auth.apiKey,
                 headers,
                 env,

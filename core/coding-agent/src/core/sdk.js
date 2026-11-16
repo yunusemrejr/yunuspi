@@ -221,6 +221,7 @@ export async function createAgentSession(options = {}) {
         });
     };
     const extensionRunnerRef = {};
+    const configuredTimeoutMs = () => settingsManager.getProviderRetrySettings().timeoutMs ?? settingsManager.getHttpIdleTimeoutMs();
     agent = new Agent({
         initialState: {
             systemPrompt: "",
@@ -229,13 +230,14 @@ export async function createAgentSession(options = {}) {
             tools: [],
         },
         convertToLlm: convertToLlmWithBlockImages,
+        // Keep the explicit environment override for the watchdog. The SDK
+        // still applies its own configured HTTP timeout below.
+        getStreamTimeoutMs: () => process.env.PI_STREAM_IDLE_MS === undefined ? configuredTimeoutMs() : undefined,
         streamFn: async (model, context, options) => {
             const providerRetrySettings = settingsManager.getProviderRetrySettings();
-            const httpIdleTimeoutMs = settingsManager.getHttpIdleTimeoutMs();
-            // SDKs treat timeout=0 as 0ms (immediate timeout), not "no timeout".
-            // Use max int32 to effectively disable the timeout.
-            const effectiveTimeoutMs = httpIdleTimeoutMs === 0 ? 2147483647 : httpIdleTimeoutMs;
-            const timeoutMs = options?.timeoutMs ?? providerRetrySettings.timeoutMs ?? effectiveTimeoutMs;
+            const idleTimeoutMs = options?.timeoutMs ?? configuredTimeoutMs();
+            // SDKs treat zero as an immediate request timeout, so use max int32.
+            const timeoutMs = idleTimeoutMs === 0 ? 2147483647 : idleTimeoutMs;
             const websocketConnectTimeoutMs = options?.websocketConnectTimeoutMs ?? settingsManager.getWebSocketConnectTimeoutMs();
             const headerRunner = extensionRunnerRef.current;
             const requestSessionId = sessionManager.getSessionId();
@@ -256,9 +258,9 @@ export async function createAgentSession(options = {}) {
                 websocketConnectTimeoutMs,
                 maxRetries: options?.maxRetries ?? providerRetrySettings.maxRetries,
                 maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
-                onPayload: async (payload, actualModel) => {
+                onPayload: async (payload, actualModel, requestSignal) => {
                     observerAdviceReceipts = [];
-                    const finalPayload = (await options?.onPayload?.(payload, actualModel)) ?? payload;
+                    const finalPayload = (await options?.onPayload?.(payload, actualModel, requestSignal ?? options?.signal)) ?? payload;
                     try { if (capsules.length && !options?.signal?.aborted && actualModel?.provider === model.provider && actualModel?.id === model.id) {
                         const text = requestText(finalPayload);
                         observerAdviceReceipts = capsules.filter(capsule => text.some(part => part.includes(capsule.text)))
@@ -281,7 +283,7 @@ export async function createAgentSession(options = {}) {
                 },
             });
         },
-        onPayload: async (payload, _model) => {
+        onPayload: async (payload, _model, signal) => {
             // PI_BODY_GATE (local patch; re-applied by verify-harness.mjs): enforce the
             // provider's hard ENCODED-request-body cap before the HTTP call. Token
             // compaction cannot bound request BYTES: a base64 image is ~1.3x its
@@ -293,7 +295,7 @@ export async function createAgentSession(options = {}) {
             // that can actually block.
             const runner = extensionRunnerRef.current;
             let gatePayload = runner?.hasHandlers("before_provider_request")
-                ? await runner.emitBeforeProviderRequest(payload)
+                ? await runner.emitBeforeProviderRequest(payload, { model: _model, signal })
                 : payload;
             /*PI_BODY_GATE_SCOPE*/if(_model?.provider&&!["openrouter","runinfra","friendli"].includes(_model.provider))return gatePayload;
             let __piSerialized;

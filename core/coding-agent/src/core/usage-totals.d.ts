@@ -7,4 +7,4 @@ export interface UsageTotals {
     cost: number;
 }
 export declare function createUsageTotals(): UsageTotals;
-export declare function addUsageToTotals(totals: UsageTotals, usage: Usage): void;
+export declare function addUsageToTotals(totals: UsageTotals, usage?: Partial<Usage>): void;

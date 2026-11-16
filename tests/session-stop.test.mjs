@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { register } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import fs from 'node:fs';
 
@@ -9,21 +8,6 @@ const template = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(template, 'agent'), path.resolve(template, '..')]
   .find((p) => fs.existsSync(path.join(p, 'extensions/lib/session-stop.ts')));
 assert.ok(agent, 'agent tree with session-stop.ts is present');
-const coreInterventionPath = [
-  path.join(template, 'core/coding-agent/src/core/intervention-session.js'),
-  path.join(template, '..', 'core/coding-agent/src/core/intervention-session.js'),
-].find((p) => fs.existsSync(p));
-assert.ok(coreInterventionPath, 'core intervention session implementation is present');
-const coreIntervention = pathToFileURL(coreInterventionPath).href;
-// Same stub technique as memory-exit-budget.test.mjs: the SDK host is not
-// part of the public distribution, so tests stub its two imported packages.
-register('data:text/javascript,' + encodeURIComponent(`export function resolve(name,ctx,next){
- const sources={
- '@yunuspi/coding-agent':'export {createInterventionSession} from ${JSON.stringify(coreIntervention)}; export function getAgentDir(){return ${JSON.stringify(path.join(template, 'agentFixture'))}};export class SettingsManager{static create(){return {getCompactionSettings(){return{};}};}}',
- '@yunuspi/ai':'export function StringEnum(v){return v}'};
- return name in sources?{url:'data:text/javascript,'+encodeURIComponent(sources[name]),shortCircuit:true}:next(name,ctx);
-}`), import.meta.url);
-
 const stop = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-stop.ts')));
 const checkpoints = await import(pathToFileURL(path.join(agent, 'extensions/checkpoints.ts')));
 

@@ -233,7 +233,7 @@ test('adaptive direct inputs preserve literal constraints without a helper or ad
 			requestMessages: [{ requestId: 'adaptive-direct', turnId: 'turn-adaptive-direct', messageIndex: 0 }],
 		});
 		assert.equal(rewritten, undefined, 'literal input remains unchanged with no auxiliary interpretation');
-		assert.equal(f.customMessages[0].message.details.attempts.length, 0);
+		assert.equal(f.customMessages.length, 0, 'a direct request without an advisory leaves no empty activity row');
 	} finally { process.env.PI_ADAPTIVE_EXECUTION = 'off'; }
 });
 

@@ -4,4 +4,5 @@ export declare function mergeCostEvidence(left: any, right: any): any;
 export declare function hasRecordedTokenUsage(usage: any, noExecution?: boolean): boolean;
 export declare function collectAuxiliaryModelUsage(entries: any[]): any;
 export declare function collectSessionCost(entries: any[], subscription?: boolean): any;
+export declare function collectSessionStats(entries: any[], subscription?: boolean): Omit<import("./agent-session.js").SessionStats, "sessionId" | "sessionFile" | "contextUsage">;
 export declare function collectSessionMetrics(entries: any[], live?: any): any;

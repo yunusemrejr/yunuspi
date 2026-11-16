@@ -75,3 +75,22 @@ test("Git drift reports a moved HEAD between observations", () => {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test("sibling worktrees sharing a common Git directory own different files", () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-writer-worktrees-"));
+	try {
+		const first = path.join(dir, "first");
+		const second = path.join(dir, "second");
+		fs.mkdirSync(first);
+		git(first, "init", "-q");
+		git(first, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture");
+		git(first, "worktree", "add", "--detach", "-q", second);
+		assert.equal(readWorkspaceGitState(first).commonDir, readWorkspaceGitState(second).commonDir);
+		recordWorkspaceMutation(first, "first-session", "src.txt", "edit");
+		assert.deepEqual(acquireWorkspaceWriterLease(second, "second-session").conflicts, []);
+		assert.deepEqual(recordWorkspaceMutation(second, "second-session", "src.txt", "edit").conflicts, []);
+		assert.equal(attributeWorkspacePath(second, "second-session", "src.txt").status, "current_session");
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});

@@ -222,6 +222,12 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
      */
     getFollowUpMessages?: () => Promise<AgentMessage[]>;
     /**
+     * When provided, the queue getters select without removing. Consume that
+     * selection immediately before delivery, or return [] if it was cleared.
+     * Interrupted preparation leaves the queued messages available.
+     */
+    consumePendingMessages?: () => AgentMessage[];
+    /**
      * Tool execution mode.
      * - "sequential": execute tool calls one by one
      * - "parallel": preflight tool calls sequentially, then execute allowed tools concurrently;
@@ -383,6 +389,8 @@ export type AgentEvent = {
 } | {
     type: "agent_end";
     messages: AgentMessage[];
+    /** The run was interrupted, possibly after a successful model response. */
+    aborted?: boolean;
 } | {
     type: "turn_start";
 } | {

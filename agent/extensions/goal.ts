@@ -230,6 +230,9 @@ export default function goalExtension(pi: ExtensionAPI): void {
 		if (event.message.role === "assistant") lastStop = event.message.stopReason;
 		else if ((event.message as any).customType === "background-task-notification") settleBackgroundCheck((event.message as any).details, ctx);
 	});
+	pi.on("agent_end", (event) => {
+		if (event.aborted) lastStop = "aborted";
+	});
 
 	/**
 	 * A background run settles its own debt. `bg_run` returns a task id at once, so
@@ -511,6 +514,8 @@ export default function goalExtension(pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "goal",
 		label: "goal",
+		// Check and commit against the results of earlier calls in the same batch.
+		executionMode: "sequential",
 		description: "Track the user's /goal. adopt with items:[standard names from the kickoff] returns each standard in full and tracks its checks. Finish in one call: complete with results:[{id,evidence}] records observed evidence for every criterion and checks completion. Per-result status may be met (default) or waived with a reason. Existing single-criterion met/waive calls also work. check is optional diagnostics for unresolved criteria, tests, reviews, delivery, audit and syntax; it is not a prerequisite. Reuse current passing checks. criteria refines open criteria; blocked reports a concrete user-action blocker (credentials, a decision, access) — difficulty, uncertainty or remaining work is not a blocker; status shows progress.",
 		parameters: Type.Object({
 			action: StringEnum(["status", "check", "adopt", "met", "waive", "criteria", "blocked", "complete"] as const),

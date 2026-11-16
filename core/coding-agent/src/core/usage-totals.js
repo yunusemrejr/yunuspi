@@ -8,9 +8,10 @@ export function createUsageTotals() {
     };
 }
 export function addUsageToTotals(totals, usage) {
-    totals.input += usage.input;
-    totals.output += usage.output;
-    totals.cacheRead += usage.cacheRead;
-    totals.cacheWrite += usage.cacheWrite;
-    totals.cost += usage.cost.total;
+    for (const field of ["input", "output", "cacheRead", "cacheWrite"]) {
+        const count = usage?.[field];
+        if (Number.isFinite(count) && count >= 0) totals[field] += count;
+    }
+    const cost = usage?.cost?.total;
+    if (Number.isFinite(cost) && cost >= 0) totals.cost += cost;
 }

@@ -42,6 +42,7 @@ export type AgentSessionEvent = Exclude<AgentEvent, {
 }> | {
     type: "agent_end";
     messages: AgentMessage[];
+    aborted?: boolean;
     willRetry: boolean;
 } | {
     type: "agent_settled";

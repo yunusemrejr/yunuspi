@@ -2842,7 +2842,7 @@
       {
         "name": "goal",
         "source": "agent/extensions/goal.ts",
-        "line": 486
+        "line": 489
       },
       {
         "name": "google-account",
@@ -2967,12 +2967,12 @@
       {
         "name": "provider-health",
         "source": "agent/extensions/provider-gate.ts",
-        "line": 485
+        "line": 495
       },
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1121
+        "line": 1120
       },
       {
         "name": "run",
@@ -3077,7 +3077,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          500
+          503
         ]
       },
       {
@@ -3130,7 +3130,7 @@
       {
         "name": "audio_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 81,
+        "line": 86,
         "kind": "factory"
       },
       {
@@ -3349,7 +3349,7 @@
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 77,
+        "line": 82,
         "kind": "factory"
       },
       {
@@ -3439,7 +3439,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/skill-review.ts",
-        "line": 95,
+        "line": 94,
         "kind": "literal"
       },
       {
@@ -3518,7 +3518,7 @@
       {
         "name": "video_browser",
         "source": "agent/extensions/video-studio.ts",
-        "line": 89,
+        "line": 94,
         "kind": "factory"
       },
       {
@@ -3530,19 +3530,19 @@
       {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 57,
+        "line": 62,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 73,
+        "line": 78,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 66,
+        "line": 71,
         "kind": "factory"
       },
       {
@@ -3779,7 +3779,7 @@
       {
         "name": "skill_review",
         "source": "agent/extensions/lib/skill-review.ts",
-        "line": 95,
+        "line": 94,
         "kind": "literal"
       },
       {

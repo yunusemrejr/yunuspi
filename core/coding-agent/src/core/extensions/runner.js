@@ -894,8 +894,11 @@ export class ExtensionRunner {
         }
         return currentMessages;
     }
-    async emitBeforeProviderRequest(payload) {
-        const ctx = this.createContext();/* PI_REQUEST_HOOK_SIGNAL_V1 */const _piRequestSignal=ctx.signal;_piRequestSignal?.throwIfAborted();
+    async emitBeforeProviderRequest(payload, { model, signal } = {}) {
+        const ctx = this.createContext();
+        /* PI_REQUEST_HOOK_SIGNAL_V1 */ const requestSignal = signal ?? ctx.signal;
+        requestSignal?.throwIfAborted();
+        const route = model && Object.freeze({ provider: model.provider, id: model.id, baseUrl: model.baseUrl });
         let currentPayload = payload;
         for (const ext of this.extensions) {
             const handlers = ext.handlers.get("before_provider_request");
@@ -906,13 +909,18 @@ export class ExtensionRunner {
                     const event = {
                         type: "before_provider_request",
                         payload: currentPayload,
+                        model: route,
+                        signal: requestSignal,
                     };
-                    const handlerResult = await handler(event, ctx);_piRequestSignal?.throwIfAborted();
+                    const handlerResult = await handler(event, ctx);
+                    requestSignal?.throwIfAborted();
                     if (handlerResult !== undefined) {
                         currentPayload = handlerResult;
                     }
                 }
-                catch (err) {/* PI_AUTONOMOUS_REQUEST_GATE_V1 */if(err?.code==="PI_AUTONOMOUS_REQUEST_DENIED")throw err;if(_piRequestSignal?.aborted)throw _piRequestSignal.reason;
+                catch (err) {
+                    /* PI_AUTONOMOUS_REQUEST_GATE_V1 */ if (err?.code === "PI_AUTONOMOUS_REQUEST_DENIED") throw err;
+                    requestSignal?.throwIfAborted();
                     const message = err instanceof Error ? err.message : String(err);
                     const stack = err instanceof Error ? err.stack : undefined;
                     this.emitError({

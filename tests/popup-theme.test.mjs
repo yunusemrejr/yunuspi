@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { register } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { chromium } from 'playwright';
 
@@ -11,13 +10,6 @@ const template = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(template, 'agent'), path.resolve(template, '..')]
   .find((p) => fs.existsSync(path.join(p, 'extensions/session-signals.ts')));
 assert.ok(agent, 'agent tree with session-signals.ts is present');
-register('data:text/javascript,' + encodeURIComponent(`export function resolve(name,ctx,next){
- const sources={
- '@yunuspi/coding-agent':'export function getAgentDir(){return ${JSON.stringify(path.join(template, 'agentFixture'))}};export class SettingsManager{static create(){return {getCompactionSettings(){return{};}};}}',
- '@yunuspi/ai':'export function StringEnum(v){return v}'};
- return name in sources?{url:'data:text/javascript,'+encodeURIComponent(sources[name]),shortCircuit:true}:next(name,ctx);
-}`), import.meta.url);
-
 const theme = await import(pathToFileURL(path.join(agent, 'extensions/lib/popup-theme.ts')));
 const signals = await import(pathToFileURL(path.join(agent, 'extensions/session-signals.ts')));
 const errorsLib = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-errors.ts')));

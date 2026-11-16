@@ -68,6 +68,7 @@ if (!isMainThread && workerData?.kind === 'yunuspi-history') {
   const modules = Promise.all([
     import(pathToFileURL(path.join(core, 'dist/core/session-manager.js')).href),
     import(pathToFileURL(path.join(core, 'dist/modes/rpc/desktop-projection.js')).href),
+    import(pathToFileURL(path.join(core, 'dist/core/session-accounting.js')).href),
   ]);
   // Keep initialization failures attached to a request rather than unhandled.
   modules.catch(() => {});
@@ -75,7 +76,7 @@ if (!isMainThread && workerData?.kind === 'yunuspi-history') {
   parentPort.on('message', request => {
     tail = tail.then(async () => {
       try {
-        const [{ loadEntriesFromFile, migrateSessionEntries }, { desktopBranchMessages, desktopGoal, desktopHistory }] = await modules;
+        const [{ loadEntriesFromFile, migrateSessionEntries }, { desktopBranchMessages, desktopGoal, desktopHistory }, { collectSessionStats }] = await modules;
         let names;
         try { names = fs.readdirSync(request.directory).filter(name => name.endsWith('.jsonl')); }
         catch (error) { if (error.code !== 'ENOENT') throw error; names = []; }
@@ -124,7 +125,11 @@ if (!isMainThread && workerData?.kind === 'yunuspi-history') {
           }
           branch.reverse();
         }
-        const data = { ...desktopHistory(desktopBranchMessages(branch), { before: request.before, limit: request.limit }), isStreaming: false, streamingMessage: null, goal: request.before === undefined ? desktopGoal(branch) : undefined };
+        const data = { ...desktopHistory(desktopBranchMessages(branch), { before: request.before, limit: request.limit }), isStreaming: false, streamingMessage: null };
+        if (request.before === undefined) {
+          data.goal = desktopGoal(branch);
+          data.stats = collectSessionStats(entries ?? []);
+        }
         // The projection clips normal text/images; malformed imported metadata
         // must not bypass its page budget on the first returned message.
         if (Buffer.byteLength(JSON.stringify(data)) > 8 * 1024 * 1024 + 4096) throw Error('This history preview exceeds the 8 MiB transfer limit. Its original file is retained.');

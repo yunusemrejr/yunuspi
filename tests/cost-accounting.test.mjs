@@ -57,6 +57,39 @@ test('Span charges join session costs while legacy missing-price zero remains un
  assert.equal(collect([span({})]).unknown,true);
 });
 
+test('provider receipts supersede incomplete or estimated snapshots for the same physical response',()=>{
+ const reported=message(.1,'openrouter','example',{responseId:'shared-id'});
+ const estimated=message(.25,'openrouter','example',{responseId:'shared-id',usage:usage(.25,'provider-estimate')});
+ const incomplete=message(0,'openrouter','example',{responseId:'shared-id',usage:undefined,stopReason:'aborted'});
+ const independent=message(.2,'fixture','example',{responseId:'shared-id'});
+ for(const snapshots of [[incomplete,estimated,reported],[reported,estimated,incomplete]]){
+  const result=collect([...snapshots, independent]);
+  close(result.total,.3);
+  assert.equal(result.estimated,0);
+  assert.equal(result.unknown,false);
+ }
+});
+
+test('OpenRouter BYOK adds upstream spend separately and flags missing upstream billing',()=>{
+ const bill=(byok,upstreamInferenceCost)=>message(0,'openrouter','example',{usage:{
+  ...usage(.01),cost:{total:.01,source:'provider-reported',byok,upstreamInferenceCost},
+ }});
+ close(collect([bill(false,.2)]).reported,.01);
+ close(collect([bill(true,.2)]).reported,.21);
+ assert.equal(collect([bill(true,.2)]).unknown,false);
+ assert.equal(collect([bill(true,undefined)]).formatted,'$0.010000+?');
+ assert.equal(collect([bill(true,0)]).unknown,false);
+ const estimate=message(.20,'openrouter','example',{responseId:'byok-turn',usage:usage(.20,'estimate')});
+ const receipt=bill(true,undefined);
+ receipt.message.responseId='byok-turn';
+ assert.equal(collect([estimate,receipt]).formatted,'$0.010000+?','confirmed gateway charge takes precedence over an earlier estimate');
+});
+
+test('known flat-plan routes do not add list prices from direct auxiliary calls',()=>{
+ const aid=auxiliary('flat-plan','completed',usage(.12,'estimate'),{provider:'kimi-coding',model:'fixture'});
+ assert.equal(collect([aid]).formatted,'sub');
+});
+
 test('per-request long-context thresholds include reads/writes and use actual output once',()=>{
  for(const [tokens,expected] of [[200000,2.44],[200001,3.880008]]){
   const u={input:tokens-100000,cacheRead:100000,cacheWrite:0,output:100000,reasoning:80000};

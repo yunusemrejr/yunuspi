@@ -132,12 +132,15 @@ function buildSessionPath(entries, leafId, byId) {
         leaf = index.get(leafId);
     }
     leaf ??= entries[entries.length - 1];
-    if (!leaf) {
-        return [];
-    }
+    return walkSessionPath(index, leaf);
+}
+function walkSessionPath(index, leaf) {
     const path = [];
     let current = leaf;
     while (current) {
+        if (path.length > index.size) {
+            throw new Error("Cannot read session branch: cyclic parent links");
+        }
         path.push(current);
         current = current.parentId ? index.get(current.parentId) : undefined;
     }
@@ -200,20 +203,14 @@ export function sessionEntryToContextMessages(entry) {
  * compaction entry. Older summarized entries are omitted.
  */
 export function buildContextEntries(entries, leafId, byId) {
-    const path = buildSessionPath(entries, leafId, byId);
-    let compaction = null;
-    for (const entry of path) {
-        if (entry.type === "compaction") {
-            compaction = entry;
-        }
-    }
-    if (!compaction) {
-        return path;
-    }
-    const compactionIdx = path.findIndex((entry) => entry.id === compaction.id);
+    return contextEntriesFromPath(buildSessionPath(entries, leafId, byId));
+}
+function contextEntriesFromPath(path) {
+    const compactionIdx = path.findLastIndex(entry => entry.type === "compaction");
     if (compactionIdx < 0) {
         return path;
     }
+    const compaction = path[compactionIdx];
     const contextEntries = [compaction];
     let foundFirstKept = false;
     for (let i = 0; i < compactionIdx; i++) {
@@ -234,9 +231,11 @@ export function buildContextEntries(entries, leafId, byId) {
  * Handles compaction and branch summaries along the path.
  */
 export function buildSessionContext(entries, leafId, byId) {
-    const path = buildSessionPath(entries, leafId, byId);
+    return sessionContextFromPath(buildSessionPath(entries, leafId, byId));
+}
+function sessionContextFromPath(path) {
     const { thinkingLevel, model } = getSessionContextSettings(path);
-    const messages = buildContextEntries(entries, leafId, byId).flatMap(sessionEntryToContextMessages);
+    const messages = contextEntriesFromPath(path).flatMap(sessionEntryToContextMessages);
     return { messages, thinkingLevel, model };
 }
 /**
@@ -1019,29 +1018,22 @@ export class SessionManager {
      * Use buildSessionContext() to get the resolved messages for the LLM.
      */
     getBranch(fromId) {
-        const path = [];
         const startId = fromId ?? this.leafId;
-        let current = startId ? this.byId.get(startId) : undefined;
-        while (current) {
-            path.push(current);
-            current = current.parentId ? this.byId.get(current.parentId) : undefined;
-        }
-        path.reverse();
-        return path;
+        return walkSessionPath(this.byId, startId ? this.byId.get(startId) : undefined);
     }
     /**
      * Build the active, compaction-aware entry list for context/rendering.
      * Uses tree traversal from current leaf.
      */
     buildContextEntries() {
-        return buildContextEntries(this.getEntries(), this.leafId, this.byId);
+        return contextEntriesFromPath(this.getBranch());
     }
     /**
      * Build the session context (what gets sent to the LLM).
      * Uses tree traversal from current leaf.
      */
     buildSessionContext() {
-        return buildSessionContext(this.getEntries(), this.leafId, this.byId);
+        return sessionContextFromPath(this.getBranch());
     }
     /**
      * Get session header.

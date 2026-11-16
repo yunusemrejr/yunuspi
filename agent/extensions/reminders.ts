@@ -583,11 +583,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	const observeWorkspace = (sid: string, ctx: ExtensionContext, st: ReminderState): void => {
 		if (!sid || !ctx?.cwd) return;
 		const current = readWorkspaceGitState(ctx.cwd);
-		if (!workspaceBaselines.has(sid)) {
-			workspaceBaselines.set(sid, current);
-			return;
-		}
+		if (!current) return;
 		const warnings = workspaceGitDrift(workspaceBaselines.get(sid), current);
+		workspaceBaselines.set(sid, current);
 		for (const warning of warnings) {
 			if (!st.workspaceWarnings.includes(warning)) st.workspaceWarnings.push(warning);
 		}
@@ -638,8 +636,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			if (event.reason === "startup" || event.reason === "new") cleanupStale(sid);
 			const st = load(sid);
 			if (sid) {
-				acquireWorkspaceWriterLease(ctx.cwd, sid);
-				workspaceBaselines.set(sid, readWorkspaceGitState(ctx.cwd));
+				const { state } = acquireWorkspaceWriterLease(ctx.cwd, sid);
+				workspaceBaselines.set(sid, state);
 				workspaceLeaseCwds.set(sid, ctx.cwd);
 			}
 			restoreTodos(ctx, st);
@@ -658,8 +656,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				workspaceLeaseCwds.delete(sid);
 			}
 			if (nextSid && ctx?.cwd) {
-				acquireWorkspaceWriterLease(ctx.cwd, nextSid);
-				workspaceBaselines.set(nextSid, readWorkspaceGitState(ctx.cwd));
+				const { state } = acquireWorkspaceWriterLease(ctx.cwd, nextSid);
+				workspaceBaselines.set(nextSid, state);
 				workspaceLeaseCwds.set(nextSid, ctx.cwd);
 			}
 		} catch (err) {
@@ -764,6 +762,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			const sid = sidOf(ctx);
 			if (!sid) return undefined;
 			const st = load(sid);
+			observeWorkspace(sid, ctx, st);
 			st.promptCount += 1;
 			const now = Date.now();
 			const fire = shouldFire(st, now);

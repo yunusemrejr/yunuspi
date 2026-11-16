@@ -7,7 +7,7 @@
  * Lease records live in the repository's private common Git directory, so no
  * tracked file or project artifact is changed.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -69,7 +69,7 @@ function optionalGit(cwd: string, args: string[]): string | undefined {
 
 function inside(root: string, candidate: string): boolean {
 	const relative = path.relative(root, candidate);
-	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+	return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
 // This runs on tool-result paths, so it must not spawn git per call (the old
@@ -143,9 +143,28 @@ function readWorkspaceGitStateFromFiles(cwd: string): WorkspaceGitState | undefi
 	return { root, commonDir, head, branch, ...(upstream ? { upstream } : {}), ...(upstreamHead ? { upstreamHead } : {}) };
 }
 
+// Most tool results in a non-checkout do not need a Git subprocess. Checking
+// ancestors on each miss also lets a newly initialized repo show up immediately.
+function mayHaveCheckout(cwd: string): boolean {
+	if (process.env.GIT_DIR || process.env.GIT_WORK_TREE) return true;
+	try {
+		let dir = fs.realpathSync(cwd);
+		for (;;) {
+			if (fs.existsSync(path.join(dir, ".git"))) return true;
+			const parent = path.dirname(dir);
+			if (parent === dir) return false;
+			dir = parent;
+		}
+	} catch {
+		return false;
+	}
+}
+
 export function readWorkspaceGitState(cwd: string): WorkspaceGitState | undefined {
+	if (!fs.existsSync(cwd)) return undefined;
 	const fromFiles = readWorkspaceGitStateFromFiles(cwd);
 	if (fromFiles) return fromFiles;
+	if (!mayHaveCheckout(cwd)) return undefined;
 	try {
 		// One rev-parse answers root, common dir, git dir and HEAD; each spawn
 		// costs milliseconds that repeat for every file a tool result touches.
@@ -183,9 +202,13 @@ function leaseDir(state: WorkspaceGitState): string {
 	return path.join(state.commonDir, LEASE_DIR_NAME);
 }
 
-function leaseFile(state: WorkspaceGitState, sessionId: string): string {
+function leaseName(state: WorkspaceGitState, sessionId: string): string {
 	const key = createHash("sha256").update(`${state.root}\0${sessionId}`).digest("hex").slice(0, 32);
-	return path.join(leaseDir(state), `session-${key}.json`);
+	return `session-${key}.json`;
+}
+
+function leaseFile(state: WorkspaceGitState, sessionId: string): string {
+	return path.join(leaseDir(state), leaseName(state, sessionId));
 }
 
 function validLease(value: unknown): value is WorkspaceWriterLease {
@@ -223,15 +246,20 @@ function activeLeases(state: WorkspaceGitState): WorkspaceWriterLease[] {
 	try {
 		return fs.readdirSync(leaseDir(state), { withFileTypes: true })
 			.filter((entry) => entry.isFile() && entry.name.endsWith(".json"))
-			.map((entry) => readLeaseFile(path.join(leaseDir(state), entry.name)))
-			.filter((lease): lease is WorkspaceWriterLease => Boolean(lease) && processAlive(lease.pid));
+			.flatMap((entry) => {
+				const lease = readLeaseFile(path.join(leaseDir(state), entry.name));
+				// Worktrees share the directory. The existing filename already
+				// identifies its checkout, including for leases written by older versions.
+				return lease && entry.name === leaseName(state, lease.sessionId) && processAlive(lease.pid)
+					? [lease] : [];
+			});
 	} catch {
 		return [];
 	}
 }
 
 function writeLease(file: string, lease: WorkspaceWriterLease): void {
-	const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
+	const tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
 	try {
 		fs.writeFileSync(tmp, JSON.stringify(lease), { flag: "wx", mode: 0o600 });
 		fs.renameSync(tmp, file);
@@ -240,10 +268,8 @@ function writeLease(file: string, lease: WorkspaceWriterLease): void {
 	}
 }
 
-export function acquireWorkspaceWriterLease(cwd: string, sessionId: string): { state?: WorkspaceGitState; lease?: WorkspaceWriterLease; conflicts: WorkspaceLeaseOwner[] } {
-	const state = readWorkspaceGitState(cwd);
-	if (!state || !sessionId) return { conflicts: [] };
-	try { fs.mkdirSync(leaseDir(state), { recursive: true, mode: 0o700 }); } catch { return { state, conflicts: [] }; }
+function refreshLease(state: WorkspaceGitState, cwd: string, sessionId: string, touchedPath?: string): WorkspaceWriterLease | undefined {
+	try { fs.mkdirSync(leaseDir(state), { recursive: true, mode: 0o700 }); } catch { return undefined; }
 	const file = leaseFile(state, sessionId);
 	const existing = readLeaseFile(file);
 	const now = Date.now();
@@ -254,9 +280,18 @@ export function acquireWorkspaceWriterLease(cwd: string, sessionId: string): { s
 		cwd: path.resolve(cwd),
 		acquiredAt: existing?.acquiredAt ?? now,
 		updatedAt: now,
-		paths: existing?.paths?.slice(-MAX_PATHS) ?? [],
+		paths: existing?.paths ?? [],
 	};
-	try { writeLease(file, lease); } catch { /* advisory only */ }
+	if (touchedPath !== undefined) lease.paths = [...lease.paths.filter((entry) => entry !== touchedPath), touchedPath];
+	lease.paths = lease.paths.slice(-MAX_PATHS);
+	try { writeLease(file, lease); } catch { return undefined; }
+	return lease;
+}
+
+export function acquireWorkspaceWriterLease(cwd: string, sessionId: string): { state?: WorkspaceGitState; lease?: WorkspaceWriterLease; conflicts: WorkspaceLeaseOwner[] } {
+	const state = readWorkspaceGitState(cwd);
+	if (!state || !sessionId) return { conflicts: [] };
+	const lease = refreshLease(state, cwd, sessionId);
 	return {
 		state,
 		lease,
@@ -298,12 +333,7 @@ export function recordWorkspaceMutation(cwd: string, sessionId: string, rawPath:
 	if (!resolved.state || !sessionId) {
 		return { path: resolved.relative, tool, ...(sha256 ? { sha256 } : {}), observedAt: Date.now(), conflicts: [] };
 	}
-	const acquired = acquireWorkspaceWriterLease(cwd, sessionId);
-	const lease = acquired.lease;
-	if (lease) {
-		const nextPaths = [...new Set([...lease.paths, resolved.relative])].slice(-MAX_PATHS);
-		try { writeLease(leaseFile(resolved.state, sessionId), { ...lease, paths: nextPaths, updatedAt: Date.now() }); } catch { /* advisory only */ }
-	}
+	refreshLease(resolved.state, cwd, sessionId, resolved.relative);
 	const conflicts = activeLeases(resolved.state)
 		.filter((other) => other.sessionId !== sessionId && (other.paths.length === 0 || other.paths.includes(resolved.relative)))
 		.map(toOwner);

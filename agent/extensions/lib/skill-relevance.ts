@@ -11,6 +11,9 @@ export type SkillIndex = {
   docs: { skill: SkillInfo; tokens: Set<string>; name: Set<string> }[];
   weight: Map<string, number>;
   strong: Set<string>;
+  naming: Set<string>;
+  postings: Map<string, number[]>;
+  deletions?: Map<string, string[]>;
   /** Content identity of the catalog this index was built from. */
   fingerprint?: string;
 };
@@ -22,6 +25,7 @@ export type Ranked = { skill: SkillInfo; score: number; matched: string[] };
 
 const MIN_TERM = 4, MAX_TERM = 31, MAX_TERMS = 400, MAX_CONTEXT_CHARS = 65536;
 const FUZZY_MIN_TERM = 6;
+const MAX_FUZZY_INDEX_POSTINGS = 65536;
 // Short domain terms are the strongest routing signal and would otherwise fall under the
 // four-character floor. Measured: a networking task naming "DNS ... TCP" and another naming
 // "TLS" both matched nothing against a skill whose description lists DNS/TCP/TLS.
@@ -109,20 +113,51 @@ export function buildSkillIndex(skills: readonly SkillInfo[]): SkillIndex {
     const name = new Set(skillTerms(`${skill.name} ${skill.name.replace(/[-_:/.]+/g, ' ')}`, 24));
     return { skill, name, tokens: new Set([...name, ...skillTerms(skill.description)]) };
   });
-  const df = new Map<string, number>();
-  for (const doc of docs) for (const term of doc.tokens) df.set(term, (df.get(term) ?? 0) + 1);
+  const postings = new Map<string, number[]>();
+  docs.forEach(({tokens}, id) => {
+    for (const term of tokens) {
+      const ids = postings.get(term);
+      if (ids) ids.push(id);
+      else postings.set(term, [id]);
+    }
+  });
   const total = Math.max(1, docs.length);
   // Rarity points are normalized so a catalogue-unique term scores 10.
   const scale = 10 / (1 + Math.log(total));
   const weight = new Map<string, number>();
   const strong = new Set<string>();
+  const naming = new Set<string>();
+  let deletions: Map<string, string[]> | undefined = new Map();
+  let deletionPostings = 0;
   // Terms shared by more than 30% of skills carry no routing signal.
-  for (const [term, count] of df) {
-    if (count / total > 0.3) continue;
+  for (const [term, ids] of postings) {
+    const count = ids.length;
+    if (count / total > 0.3) {
+      postings.delete(term);
+      continue;
+    }
     weight.set(term, scale * (1 + Math.log(total / count)));
     if (count <= Math.max(1, Math.round(total * 0.15))) strong.add(term);
+    let inName = 0;
+    for (const id of ids) if (docs[id].name.has(term)) inName++;
+    if (2 * inName >= count) naming.add(term);
+    if (!deletions || term.length < FUZZY_MIN_TERM) continue;
+    const keys = deleteOne(term);
+    deletionPostings += keys.length;
+    // Large plugin catalogs can contain long, unique vocabularies. Keep the
+    // same edit matching with one vocabulary scan per query term if the
+    // faster index grows too large.
+    if (deletionPostings > MAX_FUZZY_INDEX_POSTINGS) {
+      deletions = undefined;
+      continue;
+    }
+    for (const key of keys) {
+      const originals = deletions.get(key);
+      if (originals) originals.push(term);
+      else deletions.set(key, [term]);
+    }
   }
-  return { docs, weight, strong, fingerprint: skillCatalogFingerprint(skills) };
+  return { docs, weight, strong, naming, postings, deletions, fingerprint: skillCatalogFingerprint(skills) };
 }
 
 /**
@@ -152,19 +187,34 @@ export function oneEditAway(a: string, b: string): boolean {
   return true;
 }
 
-/** Select one deterministic close token from a document, if any. */
-function fuzzyToken(index: SkillIndex, doc: SkillIndex["docs"][number], term: string): string | undefined {
-  if (term.length < FUZZY_MIN_TERM) return undefined;
-  let best: string | undefined;
-  let bestScore = -1;
-  for (const token of doc.tokens) {
-    if (token.length < FUZZY_MIN_TERM || Math.abs(token.length - term.length) > 1 || !oneEditAway(term, token)) continue;
-    const score = (index.strong.has(token) ? 2 : 1) * (index.weight.get(token) ?? 0);
-    if (score > bestScore || score === bestScore && token < (best ?? "\uffff")) {
-      best = token; bestScore = score;
-    }
+function deleteOne(term: string): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < term.length; i++) {
+    if (i === 0 || term[i] !== term[i - 1]) keys.push(term.slice(0, i) + term.slice(i + 1));
   }
-  return best;
+  return keys;
+}
+
+/** Insertions/deletions have a shorter term as their key. Substitutions
+ * and adjacent transpositions share a one-deletion key; validate because
+ * the same key can also be shared by terms more than one edit apart. */
+function nearbyTokens(index: SkillIndex, term: string): string[] {
+  if (term.length < FUZZY_MIN_TERM) return [];
+  let vocabulary: Iterable<string> = index.postings.keys();
+  if (index.deletions) {
+    const found = new Set(index.deletions.get(term));
+    for (const key of deleteOne(term)) {
+      if (index.postings.has(key)) found.add(key);
+      for (const token of index.deletions.get(key) ?? []) found.add(token);
+    }
+    vocabulary = found;
+  }
+  const priority = (token: string) => (index.strong.has(token) ? 2 : 1) * index.weight.get(token)!;
+  const matches: string[] = [];
+  for (const token of vocabulary) {
+    if (token !== term && token.length >= FUZZY_MIN_TERM && oneEditAway(term, token)) matches.push(token);
+  }
+  return matches.sort((a, b) => priority(b) - priority(a) || (a < b ? -1 : 1));
 }
 /** Bounded heading outline of a skill body: H2/H3 headings with 1-based lines.
  * Pure, so section targeting is testable without touching the filesystem. */
@@ -215,12 +265,11 @@ const RANK_SKILLS_CACHE_MAX = 32;
 export function clearRankSkillsCache() { rankSkillsCache.clear(); }
 export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranked[] {
   const key = `${index.fingerprint ?? 'unfingerprinted'}:${limit}:${process.env.PI_LOCAL_INTELLIGENCE ?? ''}:${createHash('sha256').update(String(context ?? '')).digest('hex')}`;
-  let selected = rankSkillsCache.get(key);
-  if (!selected) {
-    selected = rankSkillsUncached(index, context, limit);
-    rankSkillsCache.set(key, selected);
-    if (rankSkillsCache.size > RANK_SKILLS_CACHE_MAX) rankSkillsCache.delete(rankSkillsCache.keys().next().value!);
-  }
+  const cached = rankSkillsCache.get(key);
+  const selected = cached ?? rankSkillsUncached(index, context, limit);
+  if (cached) rankSkillsCache.delete(key);
+  rankSkillsCache.set(key, selected);
+  if (rankSkillsCache.size > RANK_SKILLS_CACHE_MAX) rankSkillsCache.delete(rankSkillsCache.keys().next().value!);
   const fuzzyMatches = selected.filter(item => item.matched.some(term => term.includes("~"))).length;
   if(fuzzyMatches)try{sessionObservability()[Symbol.for("yunus-pi.health.v1")]?.("ml.fuzzy.used",{count:fuzzyMatches});}catch{/* optional visibility */}
   return selected.map(item => ({ skill: item.skill, score: item.score, matched: [...item.matched] }));
@@ -228,49 +277,40 @@ export function rankSkills(index: SkillIndex, context: string, limit = 4): Ranke
 function rankSkillsUncached(index: SkillIndex, context: string, limit = 4): Ranked[] {
   const terms = skillTerms(context, 64);
   if (!terms.length) return [];
-  // A catalogue term is naming when at least half of the documents that carry
-  // it also carry it in their skill name. Counted per queried term only, so the
-  // cost stays bounded by the context rather than the whole catalogue. This is
-  // what keeps a single-term match honest: "spreadsheet" names the spreadsheet
-  // skill, while "settings" is one description word among many.
-  const naming = new Map<string, boolean>();
+  const queryTerms = new Set(terms);
+  const matchesByDoc = new Map<number, Map<string, string>>();
+  const addMatch = (id: number, term: string, canonical: string) => {
+    let matches = matchesByDoc.get(id);
+    if (!matches) matchesByDoc.set(id, matches = new Map());
+    if (!matches.has(term)) matches.set(term, canonical);
+  };
+  // Only visit documents reached through the exact and one-edit postings.
+  // Exact matches reserve their own canonical term even when a typo precedes it.
   for (const term of terms) {
-    if (!index.weight.has(term) || naming.has(term)) continue;
-    let carried = 0, inName = 0;
-    for (const doc of index.docs) {
-      if (!doc.tokens.has(term)) continue;
-      carried++;
-      if (doc.name.has(term)) inName++;
-      // Later description-only mentions can invalidate the majority.
-      // Do not stop at an early prefix of the catalogue.
+    for (const id of index.postings.get(term) ?? []) addMatch(id, term, term);
+    for (const token of nearbyTokens(index, term)) {
+      if (queryTerms.has(token)) continue;
+      for (const id of index.postings.get(token)!) addMatch(id, term, token);
     }
-    naming.set(term, inName > 0 && inName * 2 >= carried);
   }
   const out: Ranked[] = [];
-  for (const doc of index.docs) {
+  for (const [id, matches] of matchesByDoc) {
+    const doc = index.docs[id];
     let score = 0, rare = 0, nameMatches = 0, namingMatches = 0;
     const matched: string[] = [];
     const matchedCanonical = new Set<string>();
-    for (const term of terms) {
-      const w = index.weight.get(term);
-      if (w && doc.tokens.has(term)) {
-        if (matchedCanonical.has(term)) continue;
-        matchedCanonical.add(term);
-        const inName = doc.name.has(term);
-        score += w * (inName ? 2 : 1);
-        if (inName) nameMatches++;
-        if (inName && naming.get(term)) namingMatches++;
-        if (index.strong.has(term)) rare++;
-        if (matched.length < 6) matched.push(term);
-        continue;
+    for (const [term, token] of matches) {
+      if (matchedCanonical.has(token)) continue;
+      matchedCanonical.add(token);
+      const exact = term === token;
+      const inName = doc.name.has(token);
+      score += index.weight.get(token)! * (inName ? 2 : 1) * (exact ? 1 : 0.55);
+      if (exact && inName) {
+        nameMatches++;
+        if (index.naming.has(term)) namingMatches++;
       }
-      const close = fuzzyToken(index, doc, term);
-      const closeWeight = close ? index.weight.get(close) : undefined;
-      if (!close || !closeWeight || matchedCanonical.has(close)) continue;
-      matchedCanonical.add(close);
-      score += closeWeight * 0.55 * (doc.name.has(close) ? 2 : 1);
-      if (index.strong.has(close)) rare++;
-      if (matched.length < 6) matched.push(`${term}~${close}`);
+      if (index.strong.has(token)) rare++;
+      if (matched.length < 6) matched.push(exact ? term : `${term}~${token}`);
     }
     // Two matched terms remain the ordinary signal. A single term that an
     // naming token of that skill is also decisive, because the skill name is
@@ -284,8 +324,8 @@ function rankSkillsUncached(index: SkillIndex, context: string, limit = 4): Rank
     }
   }
   const relevance=process.env.PI_LOCAL_INTELLIGENCE==='off'?[]:candidateRelevance(out.map(item=>`${item.skill.name} ${item.skill.description}`),context);
-  const ranked=new Map(out.map((item,i)=>[item.skill.name,relevance[i]??0]));
+  const ranked=new Map(out.map((item,i)=>[item,relevance[i]??0]));
   // Statistical tie-break only after all rarity, fuzzy-match and availability gates.
-  out.sort((a, b) => b.score - a.score || ranked.get(b.skill.name)!-ranked.get(a.skill.name)! || a.skill.name.localeCompare(b.skill.name));
+  out.sort((a, b) => b.score - a.score || ranked.get(b)!-ranked.get(a)! || a.skill.name.localeCompare(b.skill.name) || a.skill.file.localeCompare(b.skill.file));
   return out.slice(0, Math.max(1, limit));
 }

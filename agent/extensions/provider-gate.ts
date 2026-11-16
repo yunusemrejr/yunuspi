@@ -11,7 +11,7 @@
  * children and auxiliary calls alike) — and enforces the shared state from
  * pi-subagents/src/runs/shared/provider-health.ts:
  *
- *   1. resolve provider/model, consult shared provider health/rate state,
+ *   1. resolve the transport's provider/model, consult shared provider health/rate state,
  *   2. estimate request token pressure (chars/4 over the payload messages),
  *   3. record the outgoing request in the shared pressure window,
  *   4. while the route/provider is cooling: DEFER the request in place
@@ -39,14 +39,14 @@
  *
  * Kill switches (tests / debugging): PI_PROVIDER_GATE=off disables the gate;
  * PI_PROVIDER_GATE_MAX_WAIT_MS overrides the in-gate wait budget. The gate
- * fails OPEN when a request cannot be attributed to a provider/model while
- * all known candidates are healthy (it never blocks on unknown text), blocks
- * an ambiguous model when a known candidate is cooling, and skips
- * loopback/mock endpoints.
+ * falls back to the registry when a host supplies no route metadata. For an
+ * ambiguous legacy request it blocks when a known candidate is cooling.
+ * It skips loopback/mock endpoints.
  */
 
 import { cacheProfileFor } from "./lib/lean-policy.ts";
 import type {
+	BeforeProviderRequestEvent,
 	ExtensionAPI,
 	ExtensionContext,
 } from "@yunuspi/coding-agent";
@@ -108,7 +108,7 @@ function sessionLabel(ctx: AnyCtx): string | undefined {
 }
 
 /**
- * Resolve the provider for an outgoing payload. The payload carries only the
+ * Resolve the provider for a legacy event without transport metadata. The payload carries only the
  * model id; the provider comes from an unambiguous model-registry row. A
  * session model is used only when the host has no registry row (auxiliary calls
  * may use a different model). Returns undefined when the attribution is
@@ -330,10 +330,10 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 	}
 
 	// THE GATE — runs for every inference request in this process.
-	pi.on("before_provider_request", async (event: any, ctx: any) => {
+	pi.on("before_provider_request", async (event: BeforeProviderRequestEvent, ctx) => {
 		if (gateDisabled()) return undefined;
-		const payload = event?.payload;
-		const route = resolveRoute(payload, ctx as AnyCtx);
+		const { payload, model, signal } = event;
+		const route = (model?.id ? routeFromModel(model, model.id) : undefined) ?? resolveRoute(payload, ctx);
 		if (!route) {
 			const ambiguous = coolingAmbiguousRoute(payload, ctx as AnyCtx);
 			if (ambiguous) {
@@ -385,16 +385,17 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 			...(session ? { session } : {}),
 			...(endpointInfo ? { endpoint: endpointInfo.name ?? endpointInfo.endpoint } : {}),
 		};
-		markPendingAttempt(pending, attempt);
 		const estTokens = estimateTokens(payload);
+		const requestSignal = signal ?? ctx.signal;
+		markPendingAttempt(pending, attempt);
 		try {
 			const outcome = await gateRequest({
 				provider: route.provider,
 				model: route.model,
 				endpoints: endpointInfo ? [endpointInfo.endpoint, ...(endpointInfo.name ? [endpointInfo.name] : [])] : undefined,
 				estTokens,
-				session: sessionLabel(ctx as AnyCtx),
-				signal: (ctx as any)?.signal,
+				session,
+				signal: requestSignal,
 			});
 			if (outcome.deferredMs > 0) {
 				setStatus(
@@ -409,7 +410,10 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 			attempt.estTokens = estTokens;
 			return undefined; // allow the payload unchanged
 		} catch (err) {
-			removePendingAttempt(pending, attempt);
+			// A stream deadline can close the turn before the gate settles.
+			// Keep this unadmitted marker until message_end can distinguish it
+			// from a provider that stalled after an actual dispatch.
+			if (!requestSignal?.aborted) removePendingAttempt(pending, attempt);
 			if (err instanceof GateDeniedError) {
 				const d = err.details;
 				setStatus(
@@ -430,6 +434,10 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 			typeof message.provider === "string" ? message.provider : undefined;
 		const model = typeof message.model === "string" ? message.model : undefined;
 		if (!provider) return;
+		const errorMessage = typeof message.errorMessage === "string" ? message.errorMessage : undefined;
+		// Gate denials are local decisions. They cannot supply route-health
+		// evidence or consume a different in-flight request's metadata.
+		if (message.stopReason === "error" && errorMessage?.includes("429 rate limit: provider-gate ")) return;
 		const session = sessionLabel(ctx as AnyCtx);
 		const attempt = takePendingAttempt(pending, provider, model, session);
 		const endpoint = attempt?.ambiguous || attempt?.candidateProvider && attempt.candidateProvider !== provider
@@ -439,12 +447,14 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 			? performance.now() - attempt.started
 			: undefined;
 		if (message.stopReason === "error") {
+			if (attempt && !attempt.ambiguous && attempt.started === undefined) return;
 			const recorded = recordFailure({
 				provider,
 				model,
-				errorMessage: typeof message.errorMessage === "string" ? message.errorMessage : undefined,
+				errorMessage,
 				source: "message_end",
                 endpoint,
+                estTokens: attempt?.ambiguous ? undefined : attempt?.estTokens,
                 rates: ctx?.model?.provider===provider && ctx.model.id===model ? economyRateIdentity(ctx.model.cost??{},ctx.model.baseUrl,ctx.model.api) : undefined,
 			});
             if (!recorded) invalidateEconomyUsage(provider,model);

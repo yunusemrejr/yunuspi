@@ -8,15 +8,16 @@ import {pathToFileURL} from 'node:url';
 const template=path.resolve(import.meta.dirname,'..');
 const agent=[path.join(template,'agent'),path.resolve(template,'..')].find(p=>fs.existsSync(path.join(p,'extensions/pi-memory/index.ts')));
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'pi-memory-exit-budget-'));
-register('data:text/javascript,'+encodeURIComponent(`export function resolve(name,ctx,next){
- const sources={
- '@yunuspi/coding-agent':'export function convertToLlm(v){return v};export function serializeConversation(){return "fixture conversation"};export function getAgentDir(){return ${JSON.stringify(root)}};export function withFileMutationQueue(_p,fn){return fn()}',
- '@yunuspi/ai/compat':'export async function complete(...args){return globalThis.__exitBudgetComplete(...args)}'};
- return name in sources?{url:'data:text/javascript,'+encodeURIComponent(sources[name]),shortCircuit:true}:next(name,ctx);
+const original=Object.fromEntries(['PI_CODING_AGENT_DIR','PI_MEMORY_QMD_UPDATE','PI_MEMORY_EXIT_SUMMARY_TIMEOUT_MS','PI_MEMORY_EXIT_SUMMARY','PI_OFFLINE'].map(k=>[k,process.env[k]]));
+process.env.PI_CODING_AGENT_DIR=root;
+register('data:text/javascript,'+encodeURIComponent(`export async function resolve(name,ctx,next){
+ const actual=await next(name,ctx);
+ if(name!=='@yunuspi/ai/compat') return actual;
+ const source='export * from '+JSON.stringify(actual.url)+';export async function complete(...args){return globalThis.__exitBudgetComplete(...args)}';
+ return {url:'data:text/javascript,'+encodeURIComponent(source),shortCircuit:true};
 }`),import.meta.url);
 const memory=await import(pathToFileURL(path.join(agent,'extensions/pi-memory/index.ts')));
 const {registerPriming}=await import(pathToFileURL(path.join(agent,'extensions/pi-memory/priming.ts')));
-const original=Object.fromEntries(['PI_MEMORY_QMD_UPDATE','PI_MEMORY_EXIT_SUMMARY_TIMEOUT_MS','PI_MEMORY_EXIT_SUMMARY','PI_OFFLINE'].map(k=>[k,process.env[k]]));
 // Keep the real schema constructors; only provider completion is intercepted.
 // Isolate host/offline runner settings without weakening the runtime contract.
 delete process.env.PI_OFFLINE;

@@ -1,13 +1,21 @@
 /** Fixed-host ElevenLabs transport. No SDK, shell secrets, paid retries or
  * silent provider substitution. Timings describe provider alignment, not ASR. */
 import fs from 'node:fs/promises';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { FFMPEG_FLAGS, inputArgs, inputFile, number, outputFolder, probe, produced, requireStream, run } from './media-process.ts';
 import { captionChunks, toSrt, toVtt } from './captions.ts';
 import { acquireCatalogCacheLock } from './catalog-cache-lock.ts';
 
 type Env = Record<string, string | undefined>;
+export type ElevenUsageSink = (receipt: {
+  id: string;
+  provider: 'elevenlabs';
+  model: string;
+  status: 'pending' | 'completed' | 'failed' | 'cancelled' | 'timeout';
+  characterCost?: number;
+  usage?: { costDetails: { reported: 0; estimated: 0; unknown: false; subscription: false; seen: true } };
+}) => void;
 const API = 'https://api.elevenlabs.io/v1';
 const keyOf = (env: Env) => env.ELEVENLABS_API_KEY || env.PI_ELEVENLABS_API_KEY || env.XI_API_KEY;
 const digest = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
@@ -41,24 +49,42 @@ async function providerReason(response: Response): Promise<string | undefined> {
   } catch { return undefined; }
 }
 
-async function request(endpoint: string, body: any, signal: AbortSignal | undefined, env: Env, maxBytes = 64 * 1024 * 1024) {
+async function request(endpoint: string, body: any, signal: AbortSignal | undefined, env: Env, maxBytes = 64 * 1024 * 1024, onUsage?: ElevenUsageSink) {
   const key = keyOf(env);
   if (!key) throw Object.assign(new Error('ElevenLabs is not configured; set ELEVENLABS_API_KEY or explicitly use backend:piper for speech'), { submissionNotSent: true });
   const bounded = signal ? AbortSignal.any([signal, AbortSignal.timeout(600_000)]) : AbortSignal.timeout(600_000);
   if (bounded.aborted) throw Object.assign(new Error('ElevenLabs request cancelled before submission'), { submissionNotSent: true });
   const multipart = body instanceof FormData;
+  const id = onUsage && typeof body?.model_id === 'string' ? randomUUID() : undefined;
+  const note = (status: Parameters<ElevenUsageSink>[0]['status'], header?: string | null, notSent = false) => {
+    if (!id) return;
+    const units = header && /^\d+(?:\.\d+)?$/.test(header) ? Number(header) : undefined;
+    // Account plans and negotiated rates govern USD charges. A character-cost
+    // header supplies usage units only.
+    try {
+      onUsage?.({id, provider:'elevenlabs', model:body.model_id, status,
+        ...(typeof units === 'number' && Number.isFinite(units) ? {characterCost:units} : {}),
+        ...(notSent ? {usage:{costDetails:{reported:0,estimated:0,unknown:false,subscription:false,seen:true}}} : {})});
+    } catch { /* accounting must not discard a paid response */ }
+  };
+  note('pending');
   const response = await fetch(API + endpoint, { method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: bounded,
     headers: { 'xi-api-key': key, ...(body === undefined || multipart ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : multipart ? body : JSON.stringify(body) })
     .catch((error: any) => {
       // DNS and refused connections fail before any byte is sent: nothing was paid for, so no
       // "outcome unknown" marker may block the next attempt or the local fallback.
       const code = error?.cause?.code ?? error?.cause?.errors?.[0]?.code;
-      throw ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(code) ? Object.assign(error, { submissionNotSent: true }) : error;
+      const notSent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(code);
+      note(signal?.aborted ? 'cancelled' : bounded.aborted ? 'timeout' : 'failed', undefined, notSent);
+      throw notSent ? Object.assign(error, { submissionNotSent: true }) : error;
     });
   if (!response.ok) {
+    note('failed', response.headers.get('character-cost'));
     const reason = await providerReason(response);
     throw Object.assign(new Error(`ElevenLabs returned HTTP ${response.status}${reason ? ` (${reason})` : ''}; no automatic retry or fallback was attempted`), { providerStatus: response.status, ...(reason ? { providerReason: reason } : {}) });
   }
+  // The charge can survive a transport, decode, or local mastering failure.
+  note('completed', response.headers.get('character-cost'));
   if (!response.body) throw Error('ElevenLabs returned no body');
   const reader = response.body.getReader(), chunks: Buffer[] = [];
   let bytes = 0;
@@ -140,7 +166,7 @@ export function speechRequest(params: any, text: string, env: Env = process.env)
 /** dir is a fresh standalone directory or a caller-owned project cache. A
  * receipt is committed only after decoding; completed paid chunks survive a
  * project interruption and are reused only with identical inputs and bytes. */
-export async function elevenSpeech(params: any, dir: string, signal?: AbortSignal, progress?: (text: string) => void, env: Env = process.env) {
+export async function elevenSpeech(params: any, dir: string, signal?: AbortSignal, progress?: (text: string) => void, env: Env = process.env, onUsage?: ElevenUsageSink) {
   const parts = splitSpeech(params.text, params.chunkChars ?? 2000);
   if (parts.some(part => !part.trim())) throw Error('Every speech chunk must contain words; remove long runs of leading or trailing whitespace');
   speechRequest(params, parts[0], env);
@@ -152,7 +178,7 @@ export async function elevenSpeech(params: any, dir: string, signal?: AbortSigna
       const request = speechRequest(params, parts[0], env), settings = request.body.voice_settings;
       await atomicSpeechFile(path.join(dir, 'speech-request.json'), JSON.stringify({ version: 1, account: digest(keyOf(env)!), params: { text: params.text, chunkChars: params.chunkChars ?? 2000, voiceId: request.voiceId, model: request.body.model_id, speed: settings.speed, stability: settings.stability, similarity: settings.similarity_boost, expressiveness: settings.style, language: params.language, previousText: params.previousText, nextText: params.nextText } }) + '\n');
     }
-    return await speechChunks(params, dir, signal, progress, env);
+    return await speechChunks(params, dir, signal, progress, env, onUsage);
   }
   catch (error) { throw await retainedSpeechError(dir, error) ?? error; }
   finally { release(); }
@@ -177,7 +203,7 @@ export async function retainedSpeechError(dir: string, cause: unknown): Promise<
   const unknown = files.some(file => file.endsWith('.submission.json') && !files.includes(file.replace('.submission.json', '.response.json')) && !files.includes(file.replace('.submission.json', '.json')));
   return Object.assign(new Error(`${cause instanceof Error ? cause.message : String(cause)}; narration checkpoints retained at ${dir}${unknown ? '; inspect the saved submission and provider history before requesting regeneration' : ' for recovery without another paid request'}`, { cause }), { retainedSpeechCache: dir, ...(unknown ? { submissionOutcomeUnknown: true } : {}) });
 }
-async function speechChunks(params: any, dir: string, signal?: AbortSignal, progress?: (text: string) => void, env: Env = process.env) {
+async function speechChunks(params: any, dir: string, signal?: AbortSignal, progress?: (text: string) => void, env: Env = process.env, onUsage?: ElevenUsageSink) {
   const chunks = splitSpeech(params.text, params.chunkChars ?? 2000), outputs: string[] = [], words: Array<{ w: string; s: number; e: number }> = [], receipts: any[] = [];
   const temporary: string[] = [];
   let offset = 0;
@@ -211,7 +237,7 @@ async function speechChunks(params: any, dir: string, signal?: AbortSignal, prog
           signal?.throwIfAborted();
           await atomicSpeechFile(submissionPath, JSON.stringify({ status: 'submitting', voiceId, model: body.model_id, requestedCharacters: chunks[i].length, submittedAt: new Date().toISOString() }) + '\n');
           let result;
-          try { result = await request(`/text-to-speech/${voiceId}/with-timestamps?output_format=mp3_44100_128`, body, signal, env); }
+          try { result = await request(`/text-to-speech/${voiceId}/with-timestamps?output_format=mp3_44100_128`, body, signal, env, undefined, onUsage); }
           catch (error: any) {
             if (error.providerStatus || error.submissionNotSent) await fs.rm(submissionPath, { force: true });
             else await atomicSpeechFile(submissionPath, JSON.stringify({ status: 'unknown', voiceId, model: body.model_id, requestedCharacters: chunks[i].length, recordedAt: new Date().toISOString() }) + '\n');
@@ -289,7 +315,7 @@ export async function elevenVoices(signal?: AbortSignal, env: Env = process.env)
   return { provider: 'elevenlabs', voices: (body.voices ?? []).slice(0, 100).map((v: any) => ({ id: v.voice_id, name: v.name, category: v.category, labels: v.labels })), truncated: (body.voices?.length ?? 0) > 100 };
 }
 
-export async function audioGenerate(params: any, cwd: string, signal?: AbortSignal, env: Env = process.env) {
+export async function audioGenerate(params: any, cwd: string, signal?: AbortSignal, env: Env = process.env, onUsage?: ElevenUsageSink) {
   const music = params.kind === 'music';
   if (!music && params.kind !== 'sfx') throw Error('kind must be music or sfx');
   if (typeof params.prompt !== 'string' || !params.prompt.trim() || params.prompt.length > (music ? 4100 : 1000)) throw Error('Provide a bounded audio prompt');
@@ -311,7 +337,7 @@ export async function audioGenerate(params: any, cwd: string, signal?: AbortSign
     let response;
     try {
       submitted = true;
-      response = await request(music ? '/music' : '/sound-generation?output_format=mp3_44100_128', body, signal, env);
+      response = await request(music ? '/music' : '/sound-generation?output_format=mp3_44100_128', body, signal, env, undefined, onUsage);
     } catch (error: any) {
       if (error.providerStatus || error.submissionNotSent) submitted = false;
       throw error;

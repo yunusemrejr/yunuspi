@@ -39,8 +39,7 @@ import { buildSystemPrompt } from "./system-prompt.js";
 import { createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
-import { addUsageToTotals, createUsageTotals } from "./usage-totals.js";
-import { collectSessionCost } from "./session-accounting.js";
+import { collectSessionStats } from "./session-accounting.js";
 import { GuardianSupervisor, tagGuardianRequestMessage } from "./guardian/guardian-supervisor.js";
 import { sessionObservability, withSessionObservability } from "./session-observability.js";
 /** Providers that limit requests per second and send no Retry-After (Ling: 2 requests/s). A retry 5 to 8 s
@@ -464,6 +463,11 @@ export class AgentSession {
                 }
             }
         }
+        // A tool-phase interrupt leaves a valid assistant/tool pair in history.
+        // Skip retry and compaction without rewriting its recorded stop reason.
+        if (event.type === "agent_end" && event.aborted) {
+            this._lastAssistantMessage = undefined;
+        }
         // Emit to extensions first
         await this._emitExtensionEvent((/* PI_RESPONSE_BILLING_V1 */
   event.type === 'message_end' && event.message?.role === 'assistant' && event.message.usage?.cost &&
@@ -521,6 +525,7 @@ export class AgentSession {
     };
     _willRetryAfterAgentEnd(event) {
         /* PI_RETRY_LIFECYCLE_V1 */
+        if (event.aborted) return false;
         const settings = this.settingsManager.getRetrySettings();
         if (!settings.enabled) return false;
         for (let i = event.messages.length - 1; i >= 0; i--) {
@@ -567,7 +572,7 @@ export class AgentSession {
             await this._extensionRunner.emit({ type: "agent_start" });
         }
         else if (event.type === "agent_end") {
-            await this._extensionRunner.emit({ type: "agent_end", messages: event.messages });
+            await this._extensionRunner.emit(event);
         }
         else if (event.type === "turn_start") {
             const extensionEvent = {
@@ -2985,72 +2990,13 @@ export class AgentSession {
      * actually billed across the session.
      */
     getSessionStats() {
-        let userMessages = 0;
-        let assistantMessages = 0;
-        let toolResults = 0;
-        let totalMessages = 0;
-        let toolCalls = 0;
-        const usageTotals = createUsageTotals();
-        for (const entry of this.sessionManager.getEntries()) {
-            if ((entry.type === "branch_summary" || entry.type === "compaction") && entry.usage) {
-                addUsageToTotals(usageTotals, entry.usage);
-            }
-            if (entry.type !== "message")
-                continue;
-            totalMessages++;
-            const message = entry.message;
-            if (message.role === "user") {
-                userMessages++;
-            }
-            else if (message.role === "toolResult") {
-                toolResults++;
-                if (message.usage) {
-                    addUsageToTotals(usageTotals, message.usage);
-                }
-            }
-            else if (message.role === "assistant") {
-                assistantMessages++;
-                const assistantMsg = message;
-                if (Array.isArray(assistantMsg.content)) {
-                    toolCalls += assistantMsg.content.filter((c) => c.type === "toolCall").length;
-                }
-                addUsageToTotals(usageTotals, assistantMsg.usage);
-            }
-        }
+        const model = this.model;
+        const subscription = model ? isFlatPlanProvider(model.provider) || this.modelRuntime.isUsingSubscription(model.provider) : false;
         return {
             sessionFile: this.sessionFile,
             sessionId: this.sessionId,
-            userMessages,
-            assistantMessages,
-            toolCalls,
-            toolResults,
-            totalMessages,
-            tokens: {
-                input: usageTotals.input,
-                output: usageTotals.output,
-                cacheRead: usageTotals.cacheRead,
-                cacheWrite: usageTotals.cacheWrite,
-                total: usageTotals.input + usageTotals.output + usageTotals.cacheRead + usageTotals.cacheWrite,
-            },
-            // One session total: main responses, delegated runs, Jev/Span and
-            // every other helper model call. `cost` is the number, `costLabel`
-            // carries the partial/estimate/subscription markers.
-            ...this._sessionCostSummary(),
+            ...collectSessionStats(this.sessionManager.getEntries(), subscription),
             contextUsage: this.getContextUsage(),
-        };
-    }
-    _sessionCostSummary() {
-        const model = this.model;
-        const subscription = model ? isFlatPlanProvider(model.provider) || this.modelRuntime.isUsingSubscription(model.provider) : false;
-        const accounting = collectSessionCost(this.sessionManager.getEntries(), subscription);
-        const spent = row => row.reported + row.estimated;
-        const byRoute = new Map();
-        for (const row of accounting.rows) byRoute.set(row.route, (byRoute.get(row.route) ?? 0) + spent(row));
-        return {
-            cost: accounting.total,
-            costLabel: accounting.formatted,
-            costParts: { main: spent(accounting.main), delegated: spent(accounting.children), helpers: spent(accounting.auxiliary) },
-            costRoutes: [...byRoute].filter(([, cost]) => cost > 0).sort((a, b) => b[1] - a[1]).map(([route, cost]) => ({ route, cost })),
         };
     }
     getContextUsage(){/* PI_CONTEXT_SETTINGS */const usage=this._getContextUsageBeforeTelemetry();return usage?{...usage,compactionSettings:this.settingsManager.getCompactionSettings()}:usage;} _getContextUsageBeforeTelemetry(){

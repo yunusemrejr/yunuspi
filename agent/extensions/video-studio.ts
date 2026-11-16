@@ -8,7 +8,7 @@ import { selectedMediaParams } from "./lib/media-model-routing.ts";
 import { narrationTts, PIPER_VOICES, SFX_TYPES, VOICE_STYLES, videoQa } from "./lib/video-studio.ts";
 import { filmCheck, filmInit, filmInstall, filmRender, filmStatus, withFilmTools } from "./lib/film.ts";
 import { choices } from "./lib/tool-schema.ts";
-import { audioGenerate } from './lib/elevenlabs.ts';
+import { audioGenerate, type ElevenUsageSink } from './lib/elevenlabs.ts';
 import { videoBrowser } from './lib/video-browser.ts';
 import { videoReviewRouting, installVideoReviewEvidence } from './lib/video-review-evidence.ts';
 
@@ -21,7 +21,7 @@ export default function videoStudio(pi: any) {
     const command = withFilmTools(event.input?.command, ctx?.cwd || process.cwd());
     if (command) event.input.command = command;
   });
-  function register(name: string, description: string, parameters: any, handler: (params: any, cwd: string, signal?: AbortSignal, progress?: (text: string) => void) => Promise<any>, deadlineMs: number) {
+  function register(name: string, description: string, parameters: any, handler: (params: any, cwd: string, signal?: AbortSignal, progress?: (text: string) => void, onUsage?: ElevenUsageSink) => Promise<any>, deadlineMs: number) {
     pi.registerTool({
       name, label: name.replaceAll("_", " "), description, parameters,
       async execute(_id: string, params: any, signal: AbortSignal | undefined, update: ((partial: any) => void) | undefined, ctx: any) {
@@ -32,7 +32,12 @@ export default function videoStudio(pi: any) {
         if (name === 'narration_tts') params = selectedMediaParams(params, 'speech', ctx?.mediaModels);
         if (name === 'audio_generate') params = selectedMediaParams(params, params.kind, ctx?.mediaModels);
         if (name==='video_qa') await reviews.assertVisualReviews(params,ctx,bounded);
-        const result = await handler(params, ctx?.cwd || process.cwd(), bounded, progress);
+        const onUsage: ElevenUsageSink = receipt => {
+          if (ownerSession && ctx?.sessionManager === ownerManager && ownerManager.getSessionId?.() === ownerSession) {
+            pi.appendEntry?.('auxiliary-model-usage-v1', { ...receipt, owner: name });
+          }
+        };
+        const result = await handler(params, ctx?.cwd || process.cwd(), bounded, progress, onUsage);
         const reviewRouting = videoReviewRouting(result, ctx?.model?.input?.includes('image') !== false);
         if (reviewRouting) result.reviewRouting = reviewRouting;
         const content: any[] = [{ type: 'text', text: JSON.stringify(result) }];
@@ -79,12 +84,12 @@ export default function videoStudio(pi: any) {
     Type.Object({ action: Type.Optional(choices(["status", "voices", "install", "speak", "recover"])), backend: Type.Optional(choices(['auto', 'elevenlabs', 'piper'])), voiceId: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })), model: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })), language: Type.Optional(Type.String({ pattern: '^[a-z]{2}$' })), stability: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), similarity: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), expressiveness: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), text: Type.Optional(Type.String({ minLength: 1, maxLength: 8000 })), outputDir: Type.Optional(localPath), dir: Type.Optional(localPath), voice: Type.Optional(choices(Object.keys(PIPER_VOICES))), style: Type.Optional(choices(Object.keys(VOICE_STYLES), "Delivery preset for Piper or ElevenLabs; explicit stability/expressiveness override cloud presets")), speed: Type.Optional(Type.Number({ minimum: 0.6, maximum: 1.5, description: "Piper 0.6..1.5; ElevenLabs 0.7..1.2" })), lexicon: Type.Optional(Type.Record(Type.String({ minLength: 1, maxLength: 64 }), Type.String({ minLength: 1, maxLength: 128 }), { maxProperties: 64 })) }),
     narrationTts, 1_200_000);
   register('audio_generate', 'Generate an instrumental music bed or prompt-directed sound effect through ElevenLabs, using /models Audio defaults. Local selections use procedural audio; cloud selections use ElevenLabs. Music supports exact model and 3..600 seconds; SFX 0.5..30 seconds and loop intent. Returns decoded artifact and measured duration; use audio_mix role:music for ducking. Longer films use arranged sections. Requires private ELEVENLABS_API_KEY; no automatic paid retry or fallback.',
-    Type.Object({ dir: Type.Optional(localPath), style: Type.Optional(Type.String({ maxLength: 32 })), sfxType: Type.Optional(choices([...SFX_TYPES])), bpm: Type.Optional(Type.Number({ minimum: 40, maximum: 180 })), seed: Type.Optional(Type.Integer({ minimum: 0, maximum: 2147483647 })), kind: choices(['music', 'sfx']), prompt: Type.String({ minLength: 1, maxLength: 4100 }), seconds: Type.Optional(Type.Number({ minimum: 0.5, maximum: 600 })), model: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })), instrumental: Type.Optional(Type.Boolean()), loop: Type.Optional(Type.Boolean()), influence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), outputDir: Type.Optional(localPath) }), async (p, cwd, signal) => {
+    Type.Object({ dir: Type.Optional(localPath), style: Type.Optional(Type.String({ maxLength: 32 })), sfxType: Type.Optional(choices([...SFX_TYPES])), bpm: Type.Optional(Type.Number({ minimum: 40, maximum: 180 })), seed: Type.Optional(Type.Integer({ minimum: 0, maximum: 2147483647 })), kind: choices(['music', 'sfx']), prompt: Type.String({ minLength: 1, maxLength: 4100 }), seconds: Type.Optional(Type.Number({ minimum: 0.5, maximum: 600 })), model: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })), instrumental: Type.Optional(Type.Boolean()), loop: Type.Optional(Type.Boolean()), influence: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })), outputDir: Type.Optional(localPath) }), async (p, cwd, signal, _progress, onUsage) => {
       if (p.mediaProvider === 'local') {
         const { audioSynthStandalone } = await import('./lib/video-studio.ts');
         return audioSynthStandalone(p, cwd, signal);
       }
-      return audioGenerate(p, cwd, signal);
+      return audioGenerate(p, cwd, signal, undefined, onUsage);
     }, 650_000);
   register('video_browser', 'Capture a real website take with human-paced pointer movement, click rings, scrolling, typing and observed targets. Supply a URL or self-contained local HTML, seconds (1..120), and ordered timed steps. Fresh sandboxed Chromium profile, bounded real-time CDP capture, constant-frame MP4, and take.json with actual click/key/target times and source-frame timestamps. device:phone records mobile layout and touch input; tap rings and highlight steps emphasize observed controls. The returned take.json carries the observed event clock: drop the take into the public/ folder of the film and time callouts and sound to those events. Split longer walkthroughs into takes. Observe selectors with browser_session first; no logged-in profile is imported.',
     Type.Object({ url: Type.Optional(Type.String({ maxLength: 2048 })), path: Type.Optional(localPath), seconds: Type.Optional(Type.Number({ minimum: 1, maximum: 120 })), fps: Type.Optional(Type.Number({ minimum: 1, maximum: 60 })), width: Type.Optional(Type.Integer({ minimum: 64, maximum: 1920 })), height: Type.Optional(Type.Integer({ minimum: 64, maximum: 1080 })), cursor: Type.Optional(Type.Boolean()), device: Type.Optional(choices(['desktop','phone'])), accent: Type.Optional(Type.String({ pattern: '^#[0-9a-fA-F]{6}$' })), outputDir: Type.Optional(localPath), steps: Type.Optional(Type.Array(Type.Object({ action: choices(['move', 'click', 'tap', 'highlight', 'scroll', 'type', 'press', 'mark', 'wait_text']), at: Type.Optional(Type.Number({ minimum: 0, maximum: 120 })), duration: Type.Optional(Type.Number({ minimum: 0, maximum: 5 })), selector: Type.Optional(Type.String({ minLength: 1, maxLength: 500 })), x: Type.Optional(Type.Number()), y: Type.Optional(Type.Number()), dx: Type.Optional(Type.Number()), dy: Type.Optional(Type.Number()), text: Type.Optional(Type.String({ minLength: 1, maxLength: 2000 })), key: Type.Optional(Type.String({ maxLength: 100, description: 'press: key name, e.g. Enter; text is also accepted' })) }), { maxItems: 100 })) }), videoBrowser, 400_000);

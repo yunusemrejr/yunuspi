@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {createHash} from 'node:crypto';
 let agent=path.resolve(import.meta.dirname,'../agent');
 try { await fs.access(agent); } catch { agent=path.resolve(import.meta.dirname,'../..'); }
 const {buildSkillIndex,rankSkills,skillTerms,skillEvidenceContext}=await import(pathToFileURL(path.join(agent,'extensions/lib/skill-relevance.ts')));
@@ -18,6 +19,27 @@ test('specific names still qualify and repeated context cannot buy extra relevan
  const index=buildSkillIndex([skill('spreadsheet','workbooks formulas'),...unrelated]);
  assert.equal(rankSkills(index,'spreadsheet')[0]?.skill.name,'spreadsheet');
  assert.deepEqual(rankSkills(index,'spreadsheet spreadsheet'),rankSkills(index,'spreadsheet'));
+});
+
+test('exact subject evidence outranks an earlier typo of the same word', () => {
+ const index = buildSkillIndex([skill('orbital-mechanics', 'ephemeris propagation'), ...unrelated]);
+ const literal = rankSkills(index, 'orbital ephemeris');
+ assert.deepEqual(literal[0]?.matched, ['orbital', 'ephemeris']);
+ assert.deepEqual(rankSkills(index, 'orbitl orbital ephemeris'), literal);
+ for (const typo of ['orbitl', 'orbitall', 'orbztal', 'orbtial']) {
+   const ranked = rankSkills(index, `${typo} ephemeris`);
+   assert.equal(ranked[0]?.skill.name, 'orbital-mechanics');
+   assert.deepEqual(ranked[0]?.matched, [`${typo}~orbital`, 'ephemeris']);
+ }
+ assert.deepEqual(rankSkills(index, 'rboital ephemeris'), [], 'a shared deletion key is insufficient to accept multiple edits');
+});
+
+test('a large unique vocabulary keeps fuzzy recovery with bounded index memory', () => {
+ const filler = Array.from({length:160}, (_, i) => skill(`fixture-${i}`,
+   Array.from({length:24}, (_, j) => 'topic' + createHash('sha256').update(`${i}:${j}`).digest('hex').slice(0, 24)).join(' ')));
+ const index = buildSkillIndex([...filler, skill('orbital-mechanics', 'ephemeris propagation')]);
+ assert.equal(index.deletions, undefined, 'long unique terms use the vocabulary scan instead of allocating a large deletion index');
+ assert.deepEqual(rankSkills(index, 'orbitl ephemeris')[0]?.matched, ['orbitl~orbital', 'ephemeris']);
 });
 test('context scanning is bounded even when long generic prefixes contain no useful tokens',()=>{
  assert.deepEqual(skillTerms(' '.repeat(65536)+'spreadsheet'),[]);

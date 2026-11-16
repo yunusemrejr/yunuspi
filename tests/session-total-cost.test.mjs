@@ -18,7 +18,6 @@ const session=list=>({
   model:{provider:'openai'},modelRuntime:{isUsingSubscription:()=>false},
   sessionManager:{getEntries:()=>list},
   getContextUsage:()=>undefined,
-  _sessionCostSummary:AgentSession.prototype._sessionCostSummary,
 });
 
 test('session stats report one total over main, delegated and helper model calls',()=>{
@@ -35,4 +34,15 @@ test('an empty session has no metered cost to show',()=>{
   const stats=AgentSession.prototype.getSessionStats.call(session([entries[0]]));
   assert.equal(stats.cost,0);
   assert.equal(stats.costLabel,'$?');
+});
+
+test('session stats retain the recorded total across partial and missing usage receipts',()=>{
+  const stats=AgentSession.prototype.getSessionStats.call(session([
+    entries[1],
+    {type:'message',message:{role:'assistant',provider:'openai',model:'main',content:[],stopReason:'aborted'}},
+    {type:'message',message:{role:'toolResult',toolName:'fixture',usage:{input:3}}},
+  ]));
+  assert.equal(stats.cost,0.5);
+  assert.equal(stats.costLabel,'$0.500000+?');
+  assert.deepEqual(stats.tokens,{input:103,output:20,cacheRead:0,cacheWrite:0,total:123});
 });

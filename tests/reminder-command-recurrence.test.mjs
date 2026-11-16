@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -27,14 +28,14 @@ const { readRemindersState, MANUAL_INTERVAL_MS } = await import(
 );
 const T = MANUAL_INTERVAL_MS;
 
-function fixture(sid, { reject = false, rejectNotify = false } = {}) {
+function fixture(sid, { reject = false, rejectNotify = false, cwd = home } = {}) {
 	const hooks = new Map();
 	const commands = new Map();
 	const sent = [];
 	const notices = [];
 	let shouldReject = reject;
 	const ctx = {
-		cwd: home,
+		cwd,
 		sessionManager: { getSessionId: () => sid, getBranch: () => [] },
 		ui: {
 			notify: (message, level) => {
@@ -208,6 +209,24 @@ try {
 		readRemindersState("command-notify-failure").manual[0].delivered,
 		1,
 	);
+
+	const repo = fs.mkdtempSync(path.join(home, "workspace-"));
+	const git = (...args) => execFileSync("git", ["-C", repo, ...args]);
+	const commit = () => git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture");
+	git("init", "-q");
+	commit();
+	const drift = fixture("workspace-drift", { cwd: repo });
+	await drift.emit("session_start", { reason: "resume" });
+	commit();
+	const readResult = { toolName: "read", toolCallId: "inspect", input: { path: "file" }, content: [{ type: "text", text: "fixture" }], isError: false };
+	await drift.emit("tool_result", readResult);
+	const prompt = { prompt: "Continue" };
+	assert.match((await drift.emit("before_agent_start", prompt))?.message?.content ?? "", /HEAD moved/);
+	await drift.emit("tool_result", readResult);
+	assert.doesNotMatch((await drift.emit("before_agent_start", prompt))?.message?.content ?? "", /HEAD moved/, "an unchanged HEAD does not queue the same warning again");
+	commit();
+	await drift.emit("tool_result", readResult);
+	assert.match((await drift.emit("before_agent_start", prompt))?.message?.content ?? "", /HEAD moved/, "a distinct HEAD change still queues a warning");
 
 	console.log(
 		"PASS reminder-command-recurrence: immediate delivery, active-turn repeats, resume, clear, and retry",

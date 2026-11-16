@@ -7,6 +7,8 @@ export interface AgentOptions {
     convertToLlm?: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
     transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
     streamFn: StreamFn;
+    /** Select the stream timeout when starting or continuing a run. */
+    getStreamTimeoutMs?: () => number | undefined;
     getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
     onPayload?: SimpleStreamOptions["onPayload"];
     onResponse?: SimpleStreamOptions["onResponse"];
@@ -37,6 +39,7 @@ export declare class Agent {
     convertToLlm: (messages: AgentMessage[]) => Message[] | Promise<Message[]>;
     transformContext?: (messages: AgentMessage[], signal?: AbortSignal) => Promise<AgentMessage[]>;
     streamFunction: StreamFn;
+    private readonly getStreamTimeoutMs?;
     getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
     onPayload?: SimpleStreamOptions["onPayload"];
     onResponse?: SimpleStreamOptions["onResponse"];

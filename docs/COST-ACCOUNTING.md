@@ -1,6 +1,6 @@
 # Session cost accounting
 
-The footer's `total` covers recorded main responses, delegated runs and auxiliary model usage across the session, including model switches and retries. Run `/cost` for a breakdown by provider/model and main, child or auxiliary work.
+The footer's `total` covers recorded main responses, delegated runs and auxiliary usage across the session, including model switches and retries. Desktop shows the saved total when you open history, and refreshes it when a child or helper records usage after a turn. Run `/cost` for a breakdown by provider/model and main, child or auxiliary work.
 
 - `$…`: provider-reported charges, or an attested zero-activity run.
 - `$~…`: includes estimates derived from response usage and model rates.
@@ -18,7 +18,7 @@ The shared calculator selects the highest applicable context tier using input pl
 
 OpenAI service-tier pricing uses the effective returned tier. Both `fast` and `priority` are recognized. Model-specific factors replace the old blanket multiplier; applicable regional processing adds its documented uplift. Unsupported tier/model combinations remain partial. These rules apply only to official OpenAI endpoints, across both Chat Completions and Responses. The schedule was checked against [OpenAI pricing](https://developers.openai.com/api/docs/pricing) on September 12, 2026; token base rates continue to come from the model catalog/configuration.
 
-For official OpenRouter routes, the returned account charge takes precedence over catalog multiplication, including zero charges. Upstream inference cost is retained separately and is not added blindly to the account charge. DeepInfra's returned estimate is marked as a provider estimate. See [OpenRouter usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting). Other providers retain their configured rate schedules, including the existing direct DeepSeek time-based pricing.
+For official OpenRouter routes, the returned account charge takes precedence over catalog multiplication, including zero charges. A confirmed BYOK request adds its separately billed upstream cost when the response supplies it. If the upstream cost is missing, the gateway charge is shown with `+?`. DeepInfra's returned estimate is marked as a provider estimate. Other providers retain their configured rate schedules, including the existing direct DeepSeek time-based pricing. [OpenRouter usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting) · [OpenRouter BYOK billing](https://openrouter.ai/docs/guides/overview/auth/byok)
 
 ## Delegated work
 
@@ -30,7 +30,7 @@ Nested run identities are retained in accounting receipts. Repeated status, work
 
 Restart Pi and resume the session to load updated core adapters/footer code. Existing history benefits from improved aggregation, but missing historical rates, lost child evidence and unrecorded charges cannot be reconstructed. This change does not rewrite old session files or make paid inference probes.
 
-The total is an estimate of recorded metered work, not an invoice. External tools without usage records, hosted storage/containers, account-specific discounts or credits, taxes, subscription fees and separately billed BYOK provider charges may require provider billing records. Audio usage without a matching price breakdown is marked partial. Configured or cached catalogs can be stale; new pricing schedules require refreshed metadata or a matching adapter update.
+Reconciling the total against an invoice requires billing records for external tools without usage receipts, hosted storage or containers, discounts, credits, taxes and subscription fees. ElevenLabs requests retain the provider's usage units when available and show a partial total when dollar billing is missing. Configured or cached catalogs can be stale. New pricing schedules require refreshed metadata or a matching adapter update. [ElevenLabs billing](https://elevenlabs.io/docs/overview/administration/billing)
 
 Offline regression coverage includes model switches, long-context thresholds, hourly cache writes, malformed/missing rates, effective service tiers, nested/deduplicated children, retries, compactions, subscriptions, replay and billing corrections. Synthetic provider streams exercise installed API adapters without contacting model providers.
 

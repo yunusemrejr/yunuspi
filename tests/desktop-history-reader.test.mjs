@@ -46,6 +46,26 @@ test('reading a complete final line does not repair or rewrite the source file',
   assert.equal(digest(f.file), hash); assert.equal(fs.statSync(f.file).mtimeMs, stat.mtimeMs);
 });
 
+test('passive open includes whole-session charges, including discarded branches outside the page', async t => {
+  const priced = (id, parentId, total) => ({
+    ...entry(id, parentId, ''),
+    message: { role: 'assistant', provider: 'openrouter', model: 'fixture', content: [],
+      usage: { input: 10, output: 2, cacheRead: 0, cacheWrite: 0, cost: { total, source: 'provider-reported' } } },
+  });
+  const f = fixture(t, { entries: [
+    entry('root', null, 'root'), priced('old-branch', 'root', 0.125), priced('main', 'root', 0.25),
+    { type: 'custom', id: 'audio', parentId: 'main', customType: 'auxiliary-model-usage-v1',
+      data: { id: 'request', owner: 'audio_generate', provider: 'elevenlabs', model: 'music_v2', status: 'completed' } },
+    entry('current', 'audio', 'current branch'),
+  ] });
+  const latest = await readHistory({ ...f, limit: 1 });
+  assert.deepEqual(latest.messages.map(message => message.content), ['current branch']);
+  assert.equal(latest.stats.cost, 0.375);
+  assert.equal(latest.stats.costLabel, '$0.375000+?');
+  assert.equal(latest.stats.tokens.total, 24);
+  assert.equal((await readHistory({ ...f, before: latest.before })).stats, undefined);
+});
+
 test('legacy migration occurs in memory and leaves the legacy transcript bytes intact', async t => {
   const f = fixture(t, { version: 1, newline: false, entries: [
     { type: 'message', timestamp: new Date().toISOString(), message: { role: 'user', content: 'Legacy request.' } },

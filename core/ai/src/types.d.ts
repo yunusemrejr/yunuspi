@@ -69,8 +69,9 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
     /**
      * Optional callback for inspecting or replacing provider payloads before sending.
      * Return undefined to keep the payload unchanged.
+     * The coding-agent runtime supplies the request-scoped signal when available.
      */
-    onPayload?: (payload: unknown, model: TModel) => unknown | undefined | Promise<unknown | undefined>;
+    onPayload?: (payload: unknown, model: TModel, signal?: AbortSignal) => unknown | undefined | Promise<unknown | undefined>;
     /**
      * Optional callback invoked after an HTTP response is received.
      */

@@ -203,8 +203,19 @@ function harness({failSend=false}={}){
  goalExtension(pi);
  const emit=async(name,event={})=>{let out;for(const fn of handlers[name]??[]){const result=await fn(event,ctx);if(result!==undefined)out=result;}return out;};
  const call=(params)=>tools.goal.execute('id',params,undefined,undefined,ctx).then(r=>r.content[0].text);
- return {commands,entries,sent,sentOptions,notes,emit,call,ctx,emitted,bus:pi.events};
+ return {commands,entries,sent,sentOptions,notes,emit,call,ctx,emitted,bus:pi.events,tools};
 }
+
+test('goal calls are barriers and an interrupt after a tool-use response pauses the goal', async()=>{
+ const h=harness();
+ await h.commands.goal.handler('Verify the exporter',h.ctx);
+ assert.equal(h.tools.goal.executionMode,'sequential','completion waits for earlier tools in the batch');
+ await h.emit('message_end',{message:{role:'assistant',stopReason:'toolUse'}});
+ await h.emit('agent_end',{messages:[],aborted:true});
+ await h.emit('agent_settled');
+ assert.equal(h.entries.at(-1).data.status,'paused');
+ assert.equal(h.sent.length,1,'the stopped run must not queue a goal continuation');
+});
 
 test('a queued kickoff is screened: copies already waiting and kickoffs for a stopped goal are dropped',async()=>{
  const h=harness();

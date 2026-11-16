@@ -54,6 +54,36 @@ test('a session switch teardown flushes after the shutdown handlers too', async 
   assert.equal(events.at(-1), 'dispose');
 });
 
+test('branch context preserves compaction, settings, and excludes abandoned siblings', () => {
+  const manager = SessionManager.inMemory();
+  const root = manager.appendMessage({ role: 'user', content: 'old', timestamp: 1 });
+  manager.appendThinkingLevelChange('high');
+  manager.appendMessage(assistant());
+  const kept = manager.appendMessage({ role: 'user', content: 'kept', timestamp: 2 });
+  manager.appendCompaction('summarized', kept, 100);
+  manager.appendModelChange('next', 'fixture-2');
+  manager.appendMessage({ role: 'user', content: 'latest', timestamp: 3 });
+  const leaf = manager.getLeafId();
+  manager.branch(root);
+  manager.appendMessage({ role: 'user', content: 'abandoned', timestamp: 4 });
+  manager.branch(leaf);
+
+  const context = manager.buildSessionContext();
+  assert.deepEqual(context.messages.map(message => message.role), ['compactionSummary', 'user', 'user']);
+  assert.deepEqual(context.messages.slice(1).map(message => message.content), ['kept', 'latest']);
+  assert.equal(context.thinkingLevel, 'high');
+  assert.deepEqual(context.model, { provider: 'next', modelId: 'fixture-2' });
+});
+
+test('corrupt parent links fail promptly instead of hanging session reopen', () => {
+  const manager = SessionManager.inMemory(process.cwd(), undefined, [
+    { type: 'custom', id: 'a', parentId: 'b' },
+    { type: 'custom', id: 'b', parentId: 'a' },
+  ]);
+  assert.throws(() => manager.getBranch(), /cyclic parent links/);
+  assert.throws(() => manager.buildSessionContext(), /cyclic parent links/);
+});
+
 function lockArtifact(file, { owner = undefined } = {}) {
   const lock = `${file}.write-lock`;
   fs.mkdirSync(lock, { mode: 0o700 });

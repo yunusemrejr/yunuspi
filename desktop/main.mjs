@@ -57,6 +57,19 @@ const text = (value, max = 100_000) => {
   return value;
 };
 const idle = worker => { if (worker.busy) throw Error('Stop the current turn before changing this session.'); };
+const accountingEntries = new Set(['auxiliary-model-usage-v1', 'subagent-cost-v1', 'subagent-lifecycle-v1', 'jev-usage-v1', 'span-usage-v1']);
+function refreshWorkerStats(id, worker) {
+  worker.statsDirty = true;
+  if (worker.statsPending || workers.get(id) !== worker || worker.stopping) return;
+  worker.statsDirty = false;
+  worker.statsPending = true;
+  void worker.request('get_session_stats', {}, 10_000).then(data => {
+    if (workers.get(id) === worker) send({ type: 'stats', sessionId: id, data });
+  }).catch(() => {}).finally(() => {
+    worker.statsPending = false;
+    if (worker.statsDirty) refreshWorkerStats(id, worker);
+  });
+}
 const coreModule = name => import(pathToFileURL(path.join(root, 'core/coding-agent/dist/core', name)).href);
 // Team settings in Settings: which model takes each kind of delegated work. The
 // harness's own settings owner writes the global file, so every other key — of
@@ -204,12 +217,11 @@ async function workerFor(id) {
     }
     send({ type: 'agent', sessionId: id, event, sequence });
     if (event.type === 'agent_start' || event.type === 'agent_end') publish();
-    // Refresh after every completed model response, not only at the end of a long run, so the
-    // footer shows tokens and cost while the agent is still working. One request in flight.
-    if ((event.type === 'turn_end' || event.type === 'agent_end') && (!worker.statsPending || event.type === 'agent_end')) {
-      worker.statsPending = true;
-      void worker.request('get_session_stats', {}, 10_000).then(data => send({ type: 'stats', sessionId: id, data })).catch(() => {}).finally(() => { worker.statsPending = false; });
-    }
+    // Detached work and helpers can settle after the final turn, while the
+    // session is idle. Coalesce bursts and guarantee a follow-up for changes
+    // made while an earlier request was in flight.
+    if (event.type === 'turn_end' || event.type === 'agent_end' ||
+      event.type === 'entry_appended' && accountingEntries.has(event.entry?.customType)) refreshWorkerStats(id, worker);
   });
   worker.on('stopped', result => {
     if (workers.get(id) !== worker) return;
@@ -370,9 +382,8 @@ async function dispatch(action, input = {}) {
       await worker.request('set_thinking_level', { level: input.level });
       store.update(input.id, { thinkingLevel: input.level }); publish(); return input.level;
     }
-    // Browsing a closed session must not start its runtime; the renderer asks
-    // again once one is ready. Only a live runtime knows the subscription state
-    // that the cost label depends on.
+    // Passive open carries saved totals. Refreshing live totals must not
+    // start a worker just to answer /cost.
     case 'stats': return workers.has(input.id) ? (await workerFor(input.id)).request('get_session_stats') : null;
     case 'commands': return (await workerFor(input.id)).request('get_commands');
     case 'checkCommand': return checkCommand(input.id, text(input.message));

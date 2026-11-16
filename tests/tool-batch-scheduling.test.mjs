@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Type } from 'typebox';
 import { runAgentLoop } from '../core/agent/src/agent-loop.js';
+import { Agent } from '../core/agent/src/agent.js';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function deferred() { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; }
@@ -65,9 +66,64 @@ test('global sequential mode remains serial and abort prevents later barrier pre
   const gate = deferred(), started = [], preflight = [], controller = new AbortController();
   const abort = runBatch(['a', 'b', 'exclusive', 'c'], ['a', 'b', 'exclusive', 'c'].map(name => tool(name, async () => {
     started.push(name); await gate.promise; return result();
-  }, name === 'exclusive')), { beforeToolCall: ({ toolCall }) => { preflight.push(toolCall.name); }, shouldStopAfterTurn: () => true }, controller.signal);
+  }, name === 'exclusive')), { beforeToolCall: ({ toolCall }) => { preflight.push(toolCall.name); } }, controller.signal);
   await until(() => started.length === 2, 'parallel group started'); controller.abort(); gate.resolve(); await abort.done;
   assert.deepEqual(started, ['a', 'b']); assert.deepEqual(preflight, ['a', 'b']);
+  assert.equal(abort.requests(), 1, 'Stop must not start another model request');
+  assert.equal(abort.events.at(-1).aborted, true);
+  const receipts = abort.events.filter(event => event.type === 'message_end' && event.message.role === 'toolResult').map(event => event.message);
+  assert.deepEqual(receipts.map(message => [message.toolName, message.isError]), [['a', false], ['b', false], ['exclusive', true], ['c', true]]);
+});
+
+test('Stop during turn refresh skips the next provider request', async () => {
+  const controller = new AbortController();
+  const began = deferred(), refresh = deferred();
+  const run = runBatch(['read'], [tool('read', () => result())], {
+    async prepareNextTurn() { began.resolve(); await refresh.promise; },
+  }, controller.signal);
+  await began.promise;
+  controller.abort();
+  refresh.resolve();
+  await run.done;
+  assert.equal(run.requests(), 1);
+  assert.equal(run.events.filter(event => event.type === 'turn_start').length, 1);
+});
+
+test('native steering and follow-up queues retain accepted messages when Stop interrupts turn refresh', async () => {
+  for (const queue of ['steer', 'followUp']) {
+    const began = deferred(), refresh = deferred(), responding = deferred();
+    const model = { id: 'fixture', name: 'Fixture', provider: 'fixture', api: 'openai-completions', contextWindow: 32000, maxTokens: 1000 };
+    const user = text => ({ role: 'user', content: text, timestamp: Date.now() });
+    let requests = 0;
+    const agent = new Agent({
+      initialState: { model },
+      async prepareNextTurn() { began.resolve(); await refresh.promise; },
+      streamFn() {
+        const first = ++requests === 1;
+        const message = { role: 'assistant', provider: model.provider, api: model.api, model: model.id,
+          content: [{ type: 'text', text: 'done' }], stopReason: 'stop', timestamp: Date.now(),
+          usage: { input: 1, output: 1, totalTokens: 2, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } };
+        return { async *[Symbol.asyncIterator]() { if (first) await responding.promise; yield { type: 'done', message }; }, result: async () => message };
+      },
+    });
+    const running = agent.prompt(user('initial'));
+    await until(() => requests === 1, 'first request started');
+    agent[queue](user('queued before refresh'));
+    responding.resolve();
+    await began.promise;
+    agent[queue](user('queued during refresh'));
+    agent.abort();
+    refresh.resolve();
+    await running;
+
+    assert.equal(requests, 1);
+    assert.equal(agent.hasQueuedMessages(), true, queue);
+    assert.deepEqual(agent.state.messages.filter(message => message.role === 'user').map(message => message.content), ['initial']);
+    await agent.continue();
+    assert.deepEqual(agent.state.messages.filter(message => message.role === 'user').map(message => message.content),
+      ['initial', 'queued before refresh', 'queued during refresh']);
+    assert.equal(agent.hasQueuedMessages(), false, queue);
+  }
 });
 
 test('steering defers unstarted calls and preserves results for each tool call', async () => {

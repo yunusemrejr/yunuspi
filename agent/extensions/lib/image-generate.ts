@@ -277,7 +277,12 @@ export function imageUsage(raw: any) {
   if (count(written)) usage.cacheWrite = written;
   if (count(raw.total_tokens)) usage.totalTokens = raw.total_tokens;
   if (count(raw.completion_tokens_details?.reasoning_tokens)) usage.reasoning = raw.completion_tokens_details.reasoning_tokens;
-  if (typeof raw.cost === "number" && Number.isFinite(raw.cost) && raw.cost >= 0) usage.cost = { total: raw.cost, source: "provider-reported", complete: true };
+  if (typeof raw.cost === "number" && Number.isFinite(raw.cost) && raw.cost >= 0) {
+    const upstream = raw.cost_details?.upstream_inference_cost;
+    usage.cost = { total: raw.cost, source: "provider-reported", complete: true,
+      ...(raw.is_byok === true ? { byok: true } : {}),
+      ...(typeof upstream === "number" && Number.isFinite(upstream) && upstream >= 0 ? { upstreamInferenceCost: upstream } : {}) };
+  }
   else if (raw.cost && typeof raw.cost === "object") usage.cost = raw.cost;
   return usage;
 }
