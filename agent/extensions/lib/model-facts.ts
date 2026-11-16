@@ -1,4 +1,4 @@
-import { deepSeekPublishedPeakRate } from "@yunuspi/ai/utils/deepseek-pricing";
+import { deepSeekPublishedPeakRate } from "@yunuspi/ai";
 
 /** Versioned snapshots of facts the catalog endpoints cannot express, with the
  * dates they were checked. Past its window a snapshot is stale, not gone: its

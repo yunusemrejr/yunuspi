@@ -1,3 +1,7 @@
+## 0.56.7 — Restore live model discovery during extension load
+
+- The model discovery extension resolves the shared DeepSeek pricing helper through the installed API entry point.
+
 ## 0.56.6 — Durable summary billing and consistent provider attribution
 
 - Native summary attempts persist pending and terminal receipts as they run. History, forks, child processes, and desktop totals reconcile those receipts with the corresponding summary without counting the same work twice.
