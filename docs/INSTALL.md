@@ -18,14 +18,13 @@ Install Node.js 22.19 or later and its matching npm from a trusted Node distribu
 ```sh
 git clone https://github.com/yunusemrejr/yunuspi.git
 cd yunuspi
-git checkout "$(git describe --tags --abbrev=0)"   # optional: the latest published release; omit to review the current main
 node scripts/install.mjs
 node scripts/install.mjs --apply --install-deps
 export PATH="$HOME/.pi/agent/bin:$PATH"
 yunuspi --version
 ```
 
-A published release and `main` can report the same version while differing in fixes: `main` may be ahead of the latest tag. Check out the release tag for a stable installation, or stay on a reviewed `main` commit deliberately. Either way, the installation records the exact source commit in `installation.json` (`sourceCommit`); compare it with `git rev-parse HEAD` in the checkout rather than trusting the version string.
+The version string does not change with every fix. The installation records the exact source commit in `installation.json` (`sourceCommit`); compare it with `git rev-parse HEAD` in the checkout rather than trusting the version string.
 
 The first invocation is a read-only preview. The second copies public `agent/` files and the repository-owned `core/` packages into `~/.pi/agent`, installs the exact root workspace lockfile with npm lifecycle scripts disabled, and runs `build:core`. The core is built from local source; no upstream Pi package or version endpoint is consulted. Third-party dependencies still download from npm. The installer explicitly sets up the lockfile-pinned Electron distribution and registers the Linux application launcher entry for the normal installation target. Review their lockfile changes before installing a release.
 

@@ -2,47 +2,22 @@ name: Public safety and distribution checks
 on:
   push:
     branches: [main]
-    tags: ['v*']
   pull_request:
   workflow_dispatch:
   schedule:
     - cron: '17 2 * * 0'
 permissions:
   contents: read
-# PR updates supersede their older checks. Recurring/manual runs have separate
-# groups, and cannot cancel an exact main commit needed for a release.
+# A newer push or PR update supersedes the checks of the one before it.
 concurrency:
   group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: true
 jobs:
-  # A few seconds: decide whether this change needs the complete suite, so the
-  # shards below start at once instead of waiting for the short checks.
-  plan:
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 3
-    outputs:
-      full: ${{ steps.plan.outputs.full }}
-    env:
-      CI_BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '24'
-      - id: plan
-        run: node scripts/test.mjs --quick --base "$CI_BASE_SHA" --plan
-
-  # The complete suite runs as parallel shards balanced by file size. Native
-  # integrations (sandbox, browser, media) run for shared/release changes,
-  # weekly, or on demand.
+  # The complete suite as parallel shards balanced by file size, with the native
+  # integrations (sandbox, browser, media). Weekly or on demand, never on a push:
+  # publishing is a push to main and nothing waits for this.
   shard:
-    needs: [plan]
-    if: ${{ needs.plan.outputs.full == 'true' }}
+    if: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
     name: shard ${{ matrix.index }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -98,21 +73,10 @@ jobs:
           PI_RENDER_BROWSER_CHANNEL: chromium
         run: node scripts/test.mjs --shard ${{ matrix.index }}/6
 
-  # One stable job name for release verification: it passes only when every
-  # shard of the complete suite passed for this exact commit.
-  safety:
-    needs: [plan, shard]
-    if: ${{ needs.plan.outputs.full == 'true' }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 2
-    steps:
-      - run: echo "All test shards passed for ${{ github.sha }}"
-
-  # Cheap structural checks on the minimum supported Node. On ordinary updates it
-  # also runs the short catalogue plus new/changed tests; the shards cover
-  # everything when `plan` says the change needs the complete suite.
+  # Cheap structural checks on the minimum supported Node. A push or PR also runs
+  # the short catalogue plus new/changed tests; the shards cover everything on the
+  # weekly and manual runs.
   minimum-node:
-    needs: [plan]
     runs-on: ubuntu-latest
     timeout-minutes: 8
     env:
@@ -137,28 +101,5 @@ jobs:
       - run: node agent/scripts/generate-capabilities-doc.mjs --root "$PWD" --check
       - run: node scripts/check-syntax.mjs --changed "$CI_BASE_SHA"
       - name: Run short checks and changed tests on the minimum supported Node
-        if: ${{ needs.plan.outputs.full != 'true' }}
+        if: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
         run: node scripts/test.mjs --quick --base "$CI_BASE_SHA"
-
-  release:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: write
-      actions: read
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          ref: ${{ github.sha }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: '24'
-      - run: node scripts/check-public.mjs
-      - run: node scripts/version-release.mjs "$(node -p "require('./package.json').version")"
-      - name: Verify the exact main commit passed and publish its version tag
-        run: node scripts/publish-github-release.mjs
-        env:
-          GITHUB_TOKEN: ${{ github.token }}

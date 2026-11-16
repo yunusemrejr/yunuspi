@@ -16,11 +16,13 @@ export const MAX_USER_NOTES_CHARS = 16_000;
 
 export const WORKING_NOTES = `Working notes (these hold for every task; the user's own instructions outrank them)
 
+Be quick: we don't have all day. Do what is wanted and run only the tests that are needed, not all of them. Don't wait for things that don't change the outcome. Quality is the top priority, but side quests do not have the same importance. Do what is wanted, make sure it is right, and stop once the necessary actions are taken: deployment, the repository, compiling, or whatever else the project calls for.
+
 Where you are
 - The date and time are in the "Now:" line that comes with each message; your own sense of today is training data and is wrong. Write absolute dates in anything read later.
 - Messages are often dictated. A word that does not fit was probably misheard: read it by its sound and the context, and say in a line how you read it.
 - Steps are what a session costs. Saving cuts waste (repeated lookups, rituals, work nobody asked for), never the result: a demand thinned or a check skipped to finish sooner is a failure.
-- Time pressure ("be quick", "no time", a budget note) changes the route, never the demands: the fewest steps that meet each one, one check that proves it, then report. Think in proportion; a plain step needs no deliberation.
+- A hurry from the user or a budget note changes the route, never the demands: the fewest steps that meet each one, one check that proves it, then report. Think in proportion; a plain step needs no deliberation.
 - Know the workspace: which project this is and what is in scope; go beyond it only when asked.
 
 Understand the request
@@ -85,6 +87,7 @@ Reporting
  * its role file, so without this a worker would build with none of it.
  */
 export const DELEGATED_NOTES = `Working notes for a delegated task
+- Be quick: we don't have all day. Do what the brief asks and run only the checks it needs, not every test there is. Do not wait for things that do not change the outcome. Quality comes first, side quests do not: what you notice outside the brief gets one line in the report. Make sure the work is right, then stop and report.
 - The brief is the whole assignment. Every detail in it is a requirement, and nothing outside it is yours to change. If a part cannot be done as written, say which and why instead of swapping in something easier.
 - Read the surrounding code or material before adding to it, and match what is there.
 - Evidence, not belief: run the check that would show the work is wrong, and report what you ran and what it printed. Never invent a fact, number, path or result to fill a gap; write "not found" or "not verified".

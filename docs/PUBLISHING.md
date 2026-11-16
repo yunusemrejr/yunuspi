@@ -12,17 +12,13 @@ The YunusPi core has its own version lineage, starting at `0.1.0`, recorded in t
 
 Public export must preserve the reviewed `core/` source, root workspace metadata and build script from the YunusPi repository. These cannot be reconstructed from a private installation's upstream packages. Never publish an agent-only export as a complete release.
 
-Normal publication to `main` does not create a formal release. When a release is intentionally cut, update the root package version and lockfile in the same reviewed change, place an immutable `vMAJOR.MINOR.PATCH` tag on the exact tested commit, and create the matching GitHub Release with release notes. Never move an existing release tag to different source bytes. Commits after a release remain development revisions until another release is deliberately cut.
+Publication is a push to `main`. There are no release tags and no GitHub Releases to cut, and nothing waits on CI; the tags and releases up to v0.56.1 remain as history. Raise the root package version, with the lockfile, in the same commit as a change that is worth a new number.
 
 Use Semantic Versioning according to intended public behavior, not commit count or calendar age: patch for compatible fixes, documentation/test corrections and internal reliability work with no intentional public-contract change; minor for new user-visible capabilities or meaningful behavior/compatibility changes while the project remains pre-1.0; major only when an explicitly stabilized public contract later receives an incompatible change. Feature branches, PR numbers, CI run numbers, private installation state and generated capability counts are not versions. Mutable counts should remain code-owned rather than copied into prose.
 
-## Version consistency and tagged releases
+## Version consistency
 
 Run `node scripts/version-release.mjs X.Y.Z --write` to update the product, six owned packages, owned workspace dependency versions, lockfile and template metadata together. Without `--write`, the command checks consistency and fails on drift. It never changes the historical upstream attribution or third-party dependency versions.
-
-The public safety workflow tests both ordinary pushes and version tags. On a `vX.Y.Z` tag, its separate release job receives contents-write permission only after the aggregate `safety` job (all test shards) succeeds. It checks the tag against the package version and publishes the corresponding changelog section for that exact commit. Existing release notes must match on rerun; the job does not move tags or rewrite releases. Push the tested commit to `main`, wait for CI, then push its annotated tag.
-
-To cut a release, push `main` first, then run `node scripts/release-tag.mjs`. It waits for the main safety run of that exact commit and only then creates and pushes the annotated tag from `package.json`. It looks the run up once a minute (every 20 seconds when `GITHUB_TOKEN` or `GH_TOKEN` is set) and waits out a used-up GitHub rate limit, which is 60 lookups an hour without a token and shared by everything on the machine. A tag pushed while main is still running (or after it failed) makes the release job fail with "no successful main safety run"; recreate the tag once main has passed (delete the remote tag and push it again on the same commit).
 
 ## Export changes
 
@@ -79,4 +75,3 @@ selection. The private runner and historical benches are not exported. Follow
 component imports when choosing integration coverage: name matching alone
 cannot establish affected behavior.
 
-The Electron release also requires the exact main commit’s successful `desktop.yml` workflow and its `desktop` job. Both the tag helper and release publisher verify this alongside the complete `public-safety.yml` run and `safety` job; a failed, skipped, unfinished, foreign or different-commit check cannot authorize publication.

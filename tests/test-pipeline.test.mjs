@@ -21,13 +21,9 @@ test('routine checks are bounded, prerequisite-free, and include every changed o
   assert.equal(plan({ changed: ['tests/deleted.test.mjs'] }).selected.includes('tests/deleted.test.mjs'), false);
 });
 
-test('release, shared safety, dependency, test infrastructure and unknown-base changes require every test', () => {
-  for (const changed of ['core/agent/src/index.js', 'package.json', 'package-lock.json', '.github/workflows/public-safety.yml', 'scripts/test.mjs', 'config/bwrap.apparmor', 'tests/bytes.mjs', 'agent/extensions/manifest.json', 'agent/scripts/pi-launch.sh', 'tests/source-syntax.test.mjs']) {
-    assert.deepEqual(plan({ changed: [changed] }), { full: true, selected: files }, changed);
-  }
-  for (const event of ['schedule', 'workflow_dispatch']) assert.equal(plan({ event }).full, true);
-  assert.equal(plan({ knownBase: false }).full, true);
-  assert.equal(plan({ quick: false }).full, true);
+test('only a run without --quick selects every test, whatever changed', () => {
+  for (const changed of ['core/agent/src/index.js', 'package.json', '.github/workflows/public-safety.yml', 'scripts/test.mjs']) assert.equal(plan({ changed: [changed] }).full, false, changed);
+  assert.deepEqual(plan({ quick: false }), { full: true, selected: files });
   assert.throws(() => plan({ files: [] }), /Missing registered test/);
 });
 
@@ -42,11 +38,11 @@ test('test concurrency cannot silently turn a typo into unbounded process spawni
   for (const value of ['0', '99', '-1', '2oops', '']) assert.throws(() => testConcurrency(value), /CONCURRENCY/);
 });
 
-test('the test CLI rejects unknown tests and falls back to full checks for unavailable Git history', () => {
+test('the test CLI rejects unknown tests and keeps to the short catalogue for unavailable Git history', () => {
   const run = args => spawnSync(process.execPath, [path.join(root, 'scripts/test.mjs'), ...args], { cwd: root, encoding: 'utf8', timeout: 10000 });
-  const selected = run(['--quick', '--base', '0'.repeat(40), '--plan']);
+  const selected = run(['--quick', '--base', '0'.repeat(40), '--list']);
   assert.equal(selected.status, 0, selected.stderr);
-  assert.equal(JSON.parse(selected.stdout).selected.length, files.length);
+  assert.deepEqual(selected.stdout.trim().split('\n'), [...QUICK_TESTS].sort());
   assert.equal(run(['tests/absent.test.mjs', '--list']).status, 1);
   assert.equal(run(['--test-concurrency=999', '--list']).status, 1);
 });
@@ -90,19 +86,18 @@ test('shards partition the selected tests exactly once and stay balanced by size
   for (const bad of [[0, 4], [5, 4], [1, 0], [1, 33], [1.5, 4]]) assert.throws(() => shardFiles(files, ...bad, sizeOf), /--shard/);
 });
 
-test('CI plans first, runs the complete suite as parallel shards and keeps one stable safety job for releases', () => {
+test('a push runs only the quick checks; the complete suite runs as shards weekly or on demand', () => {
   const workflow = parse(fs.readFileSync(path.join(root, '.github/workflows/public-safety.yml'), 'utf8'));
   assert.ok(workflow.on.schedule.length);
   assert.ok('workflow_dispatch' in workflow.on);
-  assert.match(workflow.jobs.plan.steps.map(step => step.run ?? '').join('\n'), /scripts\/test\.mjs --quick --base .* --plan/);
-  assert.deepEqual(workflow.jobs.shard.needs, ['plan']);
-  assert.match(workflow.jobs.shard.if, /outputs.full == 'true'/);
+  assert.equal(workflow.on.push.tags, undefined, 'no tag starts a workflow');
+  assert.deepEqual(Object.keys(workflow.jobs).sort(), ['minimum-node', 'shard']);
+  assert.equal(workflow.jobs.shard.needs, undefined);
+  assert.match(workflow.jobs.shard.if, /'schedule'.*'workflow_dispatch'/);
+  assert.doesNotMatch(workflow.jobs.shard.if, /push|pull_request/);
   const count = workflow.jobs.shard.strategy.matrix.index.length;
   assert.ok(count >= 4 && workflow.jobs.shard.strategy['fail-fast'] === false);
   assert.match(workflow.jobs.shard.steps.map(step => step.run ?? '').join('\n'), new RegExp(`scripts/test\\.mjs --shard \\$\\{\\{ matrix.index \\}\\}/${count}`));
-  // Release verification looks for a completed job named exactly "safety".
-  assert.ok(workflow.jobs.safety.needs.includes('shard'));
-  assert.match(workflow.jobs.safety.if, /outputs.full == 'true'/);
   const quick = workflow.jobs['minimum-node'].steps.map(step => step.run ?? '').join('\n');
   assert.match(quick, /scripts\/test\.mjs --quick --base/);
   assert.match(quick, /generate-capabilities-doc\.mjs.*--check/);

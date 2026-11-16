@@ -25,7 +25,7 @@ test('the built-in notes cover every area a session needs judgment in', () => {
     assert.match(WORKING_NOTES, new RegExp(`^${heading}`, 'm'), heading);
   }
   // The notes ride in every request, so their size is a budget, not an accident.
-  assert.ok(WORKING_NOTES.length < 10_600, `notes are ${WORKING_NOTES.length} chars`);
+  assert.ok(WORKING_NOTES.length < 10_900, `notes are ${WORKING_NOTES.length} chars`);
 });
 
 test('a session with no personal notes gets the built-in ones', t => {

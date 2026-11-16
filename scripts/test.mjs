@@ -14,14 +14,12 @@ export const QUICK_TESTS = [
   'stream-lifecycle', 'rpc-client-lifecycle', 'guarded-process',
   'needle-embedding-cache', 'memory-guard', 'creative-evidence', 'creative-qa',
   'ui-doctrine', 'goal-state', 'completion-gate', 'motion-routing-sdk',
-  'source-integrity', 'release-tag', 'release-version', 'test-pipeline',
+  'source-integrity', 'release-version', 'test-pipeline',
 ].map(name => `tests/${name}.test.mjs`);
 
-// A shared build/dependency/safety change needs the complete distribution gate.
-const FULL_CHANGE = /^(?:core\/|config\/|\.github\/|\.githooks\/|scripts\/|package(?:-lock)?\.json$|agent\/npm\/|agent\/extensions\/manifest\.json$|agent\/scripts\/|tests\/(?![^/]+\.test\.mjs$)|tests\/[^/]*(?:browser|render|media|video|blender|sandbox|isolation|desktop|source-syntax|install|update|public-safety)[^/]*\.test\.mjs$)/;
-export function testPlan({ files, changed = [], event, knownBase = true, quick = false }) {
-  const full = !quick || !knownBase || ['schedule', 'workflow_dispatch'].includes(event)
-    || changed.some(file => FULL_CHANGE.test(file));
+// --quick is the short catalogue plus the changed tests; without it every test runs.
+export function testPlan({ files, changed = [], quick = false }) {
+  const full = !quick;
   const selected = full ? files : [...new Set([...QUICK_TESTS, ...changed.filter(file => files.includes(file))])].sort();
   for (const file of selected) if (!files.includes(file)) throw Error(`Missing registered test: ${file}`);
   if (!selected.length) throw Error('No tests selected');
@@ -61,13 +59,12 @@ export function orderForRun(selected, sizeOf = file => fs.statSync(path.join(roo
 }
 
 function main(args) {
-  let quick = false, list = false, planOnly = false, base, shard;
+  let quick = false, list = false, base, shard;
   const explicit = [], native = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--quick') quick = true;
     else if (arg === '--list') list = true;
-    else if (arg === '--plan') planOnly = true;
     else if (arg === '--base') base = args[++i] ?? '';
     else if (arg === '--shard') shard = /^(\d+)\/(\d+)$/.exec(args[++i] ?? '')?.slice(1).map(Number) ?? [0, 0];
     else if (/^tests\/[^/]+\.test\.mjs$/.test(arg)) explicit.push(arg);
@@ -79,26 +76,18 @@ function main(args) {
     else throw Error(`Unknown test argument: ${arg}`);
   }
   const files = fs.readdirSync(path.join(root, 'tests')).filter(name => name.endsWith('.test.mjs')).map(name => `tests/${name}`).sort();
-  let changed = [], knownBase = true;
-  if (base !== undefined) {
-    knownBase = /^[a-f0-9]{40}$/.test(base) && !/^0+$/.test(base);
-    if (knownBase) {
-      try { changed = execFileSync('git', ['diff', '--name-only', '-z', base, 'HEAD', '--'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean); }
-      catch { knownBase = false; } // Unknown history runs everything, never an empty check.
-    }
+  let changed = [];
+  if (base !== undefined && /^[a-f0-9]{40}$/.test(base) && !/^0+$/.test(base)) {
+    try { changed = execFileSync('git', ['diff', '--name-only', '-z', base, 'HEAD', '--'], { cwd: root, encoding: 'utf8' }).split('\0').filter(Boolean); }
+    catch { /* Unknown history: the short catalogue alone. */ }
   }
-  const plan = testPlan({ files, changed, event: base !== undefined || planOnly ? process.env.GITHUB_EVENT_NAME : undefined, knownBase, quick });
+  const plan = testPlan({ files, changed, quick });
   if (explicit.length) {
     for (const file of explicit) if (!files.includes(file)) throw Error(`Unknown test: ${file}`);
     plan.selected = [...new Set(quick ? [...plan.selected, ...explicit] : explicit)].sort();
     if (!quick) plan.full = false;
   }
   if (shard) plan.selected = shardFiles(plan.selected, ...shard);
-  if (planOnly) {
-    console.log(JSON.stringify({ ...plan, count: plan.selected.length }));
-    if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `full=${plan.full}\n`);
-    return;
-  }
   if (list) { console.log(plan.selected.join('\n')); return; }
   const concurrency = testConcurrency(process.env.PI_PUBLIC_TEST_CONCURRENCY);
   const tempRoot = createDistributionTempRoot();

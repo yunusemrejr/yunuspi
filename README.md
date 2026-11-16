@@ -115,7 +115,7 @@ Follow the [installation guide](docs/INSTALL.md) for prerequisites, the installe
 
 This is a standalone source distribution with six owned runtime packages under `core/` and maintained extensions. Upstream Pi releases have no automatic effect. Stop active YunusPi sessions before installation or updates. Existing installations require an explicit backup step. Use the documented update path so compatibility checks run before a new core is activated. [Core updates and recovery](docs/CORE-UPDATES.md)
 
-For development snapshots, the exact source identity is the Git commit SHA; package metadata identifies the compatibility/release line rather than every commit. Formal tags, GitHub Releases and package metadata move together only when a release is intentionally cut. [Release and versioning policy](docs/PUBLISHING.md#release-identity)
+The exact source identity is the Git commit SHA; the package version names the compatibility line rather than every commit. `main` is what is published: there are no release tags to wait for. [Versioning policy](docs/PUBLISHING.md#release-identity)
 
 The public repository contains reusable code and clean configuration examples. Accounts, sessions, memories, private settings and local model environments stay on your machine. Private harness backups can contain credentials; never publish them or conversation exports. [Public release procedure](docs/PUBLISHING.md)
 
@@ -123,7 +123,7 @@ The public repository contains reusable code and clean configuration examples. A
 
 Use `npm run test:quick` for routine development checks; add specific test paths after `--` to cover the behavior being edited. `npm test` runs every public regression test. Both build the owned core first, cap default concurrency at four, and use disposable temp roots to avoid slow sandbox setup in a busy system temp directory.
 
-CI plans first, runs quick checks on the minimum supported Node version (the short catalogue plus changed tests on ordinary updates), and runs the complete suite as six parallel `shard` jobs when build, dependency, safety, test infrastructure or native integration files change, weekly and through **Run workflow**. An aggregate `safety` job passes only when every shard does; release tags accept only that job's success on their exact main commit, so a quick pass cannot authorize a release. [Testing details](docs/TESTING.md)
+A push to `main` runs the quick checks on the minimum supported Node version: the public-safety scan, version consistency, changed-source parsing and the short test catalogue plus changed tests. The complete suite runs as six parallel `shard` jobs weekly and through **Run workflow**, never on a push. [Testing details](docs/TESTING.md)
 
 Installed structural checks and live provider availability are separate checks; passing local tests does not establish every provider's behavior or model output quality.
 
