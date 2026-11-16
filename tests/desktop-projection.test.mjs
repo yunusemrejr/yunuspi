@@ -1,7 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { desktopHistory, desktopMessage, desktopEvent, desktopBranchMessages } from '../core/coding-agent/src/modes/rpc/desktop-projection.js';
-import { createConversation, prependConversation } from '../desktop/renderer/conversation.mjs';
+import { runAgentLoop } from '../core/agent/src/agent-loop.js';
+import { streamSimple as openAICompletions } from '../core/ai/src/api/openai-completions.js';
+import { toJsonEvent } from '../core/coding-agent/src/modes/json-event.js';
+import { desktopHistory, desktopMessage, desktopEvent, desktopBranchMessages, desktopSessionHistory } from '../core/coding-agent/src/modes/rpc/desktop-projection.js';
+import { applyAgentEvent, createConversation, messageText, prependConversation } from '../desktop/renderer/conversation.mjs';
 import { SessionManager } from '../core/coding-agent/src/core/session-manager.js';
 
 test('desktop history pages newest records without gaps or duplicates', () => {
@@ -12,6 +15,66 @@ test('desktop history pages newest records without gaps or duplicates', () => {
   assert.deepEqual(collected, messages);
   assert.throws(() => desktopHistory(messages, { limit: 0 }), /limit/);
   assert.throws(() => desktopHistory(messages, { before: -1 }), /before/);
+});
+
+test('live desktop history walks an unchanged branch once and projects each bounded page', () => {
+  const manager = SessionManager.inMemory('/tmp');
+  manager.appendCustomEntry('goal-state-v1', { id: 'fixture', status: 'active', criteria: [{ status: 'open' }] });
+  for (let index = 0; index < 301; index++) manager.appendMessage({ role: 'user', content: `request ${index}`, timestamp: index });
+  manager.appendCustomMessageEntry('harness-activity', 'Fixture activity', true, { label: 'Fixture', status: 'done' });
+  const expected = desktopBranchMessages(manager.getBranch());
+  let walks = 0;
+  const getBranch = manager.getBranch.bind(manager);
+  manager.getBranch = () => { walks++; return getBranch(); };
+
+  const initial = desktopSessionHistory(manager);
+  assert.deepEqual(initial.goal, { id: 'fixture', status: 'active', settled: 0, total: 1 });
+  assert.deepEqual(initial.messages, desktopHistory(expected).messages);
+  const messages = [...initial.messages];
+  let page = initial;
+  while (page.hasMore) {
+    assert.match(page.anchor, /^[a-f0-9]{64}$/);
+    page = desktopSessionHistory(manager, { before: page.before, anchor: page.anchor });
+    messages.unshift(...page.messages);
+  }
+  assert.deepEqual(messages, expected);
+  assert.equal(walks, 1);
+});
+
+test('live history anchors survive append and shared ancestry but detect divergence and forks', () => {
+  const manager = SessionManager.inMemory('/tmp');
+  const append = content => manager.appendMessage({ role: 'user', content, timestamp: 1 });
+  append('original');
+  const shared = append('shared prefix');
+  const boundary = append('left branch');
+  const lastLeft = append('left tail');
+  const initial = desktopSessionHistory(manager, { limit: 2 });
+  const cursor = { before: initial.before, anchor: initial.anchor };
+  const readOlder = () => desktopSessionHistory(manager, cursor);
+  const visible = page => page.messages.map(message => message.content);
+
+  append('appended through the same worker');
+  assert.deepEqual(visible(readOlder()), ['original', 'shared prefix']);
+  manager.branch(boundary);
+  assert.deepEqual(visible(readOlder()), ['original', 'shared prefix']);
+
+  manager.branch(shared);
+  append('right branch');
+  append('right tail');
+  assert.deepEqual(readOlder(), { reset: true });
+  assert.deepEqual(visible(desktopSessionHistory(manager, { limit: 2 })), ['right branch', 'right tail']);
+
+  manager.branch(lastLeft);
+  assert.deepEqual(visible(readOlder()), ['original', 'shared prefix']);
+  const revision = manager.getEntriesRevision();
+  const oldLeaf = manager.getLeafEntry();
+  manager.createBranchedSession(lastLeft);
+  assert.equal(manager.getLeafEntry().id, oldLeaf.id);
+  assert.notEqual(manager.getLeafEntry(), oldLeaf);
+  assert.notEqual(manager.getEntriesRevision(), revision);
+  assert.deepEqual(readOlder(), { reset: true });
+  assert.deepEqual(visible(desktopSessionHistory(manager, { limit: 2 })), ['left branch', 'left tail']);
+  assert.throws(() => desktopSessionHistory(manager, { anchor: initial.anchor }), /anchor/);
 });
 
 test('large and escaped text histories stay below the transport record limit and remain pageable', () => {
@@ -41,6 +104,63 @@ test('desktop live events drop redundant full-history/tool-update payloads but r
   assert.equal(event.result.content[0].text, 'successful file read');
   assert.equal(event.result.details, undefined);
   assert.equal(event.toolCallId, 'call');
+});
+
+test('desktop shows the first provider delta once before EOF and preserves repeated text after a resume snapshot', { timeout: 3000 }, async () => {
+  const live = createConversation(), visibleUpdates = [];
+  let resumed, sourceStartText, body;
+  const firstDelta = Promise.withResolvers();
+  const text = 'Synthetic first text.';
+  const encoder = new TextEncoder();
+  const frame = (delta, finish_reason = null) => encoder.encode(`data: ${JSON.stringify({
+    id: 'fixture-response', object: 'chat.completion.chunk', choices: [{ index: 0, delta, finish_reason }],
+  })}\n\n`);
+  const fetch = async () => new Response(new ReadableStream({ start(controller) {
+    body = controller;
+    body.enqueue(frame({ role: 'assistant', content: text }));
+  } }), { headers: { 'content-type': 'text/event-stream' } });
+  const model = {
+    id: 'fixture', provider: 'openai', api: 'openai-completions', name: 'Fixture', baseUrl: 'https://example.invalid/v1',
+    input: ['text'], reasoning: false, contextWindow: 8192, maxTokens: 256, cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 },
+  };
+  await runAgentLoop([{ role: 'user', content: 'Synthetic prompt', timestamp: 1 }], { messages: [], tools: [] }, {
+    model, apiKey: 'synthetic-token', convertToLlm: messages => messages, retryOwner: 'session',
+  }, async event => {
+    if (event.type === 'message_start' && event.message.role === 'assistant') {
+      // A slow start subscriber (such as an extension hook) can let the adapter
+      // mutate its shared content before RPC serializes the start event.
+      await firstDelta.promise;
+      sourceStartText = messageText(event.message);
+    }
+    const projected = desktopEvent(toJsonEvent(event));
+    applyAgentEvent(live, projected);
+    if (resumed) applyAgentEvent(resumed, projected);
+    if (event.type !== 'message_update' || event.assistantMessageEvent.type !== 'text_delta') return;
+    visibleUpdates.push(messageText(live.messages.at(-1)));
+    if (resumed) {
+      assert.equal(messageText(resumed.messages.at(-1)), text + text);
+      return;
+    }
+    // Capture the same current partial that get_messages uses on reattach.
+    resumed = createConversation([desktopMessage(event.message)]);
+    resumed.streaming = resumed.messages[0].key;
+    body.enqueue(frame({ content: text }));
+    body.enqueue(frame({}, 'stop'));
+    body.close();
+  }, undefined, (selected, context, options) => {
+    const source = openAICompletions(selected, context, { ...options, fetch });
+    const push = source.push.bind(source);
+    source.push = event => {
+      push(event);
+      if (event.type === 'text_delta') firstDelta.resolve();
+    };
+    return source;
+  });
+
+  assert.equal(sourceStartText, text, 'the shared start partial already contains the first delta');
+  assert.deepEqual(visibleUpdates, [text, text + text]);
+  assert.equal(messageText(live.messages.at(-1)), text + text);
+  assert.equal(messageText(resumed.messages.at(-1)), text + text);
 });
 
 test('desktop history retains the persisted conversation through model-context compaction', () => {

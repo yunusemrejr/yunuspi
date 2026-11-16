@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -7,6 +8,7 @@ import test from 'node:test';
 import { runInNewContext } from 'node:vm';
 import { AgentWorker, jsonLines } from '../desktop/agent-worker.mjs';
 import { AgentSession } from '../core/coding-agent/src/core/agent-session.js';
+import { validateDesktopImages } from '../desktop/recovered-input.mjs';
 
 const source = readFileSync(new URL('../desktop/main.mjs', import.meta.url), 'utf8');
 const sections = [
@@ -22,7 +24,7 @@ function fixture({ holdPrompt = false } = {}) {
   const workers = new Map(), starting = new Map(), closing = new Map();
   const session = { projectId: 'project', state: 'open', title: 'Fixture', draft: 'existing' };
   const project = { id: 'project', path: '/fixture' };
-  const queued = ['earlier accepted'], commands = [], spawned = [];
+  const queued = ['earlier accepted'], recovered = [], commands = [], spawned = [];
   const reply = (child, command, data) => child.stdout.write(JSON.stringify({ id: command.id, type: 'response', success: true, data }) + '\n');
   let respondToQueueRead;
   function spawnWorker() {
@@ -35,8 +37,13 @@ function fixture({ holdPrompt = false } = {}) {
       commands.push(command);
       if (command.type === 'get_state') queueMicrotask(() => reply(child, command, { isStreaming: false }));
       else if (command.type === 'clear_queue') {
-        const steering = queued.splice(0);
-        respondToQueueRead = () => reply(child, command, { steering, followUp: [] });
+        respondToQueueRead = refusal => {
+          if (refusal) child.stdout.write(JSON.stringify({ id: command.id, type: 'response', success: false, error: refusal }) + '\n');
+          else {
+            const accepted = queued.splice(0); recovered.push(...accepted);
+            reply(child, command, { recovery: { id: command.recoveryId, count: accepted.length } });
+          }
+        };
         queueRead.resolve(command);
       } else if (command.type === 'prompt') {
         queued.push(command.message);
@@ -56,12 +63,14 @@ function fixture({ holdPrompt = false } = {}) {
       setProjectArchived: (_id, archived) => { project.archived = archived; if (archived) session.state = 'closed'; },
     },
     path, fs: { realpathSync: value => value, existsSync: () => true }, root: '/fixture', agentDir: '/fixture', process: { env: {} },
+    randomUUID, validateDesktopImages,
     projectTrustStore: () => { trustStarted.resolve(); return trust.promise; },
     AgentWorker: function () { return spawnWorker(); },
     send() {}, publish() {}, text: value => value, window: {}, dialog: { showMessageBox: async () => ({ response: 1 }) },
   };
   const api = runInNewContext(`${handlers}\n({ workerFor, sessionAction, projectAction, dispatch });`, context);
-  return { api, session, workers, closing, commands, spawned, trust, trustStarted, promptRead, queueRead, spawnWorker, releaseQueue: () => respondToQueueRead() };
+  return { api, session, workers, closing, commands, spawned, trust, trustStarted, promptRead, queueRead, spawnWorker,
+    recovered, releaseQueue: refusal => respondToQueueRead(refusal) };
 }
 
 test('closing or archiving invalidates a startup waiting for project trust, even after reopening', async () => {
@@ -99,12 +108,13 @@ test('close fences prompt admission before the queue snapshot and keeps both que
   f.releaseQueue();
   await closing;
   assert.deepEqual(f.commands.map(command => command.type), ['clear_queue']);
-  assert.equal(f.session.draft, 'earlier accepted\n\nexisting');
+  assert.deepEqual(f.recovered, ['earlier accepted']);
+  assert.equal(f.session.draft, 'existing');
   assert.equal(f.session.state, 'closed');
   assert.equal(worker.dead, true);
 });
 
-test('a matching draft acknowledged during close is restored from the queue only once', async () => {
+test('a matching draft acknowledged during close is captured only once', async () => {
   const f = fixture({ holdPrompt: true }), worker = f.spawnWorker();
   worker.busy = true;
   f.workers.set('fixture', worker);
@@ -117,7 +127,23 @@ test('a matching draft acknowledged during close is restored from the queue only
   assert.equal(f.session.draft, '');
   f.releaseQueue();
   await closing;
-  assert.equal(f.session.draft, 'earlier accepted\n\nexisting');
+  assert.deepEqual(f.recovered, ['earlier accepted', 'existing']);
+  assert.equal(f.session.draft, '');
+});
+
+test('a recovery refusal leaves the worker connected and the unsent draft alone', async () => {
+  const f = fixture(), worker = f.spawnWorker();
+  f.workers.set('fixture', worker);
+  const closing = assert.rejects(f.api.sessionAction('fixture', 'close'), /Queued messages could not be saved.*Write failed/);
+  await f.queueRead.promise;
+  f.releaseQueue('Write failed');
+  await closing;
+  assert.equal(f.workers.get('fixture'), worker);
+  assert.equal(f.closing.has('fixture'), false);
+  assert.equal(f.session.state, 'open');
+  assert.equal(f.session.draft, 'existing');
+  assert.equal(worker.dead, false);
+  await worker.stop();
 });
 
 test('close-only queue drain cancels unfinished preflight and preserves previously admitted input', async () => {

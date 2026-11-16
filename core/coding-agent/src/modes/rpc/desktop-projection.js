@@ -1,5 +1,10 @@
+import { createHash, randomUUID } from 'node:crypto';
+
 // Desktop previews never alter the authoritative messages sent to the model or
 // saved in JSONL. Keep wire records bounded, including image-heavy history.
+const liveHistory = new WeakMap();
+const MAX_CACHED_LIVE_HISTORY_ENTRIES = 50_000;
+
 /** Harness-activity lines are drawn from their small, fixed-shape details (label, status, detail), never from model content. */
 const activityDetails = (customType, details) => {
     if (customType !== 'harness-activity' || !details || typeof details !== 'object') return undefined;
@@ -7,12 +12,17 @@ const activityDetails = (customType, details) => {
     return json.length <= 1024 ? JSON.parse(json) : undefined;
 };
 const clip = (value, limit) => typeof value === 'string' && value.length > limit ? value.slice(0, limit) + '\n[Desktop preview truncated; full content is retained in session history.]' : value;
+const isDesktopHistoryEntry = entry => entry.type === 'message' || entry.type === 'custom_message' || entry.type === 'compaction';
+function desktopEntryMessage(entry) {
+    if (entry.type === 'message') return entry.message;
+    if (entry.type === 'compaction') return { role: 'custom', customType: 'desktop-compaction', content: 'Context compacted. Earlier conversation remains available.', display: true, timestamp: entry.timestamp };
+    const details = activityDetails(entry.customType, entry.details);
+    return { role: 'custom', customType: entry.customType, content: entry.content, display: entry.display, timestamp: entry.timestamp, ...(details ? { details } : {}) };
+}
 export function desktopBranchMessages(entries) {
     const messages = [];
     for (const entry of entries) {
-        if (entry.type === 'message') messages.push(entry.message);
-        else if (entry.type === 'custom_message') messages.push({ role: 'custom', customType: entry.customType, content: entry.content, display: entry.display, timestamp: entry.timestamp, ...(activityDetails(entry.customType, entry.details) ? { details: activityDetails(entry.customType, entry.details) } : {}) });
-        else if (entry.type === 'compaction') messages.push({ role: 'custom', customType: 'desktop-compaction', content: 'Context compacted. Earlier conversation remains available.', display: true, timestamp: entry.timestamp });
+        if (isDesktopHistoryEntry(entry)) messages.push(desktopEntryMessage(entry));
     }
     return messages;
 }
@@ -72,22 +82,62 @@ export function desktopArguments(args) {
     }
     return preview;
 }
-export function desktopHistory(messages, { limit = 80, before = messages.length } = {}) {
-    if (!Number.isInteger(limit) || limit < 1 || limit > 200 || !Number.isInteger(before) || before < 0) throw Error('History needs a limit of 1–200 and a nonnegative before index.');
-    const end = Math.min(before, messages.length), lower = Math.max(0, end - limit), previews = [];
+function validateHistoryPage(limit, before) {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 200 || before !== undefined && (!Number.isInteger(before) || before < 0)) throw Error('History needs a limit of 1–200 and a nonnegative before index.');
+}
+function historyPage(records, limit, before = records.length, toMessage) {
+    const end = Math.min(before, records.length), lower = Math.max(0, end - limit), previews = [];
     let bytes = 0, start = end;
     for (let index = end - 1; index >= lower; index--) {
-        const preview = desktopMessage(messages[index]), size = Buffer.byteLength(JSON.stringify(preview));
+        const preview = desktopMessage(toMessage ? toMessage(records[index]) : records[index]), size = Buffer.byteLength(JSON.stringify(preview));
         if (previews.length && bytes + size > 8 * 1024 * 1024) break;
-        previews.unshift(preview); bytes += size; start = index;
+        previews.push(preview); bytes += size; start = index;
     }
-    return { messages: previews, before: start, hasMore: start > 0, total: messages.length };
+    return { messages: previews.reverse(), before: start, hasMore: start > 0, total: records.length };
+}
+export function desktopHistory(messages, { limit = 80, before } = {}) {
+    validateHistoryPage(limit, before);
+    return historyPage(messages, limit, before);
+}
+function historyAnchor(scope, record) {
+    return typeof record?.id === 'string' ? createHash('sha256').update(scope).update(record.id).digest('hex') : undefined;
+}
+export function desktopSessionHistory(manager, { limit = 80, before, anchor } = {}) {
+    validateHistoryPage(limit, before);
+    if (anchor !== undefined && (before === undefined || typeof anchor !== 'string' || !/^[a-f0-9]{64}$/.test(anchor))) throw Error('A history anchor requires a matching before index.');
+    const header = manager.getHeader();
+    let cache = liveHistory.get(manager);
+    if (!cache || cache.header !== header) {
+        cache = { header, scope: randomUUID(), projection: undefined };
+        liveHistory.set(manager, cache);
+    }
+    const leaf = manager.getLeafEntry(), revision = manager.getEntriesRevision();
+    let projection = cache.projection;
+    if (!projection || projection.leaf !== leaf || projection.revision !== revision) {
+        const branch = manager.getBranch();
+        const records = branch.filter(isDesktopHistoryEntry);
+        projection = { leaf, revision, records, goal: desktopGoal(branch) };
+        cache.projection = records.length <= MAX_CACHED_LIVE_HISTORY_ENTRIES ? projection : undefined;
+    }
+    const { records, goal } = projection;
+    // An append-only branch keeps its older prefix. A new session header or a
+    // different entry at the boundary invalidates the renderer's cursor.
+    if (anchor !== undefined && anchor !== historyAnchor(cache.scope, records[before])) return { reset: true };
+    const page = historyPage(records, limit, before, desktopEntryMessage);
+    return { ...page, anchor: page.hasMore ? historyAnchor(cache.scope, records[page.before]) : undefined, goal: before === undefined ? goal : undefined };
 }
 export function desktopEvent(event) {
     if (event.type === 'tool_execution_update') return undefined;
     if (event.type === 'agent_end') return { type: 'agent_end' };
     if (event.type === 'turn_end') return { type: 'turn_end' };
-    if (event.type === 'message_start' || event.type === 'message_end') return { ...event, message: desktopMessage(event.message) };
+    if (event.type === 'message_start' || event.type === 'message_end') {
+        // A provider's shared assistant partial can already contain updates
+        // queued behind its start. The live desktop builds content from deltas.
+        const message = event.type === 'message_start' && event.message?.role === 'assistant'
+            ? { ...event.message, content: [] }
+            : event.message;
+        return { ...event, message: desktopMessage(message) };
+    }
     if (event.type === 'tool_execution_start') return { ...event, args: desktopArguments(event.args) };
     if (event.type === 'tool_execution_end') return { ...event, result: desktopMessage({ ...event.result, role: 'toolResult' }) };
     return event;

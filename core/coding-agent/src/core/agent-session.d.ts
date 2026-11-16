@@ -51,6 +51,9 @@ export type AgentSessionEvent = Exclude<AgentEvent, {
     steering: readonly string[];
     followUp: readonly string[];
 } | {
+    type: "desktop_input_delivered";
+    recoveryMessageId: string;
+} | {
     type: "compaction_start";
     reason: "manual" | "threshold" | "overflow";
 } | {
@@ -163,7 +166,9 @@ export interface PromptOptions {
     /** The user's literal words when `text` is an expansion of them (for example a goal kickoff that adds criteria). Input handlers and the Guardian read it as `originalText`; defaults to `text`. */
     originalText?: string;
     /** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
-    preflightResult?: (success: boolean) => void;
+    preflightResult?: (success: boolean, disposition?: "handled" | "queued" | "started") => void;
+    /** Authorized Desktop RPC's original input, scoped to pending user delivery. */
+    desktopInput?: { id: string; text: string; images: ImageContent[]; recovered: boolean };
 }
 /** Options for model/thinking mutations. */
 export interface ModelMutationOptions {
@@ -456,6 +461,11 @@ export declare class AgentSession {
         steering: string[];
         followUp: string[];
     };
+    desktopInputStatus(id: string): "missing" | "pending" | "delivered";
+    reserveDesktopInput(id: string): "missing" | "pending" | "delivered";
+    releaseDesktopInput(id: string): void;
+    finishDesktopInputCommand(id: string): void;
+    recoverDesktopQueue(id: string): { id: string; count: number };
     /** Number of pending messages (includes both steering and follow-up) */
     get pendingMessageCount(): number;
     /** Get pending steering messages (read-only) */

@@ -223,6 +223,13 @@ export class Agent {
         this.clearSteeringQueue();
         this.clearFollowUpQueue();
     }
+    /** Snapshot queue membership before a synchronous, externally persisted handoff. */
+    getQueuedMessages() {
+        return {
+            steering: this.steeringQueue.messages.map(entry => entry.message),
+            followUp: this.followUpQueue.messages.map(entry => entry.message),
+        };
+    }
     /** Returns true when either queue still contains pending messages. */
     hasQueuedMessages() {
         return this.steeringQueue.hasItems() || this.followUpQueue.hasItems();

@@ -11,13 +11,14 @@
  * - Extension UI: Extension UI requests are emitted, client responds with extension_ui_response
  */
 import * as crypto from "node:crypto";
+import { desktopInputPayload, isDesktopInputId } from "../../core/desktop-queue-recovery.js";
 import { flushRawStdout, takeOverStdout, waitForRawStdoutBackpressure, writeRawStdout, } from "../../core/output-guard.js";
 import { raceWithAbortSignal } from "../../utils/abort.js";
 import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { theme } from "../interactive/theme/theme.js";
 import { toJsonEvent } from "../json-event.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
-import { desktopEvent, desktopGoal, desktopHistory, desktopMessage, desktopBranchMessages } from "./desktop-projection.js";
+import { desktopEvent, desktopMessage, desktopSessionHistory } from "./desktop-projection.js";
 /**
  * Run in RPC mode.
  * Listens for JSON commands on stdin, outputs events and responses on stdout.
@@ -308,23 +309,46 @@ export async function runRpcMode(runtimeHost) {
             // Prompting
             // =================================================================
             case "prompt": {
+                const desktop = process.env.PI_DESKTOP_SESSION === "1";
+                const recoveryMessageId = command.recoveryMessageId;
+                if (recoveryMessageId !== undefined && (!desktop || !isDesktopInputId(recoveryMessageId)))
+                    throw new Error("Invalid desktop recovered message ID.");
+                const promptSession = session;
+                const desktopInput = desktop ? {
+                    ...desktopInputPayload(command.message, command.images),
+                    id: recoveryMessageId ?? crypto.randomUUID(),
+                    recovered: recoveryMessageId !== undefined,
+                } : undefined;
+                if (recoveryMessageId !== undefined) {
+                    const status = promptSession.reserveDesktopInput(recoveryMessageId);
+                    if (status !== "missing") return success(id, "prompt", { recoveryMessageId, status });
+                }
                 // Start prompt handling immediately, but emit the authoritative response only after
                 // prompt preflight succeeds. Queued and immediately handled prompts also count as success.
                 let preflightSucceeded = false;
-                void session
+                void promptSession
                     .prompt(command.message, {
                     images: command.images,
                     streamingBehavior: command.streamingBehavior,
                     source: "rpc",
-                    preflightResult: (didSucceed) => {
+                    desktopInput,
+                    preflightResult: (didSucceed, disposition) => {
                         if (didSucceed) {
                             preflightSucceeded = true;
-                            output(success(id, "prompt"));
+                            let status = "pending";
+                            if (recoveryMessageId !== undefined && disposition === "handled") {
+                                try {
+                                    promptSession.finishDesktopInputCommand(recoveryMessageId);
+                                    status = "delivered";
+                                } catch { /* An accepted command remains uncertain if its receipt cannot be written. */ }
+                            }
+                            output(success(id, "prompt", recoveryMessageId === undefined ? undefined : { recoveryMessageId, status }));
                         }
                     },
                 })
                     .catch((e) => {
                     if (!preflightSucceeded) {
+                            if (recoveryMessageId !== undefined) promptSession.releaseDesktopInput(recoveryMessageId);
                         output(error(id, "prompt", e.message));
                     }
                 });
@@ -343,7 +367,16 @@ export async function runRpcMode(runtimeHost) {
                 return success(id, "abort");
             }
             case "clear_queue": {
+                if (command.recoveryId !== undefined) {
+                    if (process.env.PI_DESKTOP_SESSION !== "1" || command.abortPendingInput !== true)
+                        throw new Error("Desktop queue recovery requires a desktop close request.");
+                    return success(id, "clear_queue", { recovery: session.recoverDesktopQueue(command.recoveryId) });
+                }
                 return success(id, "clear_queue", session.clearQueue({ abortPendingInput: command.abortPendingInput === true }));
+            }
+            case "desktop_input_status": {
+                if (process.env.PI_DESKTOP_SESSION !== "1") throw new Error("Desktop input status requires a desktop session.");
+                return success(id, "desktop_input_status", { status: session.desktopInputStatus(command.recoveryMessageId) });
             }
             case "new_session": {
                 const options = command.parentSession ? { parentSession: command.parentSession } : undefined;
@@ -549,12 +582,15 @@ export async function runRpcMode(runtimeHost) {
             // Messages
             // =================================================================
             case "get_messages": {
-                if (command.projection === 'desktop') return success(id, "get_messages", {
-                    ...desktopHistory(desktopBranchMessages(session.sessionManager.getBranch()), { limit: command.limit, before: command.before }),
-                    goal: command.before === undefined ? desktopGoal(session.sessionManager.getBranch()) : undefined,
-                    isStreaming: session.isStreaming,
-                    streamingMessage: command.before === undefined && session.agent.state.streamingMessage?.role === 'assistant' ? desktopMessage(session.agent.state.streamingMessage) : null,
-                });
+                if (command.projection === 'desktop') {
+                    const page = desktopSessionHistory(session.sessionManager, { limit: command.limit, before: command.before, anchor: command.anchor });
+                    if (page.reset) return success(id, "get_messages", { ...page, messages: [] });
+                    return success(id, "get_messages", {
+                        ...page,
+                        isStreaming: session.isStreaming,
+                        streamingMessage: command.before === undefined && session.agent.state.streamingMessage?.role === 'assistant' ? desktopMessage(session.agent.state.streamingMessage) : null,
+                    });
+                }
                 return success(id, "get_messages", { messages: session.messages });
             }
             // =================================================================

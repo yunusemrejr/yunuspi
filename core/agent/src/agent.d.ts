@@ -95,6 +95,8 @@ export declare class Agent {
     clearFollowUpQueue(): void;
     /** Remove all queued steering and follow-up messages. */
     clearAllQueues(): void;
+    /** Snapshot queue membership before a synchronous, externally persisted handoff. */
+    getQueuedMessages(): { steering: AgentMessage[]; followUp: AgentMessage[] };
     /** Returns true when either queue still contains pending messages. */
     hasQueuedMessages(): boolean;
     /** Active abort signal for the current run, if any. */

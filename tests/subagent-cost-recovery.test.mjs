@@ -35,14 +35,28 @@ function fixture(t) {
   fs.mkdirSync(path.dirname(childFile), {recursive:true});
   fs.mkdirSync(path.dirname(statusFile), {recursive:true});
   const write = (file, rows) => fs.writeFileSync(file, rows.map(value => JSON.stringify(value)).join('\n') + '\n');
-  write(sessionFile, entries);
+  const writeParent = () => write(sessionFile, entries);
+  writeParent();
   const writeChild = (receipts, main = assistant('answer', null, .5)) => write(childFile,
     [header('child'), ...(main ? [main] : []), ...receipts.map(value => value?.type === 'custom' ? value : hostedReceipt(value))]);
   writeChild(['completed']);
   const writeStatus = (overrides = {}) => fs.writeFileSync(statusFile, JSON.stringify({runId, mode:'single', state:'complete', sessionId:sessionFile,
     steps:[{status:'complete', sessionFile:childFile}], ...overrides}));
   writeStatus();
-  return {entries, options:{sessionFile, statusRoot}, writeStatus, writeChild, childFile, statusFile, nativeId, row};
+  return {entries, options:{sessionFile, statusRoot}, writeParent, writeStatus, writeChild, childFile, statusFile, nativeId, row};
+}
+
+function retainForegroundResult(f) {
+  fs.unlinkSync(f.statusFile);
+  delete f.entries[2].data.mode;
+  delete f.entries[2].data.state;
+  delete f.row.status;
+  f.row.runId = f.nativeId;
+  f.row.exitCode = 0;
+  f.row.evidence = {version:1, usage:{input:10, output:2, cacheRead:0, cacheWrite:0, turns:1}};
+  Object.assign(f.row.usage, {cacheRead:0, cacheWrite:0,
+    costByModel:[{route:'openrouter/fixture', evidence:{reported:.5, estimated:0, unknown:false, subscription:false, seen:true}}]});
+  f.writeParent();
 }
 
 test('owner-attested local recovery retains hosted spend exactly once across reopen and native replay', t => {
@@ -230,4 +244,58 @@ test('exact direct spend stays reported when the child adds metered and estimate
   assert.equal(result.total, .90625);
   assert.match(result.formatted, /~0\.906250/);
   assert.deepEqual(recoverRetainedChildCosts(entries, f.options).entries, []);
+});
+
+test('a saved native foreground terminal result attests its retained auxiliary charge without async status', t => {
+  const f = fixture(t);
+  retainForegroundResult(f);
+  const prior = collectSessionCost(f.entries);
+  assert.equal(prior.total, .75);
+
+  const receipts = recoverRetainedChildCosts(f.entries, f.options).entries;
+  const next = [...f.entries, ...receipts];
+  assert.equal(receipts.length, 1);
+  assert.equal(collectSessionCost(next).total, .875);
+  assert.equal(collectSessionCost([...next, ...receipts]).total, .875);
+  assert.deepEqual(recoverRetainedChildCosts(next, f.options).entries, []);
+
+  const manager = SessionManager.open(f.options.sessionFile);
+  for (const receipt of receipts) manager.appendCustomEntry(receipt.customType, receipt.data);
+  const fork = manager.createBranchedSession(manager.getLeafId());
+  const forked = SessionManager.open(fork);
+  const forkEntries = [forked.getHeader(), ...forked.getEntries()];
+  assert.equal(collectSessionCost(forkEntries).total, .75);
+  assert.deepEqual(recoverRetainedChildCosts(forkEntries, {...f.options, sessionFile:fork}).entries, []);
+});
+
+test('foreground backfill rejects unproven native identities, usage, and terminal state', t => {
+  const f = fixture(t);
+  retainForegroundResult(f);
+  const deny = () => assert.deepEqual(recoverRetainedChildCosts(f.entries, f.options).entries, []);
+  f.row.runId = randomUUID();
+  deny();
+  f.row.runId = f.nativeId;
+  const evidence = f.row.evidence;
+  delete f.row.evidence;
+  deny();
+  f.row.evidence = evidence;
+  f.row.status = 'running';
+  deny();
+  delete f.row.status;
+  f.row.usage.input += 1;
+  deny();
+  f.row.usage.input -= 1;
+  f.row.usage.costByModel[0].route = 'openrouter/different-model';
+  deny();
+  f.row.usage.costByModel[0].route = 'openrouter/fixture';
+  f.writeStatus({state:'running'});
+  deny();
+});
+
+test('foreground recovery leaves inclusive child graphs to the existing native accounting', t => {
+  const f = fixture(t);
+  retainForegroundResult(f);
+  f.writeChild(['completed', {type:'custom', customType:'subagent-cost-v1', id:'descendant', parentId:'answer', timestamp,
+    data:{runId:randomUUID(), results:[{usage:usage(.125)}]}}]);
+  assert.deepEqual(recoverRetainedChildCosts(f.entries, f.options).entries, []);
 });

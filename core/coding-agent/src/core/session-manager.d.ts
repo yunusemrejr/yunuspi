@@ -238,7 +238,7 @@ export declare class SessionManager {
      * so it is easier to find them.
      * These need to be appended via appendCompaction() and appendBranchSummary() methods.
      */
-    appendMessage(message: Message | CustomMessage | BashExecutionMessage): string;
+    appendMessage(message: Message | CustomMessage | BashExecutionMessage, options?: { durable?: boolean }): string;
     /** Append a thinking level change as child of current leaf, then advance leaf. Returns entry id. */
     appendThinkingLevelChange(thinkingLevel: string): string;
     /** Append a model change as child of current leaf, then advance leaf. Returns entry id. */

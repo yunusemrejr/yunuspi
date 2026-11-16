@@ -44,6 +44,18 @@ function readOwnedFile(file, limit) {
   finally { if (fd !== undefined) fs.closeSync(fd); }
 }
 
+function fileAbsent(file) {
+  try { fs.lstatSync(file); return false; }
+  catch (error) { return error.code === 'ENOENT'; }
+}
+
+function ownsSessionFile(file) {
+  try {
+    const stat = fs.lstatSync(file);
+    return stat.isFile() && stat.uid === process.getuid() && stat.nlink === 1 && !(stat.mode & 0o002) && fs.realpathSync(file) === file;
+  } catch { return false; }
+}
+
 function readChildLedger(bytes) {
   const entries = [], ids = new Set();
   let incomplete = false;
@@ -95,6 +107,49 @@ function attributableRoutes(routes, required) {
     amounts.set(row.route, before ? mergeCostEvidence(before, evidence) : evidence);
   }
   if (Math.abs([...amounts.values()].reduce((sum, evidence) => sum + spent(evidence), 0) - required) < 1e-10) return amounts;
+}
+
+function nativeTerminalResult(data, row, relativeFile) {
+  const nativeId = relativeFile.split(path.sep)[0];
+  const states = [data.state, row.status ?? row.state];
+  return row.runId === nativeId && (row.index ?? 0) === 0 && data.asyncId === undefined &&
+    (data.mode === undefined || data.mode === 'single') && row.childProcessStarted !== false &&
+    Number.isSafeInteger(row.exitCode) && row.exitCode >= 0 && row.evidence?.version === 1 &&
+    states.every(state => state === undefined || state === 'completed' || terminal.has(state));
+}
+
+// Foreground runs can have no async status file. A retained native result
+// already records process exit and the direct usage it observed. Use that
+// receipt to attest the child file before recovering separate auxiliary work.
+function matchesNativeDirectUsage(row, child, actual) {
+  const {main, auxiliary} = actual;
+  const recorded = readCostEvidence(row.usage);
+  if (child.incomplete || spent(auxiliary) <= 0 || (!recorded.seen && !recorded.subscription) ||
+      ['reported', 'estimated', 'seen', 'unknown', 'subscription'].some(key => recorded[key] !== main[key]) ||
+      (row.totalCost !== undefined && row.totalCost?.costUsd !== spent(recorded))) return false;
+
+  const recordedRoutes = attributableRoutes(row.usage?.costByModel, spent(recorded));
+  const directRoutes = actual.rows.filter(route => route.scope === 'main');
+  if (!recordedRoutes || recordedRoutes.size !== directRoutes.length || directRoutes.some(route => {
+    const saved = recordedRoutes.get(route.route);
+    return !saved || ['reported', 'estimated', 'seen', 'unknown', 'subscription'].some(key => saved[key] !== route[key]);
+  })) return false;
+
+  const usage = row.evidence.usage;
+  if (!Number.isSafeInteger(usage?.turns) || usage.turns < 1 || usage.turns !== row.usage.turns ||
+      tokenFields.some(key => !Number.isSafeInteger(usage[key]) || usage[key] < 0 || usage[key] !== row.usage[key])) return false;
+  const direct = {input:0, output:0, cacheRead:0, cacheWrite:0};
+  let turns = 0;
+  for (const entry of child.entries) {
+    if (entry.type !== 'message' || entry.message?.role !== 'assistant') continue;
+    turns++;
+    for (const key of tokenFields) {
+      const count = entry.message.usage?.[key] ?? 0;
+      if (!Number.isSafeInteger(count) || count < 0) return false;
+      direct[key] += count;
+    }
+  }
+  return turns === usage.turns && tokenFields.every(key => direct[key] === usage[key]);
 }
 
 /** Merge filesystem observations after alias folding. Each observation can
@@ -186,11 +241,12 @@ export function recoverRetainedChildCosts(entries, {sessionFile, statusRoot = de
         !Array.isArray(data.results) || data.results.length !== 1) continue;
     const row = data.results[0];
     const childFile = row?.sessionFile;
-    if (typeof childFile !== 'string' || !path.isAbsolute(childFile) || path.normalize(childFile) !== childFile ||
-        !childFilePattern.test(path.relative(childRoot, childFile))) continue;
+    if (typeof childFile !== 'string' || !path.isAbsolute(childFile) || path.normalize(childFile) !== childFile) continue;
+    const relativeFile = path.relative(childRoot, childFile);
+    if (!childFilePattern.test(relativeFile)) continue;
     const key = `${data.runId}\0${childFile}`;
     if (candidates.size < maxRuns && !candidates.has(key) && !row.children?.length && !row.steps?.length) {
-      candidates.set(key, {data, row, childFile});
+      candidates.set(key, {data, row, childFile, nativeTerminal:nativeTerminalResult(data, row, relativeFile)});
     }
   }
   if (!candidates.size) return none;
@@ -199,20 +255,29 @@ export function recoverRetainedChildCosts(entries, {sessionFile, statusRoot = de
   const readFiles = new Set();
   let remaining = maxChildTotalBytes;
   const proposals = [];
-  for (const {data, row, childFile} of candidates.values()) {
+  let ownedParent;
+  for (const {data, row, childFile, nativeTerminal} of candidates.values()) {
     if (!remaining) break;
     if (readFiles.has(childFile)) continue;
-    const rawStatus = readOwnedFile(path.join(statusRoot, data.runId, 'status.json'), maxStatusBytes);
-    if (!rawStatus) continue;
-    let status;
-    try { status = JSON.parse(rawStatus.toString('utf8')); }
-    catch { continue; }
-    if (status?.runId !== data.runId || status.sessionId !== sessionFile || status.mode !== 'single' ||
-        !terminal.has(status.state) || !Array.isArray(status.steps) || status.steps.length !== 1) continue;
-    const step = status.steps[0];
-    if (!terminal.has(step?.status ?? step?.state) || (step.sessionFile ?? step.result?.sessionFile) !== childFile ||
-        (step.result?.sessionFile !== undefined && step.result.sessionFile !== childFile)) continue;
-    readFiles.add(childFile);
+    const statusFile = path.join(statusRoot, data.runId, 'status.json');
+    const rawStatus = readOwnedFile(statusFile, maxStatusBytes);
+    let complete = false;
+    if (rawStatus) {
+      let status;
+      try { status = JSON.parse(rawStatus.toString('utf8')); }
+      catch { continue; }
+      if (status?.runId !== data.runId || status.sessionId !== sessionFile || status.mode !== 'single' ||
+          !terminal.has(status.state) || !Array.isArray(status.steps) || status.steps.length !== 1) continue;
+      const step = status.steps[0];
+      if (!terminal.has(step?.status ?? step?.state) || (step.sessionFile ?? step.result?.sessionFile) !== childFile ||
+          (step.result?.sessionFile !== undefined && step.result.sessionFile !== childFile)) continue;
+      complete = status.state === 'complete' && (step.status ?? step.state) === 'complete';
+    } else {
+      if (!nativeTerminal || !fileAbsent(statusFile) ||
+          (row.runId !== data.runId && !fileAbsent(path.join(statusRoot, row.runId, 'status.json')))) continue;
+      ownedParent ??= ownsSessionFile(sessionFile);
+      if (!ownedParent) continue;
+    }
     const bytes = readOwnedFile(childFile, Math.min(maxChildBytes, remaining));
     if (!bytes) continue;
     remaining -= bytes.length;
@@ -223,6 +288,8 @@ export function recoverRetainedChildCosts(entries, {sessionFile, statusRoot = de
     // The inclusive nested graph may already be represented in the parent.
     // Recover leaf charges only until every descendant can be tied to a node.
     if ((!actual.rows.length && !actual.unknown && !child.incomplete) || actual.rows.some(result => result.scope === 'children')) continue;
+    if (!rawStatus && !matchesNativeDirectUsage(row, child, actual)) continue;
+    readFiles.add(childFile);
     const own = mergeCostEvidence(actual.main, actual.auxiliary);
     own.unknown ||= child.incomplete || actual.unknown;
     const usage = Object.fromEntries([...tokenFields, 'turns'].flatMap(key =>
@@ -231,7 +298,7 @@ export function recoverRetainedChildCosts(entries, {sessionFile, statusRoot = de
       route:route.slice(0, 512), evidence:readCostEvidence({costDetails:evidence}),
     })) : undefined;
     const coverage = {
-      direct:status.state === 'complete' && (step.status ?? step.state) === 'complete' ? directFootprint(child, actual) : undefined,
+      direct:complete ? directFootprint(child, actual) : undefined,
       requests:requests.rows.length <= maxCoverageRoutes ? requests.rows.map(request => [
         JSON.stringify([request.owner, request.id, request.route]), request.route,
         request.status === 'pending' ? 'pending' : request.evidence.unknown ? 'unpriced' : 'known',

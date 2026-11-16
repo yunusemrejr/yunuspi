@@ -21,11 +21,14 @@ const alpha = path.join(scratch, 'project-alpha'), beta = path.join(scratch, 'pr
 for (const directory of [agentDir, alpha, beta, path.join(agentDir, 'extensions')]) fs.mkdirSync(directory, { recursive: true });
 fs.writeFileSync(path.join(alpha, 'sample.txt'), 'The desktop tool fixture is readable.\n');
 const requests = [];
+const recoveryImage = { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0dUAAAAASUVORK5CYII=' };
+let recoveredImageRequests = 0;
 const server = http.createServer(async (req, res) => {
   if (req.method !== 'POST') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"data":[]}'); return; }
   let body = ''; for await (const chunk of req) body += chunk;
   const input = JSON.parse(body), user = [...input.messages].reverse().find(m => m.role === 'user');
   const prompt = typeof user?.content === 'string' ? user.content : (user?.content ?? []).map(p => p.text || '').join('');
+  if (Array.isArray(user?.content) && user.content.some(part => part.image_url?.url?.endsWith(recoveryImage.data))) recoveredImageRequests++;
   requests.push(prompt);
   const responseId = `synthetic-desktop-${requests.length}`;
   res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' });
@@ -33,6 +36,10 @@ const server = http.createServer(async (req, res) => {
   const finish = reason => {
     res.write(`data: ${JSON.stringify({ id: responseId, choices: [{ index: 0, delta: {}, finish_reason: reason }], usage: { prompt_tokens: 25, completion_tokens: 30, total_tokens: 55 } })}\n\ndata: [DONE]\n\n`); res.end();
   };
+  if (prompt === 'Hold the queue recovery fixture') {
+    chunk({ role: 'assistant', content: 'Holding this fixture turn open.' });
+    return;
+  }
   // A turn of several steps: narration and one read per request, the second read failing, then the answer.
   if (prompt.includes('STEPS')) {
     const ran = input.messages.slice(input.messages.map(m => m.role).lastIndexOf('user') + 1).filter(m => m.role === 'tool').length;
@@ -480,12 +487,37 @@ try {
   await secondLaunch('');
   assert.equal(new SessionStore(dataDir).data.sessions.length, countBefore + 1);
   check('secondary launches forward project drafts without replacing the existing session');
+  const recoverySession = await page.evaluate(projectId => window.yunuspi.createSession(projectId), pa.id);
+  await open(recoverySession.id);
+  await send('Hold the queue recovery fixture');
+  await page.getByText('Holding this fixture turn open.', { exact: true }).waitFor();
+  await page.evaluate(({ id, image }) => window.yunuspi.prompt(id, '', [image], 'followUp'), { id: recoverySession.id, image: recoveryImage });
+  await page.evaluate(id => window.yunuspi.prompt(id, 'A separate queued message', [], 'followUp'), recoverySession.id);
+  await page.locator('#prompt').fill('Independent unsent draft');
+  await page.evaluate(id => window.yunuspi.sessionAction(id, 'close'), recoverySession.id);
+  assert.equal(recoveredImageRequests, 0, 'close never automatically submits recovered images');
   // Release all workers through the real shutdown path, then verify saved state.
   const snapshot = await page.evaluate(() => window.yunuspi.snapshot());
   for (const runtime of snapshot.runtime) await page.evaluate(id => window.yunuspi.sessionAction(id, 'close'), runtime.id);
   await electron.close(); electron = null;
   const persisted = new SessionStore(dataDir); assert.equal(persisted.session(first.id).draft, 'final unsent draft before shutdown');
   check('worker shutdown and saved drafts survive desktop exit');
+  electron = await _electron.launch({ args: [path.join(repo, 'desktop/main.mjs')], env, timeout: 30_000 });
+  page = await electron.firstWindow();
+  await open(recoverySession.id);
+  assert.equal(await page.locator('#prompt').inputValue(), 'Independent unsent draft');
+  const recovered = page.getByRole('button', { name: 'Recovered messages (2)' });
+  await recovered.press('Enter');
+  await page.getByRole('button', { name: '1 image', exact: true }).press('Enter');
+  assert.match(await page.locator('#dialog-content img').getAttribute('src'), /^data:image\/png;base64,/);
+  assert.ok(!(await page.evaluate(() => window.yunuspi.snapshot())).runtime.some(worker => worker.id === recoverySession.id));
+  await page.getByRole('button', { name: 'Send recovered message' }).press('Enter');
+  await page.getByRole('button', { name: 'Recovered messages (1)' }).waitFor();
+  await page.waitForFunction(() => document.getElementById('stop').hidden);
+  assert.equal(recoveredImageRequests, 1);
+  assert.equal(await page.locator('#prompt').inputValue(), 'Independent unsent draft');
+  check('queued image-only messages survive close and restart and are delivered once after review');
+  await electron.close(); electron = null;
   report.requests = requests.length;
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n');
   console.log(JSON.stringify({ bootMs: report.bootMs, readyMs: report.readyMs, checks: report.checks.length, output }));

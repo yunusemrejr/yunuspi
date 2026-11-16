@@ -17,6 +17,7 @@ export type RpcCommand = {
     message: string;
     images?: ImageContent[];
     streamingBehavior?: "steer" | "followUp";
+    recoveryMessageId?: string;
 } | {
     id?: string;
     type: "steer";
@@ -34,6 +35,11 @@ export type RpcCommand = {
     id?: string;
     type: "clear_queue";
     abortPendingInput?: boolean;
+    recoveryId?: string;
+} | {
+    id?: string;
+    type: "desktop_input_status";
+    recoveryMessageId: string;
 } | {
     id?: string;
     type: "new_session";
@@ -135,6 +141,8 @@ export type RpcCommand = {
     projection?: "desktop";
     limit?: number;
     before?: number;
+    /** Desktop cursor boundary from the previous live history page. */
+    anchor?: string;
 } | {
     id?: string;
     type: "get_commands";
@@ -177,6 +185,7 @@ export type RpcResponse = {
     type: "response";
     command: "prompt";
     success: true;
+    data?: { recoveryMessageId: string; status: "pending" | "delivered" };
 } | {
     id?: string;
     type: "response";
@@ -200,6 +209,16 @@ export type RpcResponse = {
     data: {
         steering: string[];
         followUp: string[];
+    } | {
+        recovery: { id: string; count: number };
+    };
+} | {
+    id?: string;
+    type: "response";
+    command: "desktop_input_status";
+    success: true;
+    data: {
+        status: "missing" | "pending" | "delivered";
     };
 } | {
     id?: string;
@@ -390,7 +409,9 @@ export type RpcResponse = {
     success: true;
     data: {
         messages: AgentMessage[];
+        reset?: true;
         before?: number;
+        anchor?: string;
         hasMore?: boolean;
         total?: number;
         isStreaming?: boolean;

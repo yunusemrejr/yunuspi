@@ -4,9 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { SessionStore } from './session-store.mjs';
 import { AgentWorker } from './agent-worker.mjs';
 import { readHistory, closeHistoryReaders, cancelPendingHistoryReads } from './history-reader.mjs';
+import { getRecoveredInput, listRecoveredInput, validateDesktopImages } from './recovered-input.mjs';
 import { applyTeamValue, readTeam } from './renderer/team-settings.mjs';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
@@ -263,30 +265,26 @@ async function workerFor(id) {
   return ready;
 }
 
-function stop(id, finish) {
+function stop(id, finish, { preserveQueue = true } = {}) {
   if (closing.has(id)) return closing.get(id);
   const worker = workers.get(id);
   // Mark closure before the drain starts. A cancelled reservation may still
   // resolve an import or ready response, but it can no longer admit a worker.
   const pending = Promise.resolve().then(async () => {
     if (worker) {
-      let queued = null;
-      try { queued = await worker.request('clear_queue', { abortPendingInput: true }, 2000); } catch { /* unavailable worker */ }
-      const saved = [...(queued?.steering ?? []), ...(queued?.followUp ?? [])]
-        .filter(text => typeof text === 'string' && text.trim());
-      if (saved.length) {
-        try {
-          const draft = saved.join('\n\n');
-          const existing = store.session(id).draft.trim();
-          store.setDraft(id, existing ? `${draft}\n\n${existing}` : draft);
-          publish();
-        } catch { /* the transcript still closes */ }
+      if (preserveQueue && !worker.dead) {
+        const recoveryId = randomUUID();
+        const result = await worker.request('clear_queue', { abortPendingInput: true, recoveryId }, 20_000)
+          .catch(error => { throw Error(`Queued messages could not be saved. The session stays open. ${error.message}`); });
+        if (result?.recovery?.id !== recoveryId || !Number.isSafeInteger(result.recovery.count) || result.recovery.count < 0) {
+          throw Error('The worker did not confirm queue recovery. The session stays open.');
+        }
       }
       await worker.stop();
     }
     finish?.();
   }).finally(() => {
-    if (workers.get(id) === worker) workers.delete(id);
+    if (worker?.dead && workers.get(id) === worker) workers.delete(id);
     if (closing.get(id) === pending) closing.delete(id);
     publish();
   });
@@ -316,7 +314,7 @@ async function sessionAction(id, action) {
   if (!['close', 'archive', 'restore', 'delete'].includes(action)) throw Error('Unknown session action.');
   const worker = workers.get(id);
   if (action === 'delete' || worker?.busy && action !== 'restore') {
-    const result = await dialog.showMessageBox(window, { type: action === 'delete' ? 'warning' : 'question', message: action === 'delete' ? `Delete “${session.title}”?` : `Stop “${session.title}”?`, detail: action === 'delete' ? 'This permanently deletes this desktop session’s transcript and draft. Shared project memories and project files are kept.' : 'The current turn will stop. Your conversation is saved and can be resumed.', buttons: ['Cancel', action === 'delete' ? 'Delete session' : 'Stop and continue'], defaultId: 0, cancelId: 0, noLink: true });
+    const result = await dialog.showMessageBox(window, { type: action === 'delete' ? 'warning' : 'question', message: action === 'delete' ? `Delete “${session.title}”?` : `Stop “${session.title}”?`, detail: action === 'delete' ? 'This permanently deletes this desktop session’s transcript, draft, and saved queued messages. Shared project memories and project files are kept.' : 'The current turn will stop. Your conversation and queued messages are saved and can be resumed.', buttons: ['Cancel', action === 'delete' ? 'Delete session' : 'Stop and continue'], defaultId: 0, cancelId: 0, noLink: true });
     if (result.response === 0) return { cancelled: true };
   }
   if (closing.has(id)) throw Error('Session is closing.');
@@ -324,7 +322,7 @@ async function sessionAction(id, action) {
   else await stop(id, () => {
     if (action === 'delete') store.delete(id);
     else store.update(id, { state: action === 'archive' ? 'archived' : 'closed' });
-  });
+  }, { preserveQueue: action !== 'delete' });
   publish();
   return { cancelled: false };
 }
@@ -338,7 +336,9 @@ async function projectAction(id, action) {
       const result = await dialog.showMessageBox(window, { type: 'question', message: `Stop running sessions in “${project.name}”?`, detail: 'Archiving the project stops its sessions. Conversations are saved; restore the project from Archive to continue them.', buttons: ['Cancel', 'Stop and archive'], defaultId: 0, cancelId: 0, noLink: true });
       if (result.response === 0) return { cancelled: true };
     }
-    await Promise.allSettled(running.map(s => stop(s.id)));
+    const results = await Promise.allSettled(running.map(s => stop(s.id)));
+    const failed = results.find(result => result.status === 'rejected');
+    if (failed) throw failed.reason;
   }
   store.setProjectArchived(project.id, action === 'archive');
   publish();
@@ -368,14 +368,24 @@ async function dispatch(action, input = {}) {
     }
     case 'warm': await workerFor(input.id); return;
     case 'history': {
-      const { id, revision, before } = input;
+      const { id, revision, before, anchor } = input;
       // A numeric index addresses the source that supplied it. Warming a
       // session does not transfer saved cursors to the live process.
       if (!isWorkerHistory(revision)) return savedHistory(id, { before, revision });
       if (workers.get(id)?.historyRevision !== revision) return { reset: true };
       const worker = await workerFor(id);
       if (worker.historyRevision !== revision) return { reset: true };
-      return worker.request('get_messages', { projection: 'desktop', limit: 80, before });
+      return worker.request('get_messages', { projection: 'desktop', limit: 80, before, anchor });
+    }
+    case 'recoveredInput': return listRecoveredInput(store.transcriptDirectory(input.id, false), input.id);
+    case 'reviewRecoveredInput': return getRecoveredInput(store.transcriptDirectory(input.id, false), input.id, input.batchId, input.messageId);
+    case 'sendRecoveredInput': {
+      const { id, batchId, messageId, digest } = input;
+      const item = await getRecoveredInput(store.transcriptDirectory(id, false), id, batchId, messageId);
+      if (item.digest !== digest) throw Error('The saved message changed. Review it again before sending.');
+      const worker = await workerFor(id);
+      if (closing.has(id) || quitting || workers.get(id) !== worker || worker.stopping) throw Error('Session is closing.');
+      return worker.request('prompt', { message: item.text, images: item.images, streamingBehavior: item.kind, recoveryMessageId: item.id });
     }
     case 'updateSession': {
       if (!input.patch || Object.keys(input.patch).some(k => !['title', 'draft'].includes(k))) throw Error('Invalid session update.');
@@ -386,10 +396,8 @@ async function dispatch(action, input = {}) {
     case 'projectAction': return projectAction(input.id, input.action);
     case 'prompt': {
       const message = text(input.message);
-      if (!message.trim() && !input.images?.length) throw Error('Write a message or attach an image.');
-      const images = input.images ?? [];
-      if (!Array.isArray(images) || images.length > 6 || images.some(i => i?.type !== 'image' || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(i.mimeType) || typeof i.data !== 'string' || i.data.length > 14_000_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(i.data))) throw Error('Invalid image attachment.');
-      if (images.reduce((sum, image) => sum + image.data.length, 0) > 14_000_000) throw Error('Attachments together must be smaller than 10 MiB.');
+      const images = validateDesktopImages(input.images ?? []);
+      if (!message.trim() && !images.length) throw Error('Write a message or attach an image.');
       const worker = await workerFor(input.id);
       if (closing.has(input.id) || quitting || workers.get(input.id) !== worker || worker.stopping) throw Error('Session is closing.');
       const { draft, updatedAt } = store.session(input.id);
@@ -586,7 +594,14 @@ else {
         if (result.response === 0) return;
       }
       quitting = true;
-      await Promise.allSettled([...new Set([...workers.keys(), ...starting.keys()])].map(id => stop(id)));
+      const stops = await Promise.allSettled([...new Set([...workers.keys(), ...starting.keys()])].map(id => stop(id)));
+      const failed = stops.find(result => result.status === 'rejected');
+      if (failed) {
+        quitting = false;
+        if (window && !window.isDestroyed()) send({ type: 'failure', message: failed.reason.message });
+        else { createWindow(); dialog.showErrorBox('YunusPi remains open', failed.reason.message); }
+        return;
+      }
       await closeHistoryReaders();
       try { store.flush(); }
       catch (error) {

@@ -1,3 +1,10 @@
+## 0.56.13 — Durable desktop queue recovery
+
+- Desktop close and quit save queued text and images before draining the agent queue. Review each recovered message separately after reopening, with the current composer draft preserved.
+- Live history reuses the branch it already walked and projects one bounded page at a time. Cursors follow the same branch across ordinary appends and refresh when a branch change invalidates them.
+- Desktop streaming renders the first chunk once, including when it arrives in the same frame as the assistant start event.
+- Saved foreground child runs contribute separately recorded helper charges when their terminal result, owned transcript, and direct usage establish the link.
+
 ## 0.56.12 — Child billing evidence and reliable browser reads
 
 - Retained child receipts update the footer when coverage changes, including missing usage, a reported zero, and a verified correction to an estimate. Native replays count the same child once.

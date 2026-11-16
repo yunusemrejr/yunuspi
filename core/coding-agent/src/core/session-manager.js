@@ -905,7 +905,8 @@ export class SessionManager {
      * so it is easier to find them.
      * These need to be appended via appendCompaction() and appendBranchSummary() methods.
      */
-    appendMessage(message) {
+    appendMessage(message, { durable = false } = {}) {
+        if (durable) this.flush();
         const entry = {
             type: "message",
             id: generateId(this.byId),
@@ -913,7 +914,7 @@ export class SessionManager {
             timestamp: new Date().toISOString(),
             message,
         };
-        this._appendEntry(entry);
+        this._appendEntry(entry, durable);
         return entry.id;
     }
     /** Append a thinking level change as child of current leaf, then advance leaf. Returns entry id. */

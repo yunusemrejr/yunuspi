@@ -141,6 +141,9 @@ function renderChrome() {
   $('session-caption').textContent = state?.sending ? 'Sending…' : busy ? 'Enter steers the running turn · Alt Enter queues for after it · Esc to stop' : session ? 'Enter to send · Shift Enter for a new line' : 'Local files · persistent project memory';
   const stats = state?.stats;
   $('usage-caption').textContent = stats ? `${Number(stats.tokens?.total || 0).toLocaleString()} tokens · ${costText(stats)}` : '';
+  const recovered = state?.recoveredInput?.length ?? 0;
+  $('review-recovered').hidden = !recovered;
+  if (recovered) $('review-recovered').textContent = `Recovered messages (${recovered})`;
   $('welcome-project').hidden = Boolean(session);
   $('welcome').hidden = Boolean(state?.messages.length);
   $('welcome').querySelector('h1').textContent = archived ? 'A little room to think.' : 'What are we building?';
@@ -172,7 +175,10 @@ async function openSession(id, reload = false) {
     // its response boundary, and deltas arriving afterwards continue the reducer.
     const previous = conversationOf(id);
     const state = result.messages ? createConversation([...result.messages, ...(result.streamingMessage ? [result.streamingMessage] : [])]) : previous;
-    if (result.messages) { state.historyBefore = result.before; state.hasMore = result.hasMore; pendingView.savedGoal = result.goal ?? null; }
+    if (result.messages) {
+      state.historyBefore = result.before; state.historyAnchor = result.anchor; state.hasMore = result.hasMore;
+      pendingView.savedGoal = result.goal ?? null;
+    }
     state.historyRevision = result.revision;
     Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming,
       stats: result.stats ?? (result.passive && result.messages ? undefined : previous.stats) });
@@ -190,6 +196,7 @@ async function openSession(id, reload = false) {
     opening = false; renderMessages(true); renderChrome(); renderActivity(); renderContext(); $('prompt').focus();
     // Totals come from the transcript, so a reopened session shows its cost before the next turn ends.
     if (!result.passive) refreshStats(id);
+    void refreshRecoveredInput(id).catch(error => { if (activeId === id) toast(safeError(error), 'error'); });
     showNextExtension();
   } catch (error) {
     if (version !== switchVersion || activeId !== id) return;
@@ -210,6 +217,18 @@ setInterval(renderTurnStatus, 1000);
 function refreshStats(id) {
   const state = conversationOf(id);
   return api.stats(id).then(stats => { if (stats && conversations.get(id) === state) { state.stats = stats; if (activeId === id) { renderChrome(); renderContext(); } } }).catch(() => {});
+}
+async function refreshRecoveredInput(id) {
+  const state = conversations.get(id);
+  if (!state) return [];
+  const request = (state.recoveryRefresh ?? 0) + 1;
+  state.recoveryRefresh = request;
+  const entries = await api.recoveredInput(id);
+  if (conversations.get(id) === state && state.recoveryRefresh === request) {
+    state.recoveredInput = entries;
+    if (activeId === id) renderChrome();
+  }
+  return entries;
 }
 function scheduleRender() {
   if (renderTimer) return;
@@ -617,8 +636,8 @@ function modal(title, build, onCancel) {
 }
 // Opens at once, then fills: a closed session starts its runtime on first use,
 // which takes several seconds, and a click must never look ignored meanwhile.
-async function loadingModal(title, id, load, build) {
-  const starting = !workspace.runtime.some(r => r.id === id && r.status === 'ready');
+async function loadingModal(title, id, load, build, { passive = false } = {}) {
+  const starting = !passive && !workspace.runtime.some(r => r.id === id && r.status === 'ready');
   modal(title, content => {
     const status = element('p', 'dialog-loading'); status.setAttribute('role', 'status');
     const mark = element('span', 'working-mark'); mark.append(element('i'), element('i'), element('i'));
@@ -630,9 +649,58 @@ async function loadingModal(title, id, load, build) {
     if (live()) { $('dialog-content').replaceChildren(); build($('dialog-content'), data); }
   } catch (error) {
     if (!live()) return;
-    const retry = element('button', 'quiet-button', 'Try again'); retry.onclick = () => tryAction(() => loadingModal(title, id, load, build));
+    const retry = element('button', 'quiet-button', 'Try again'); retry.onclick = () => tryAction(() => loadingModal(title, id, load, build, { passive }));
     $('dialog-content').replaceChildren(element('p', 'dialog-error', safeError(error)), retry);
   }
+}
+function showRecoveredInput(id) {
+  return loadingModal('Recovered messages', id, () => refreshRecoveredInput(id), (content, entries) => {
+    if (!entries.length) { content.append(element('p', 'empty-hint', 'No recovered messages.')); return; }
+    const list = element('div', 'dialog-list');
+    const more = element('button', 'quiet-button', 'Show more recovered messages');
+    let shown = 0;
+    function appendPage(focus) {
+      const first = shown;
+      for (const item of entries.slice(shown, shown + 48)) {
+        const images = item.imageCount ? `${item.imageCount} image${item.imageCount === 1 ? '' : 's'}` : '';
+        const label = item.preview || images;
+        list.append(actionButton(item.preview && images ? `${label} · ${images}` : label, 'chat', () => reviewRecoveredInput(id, item)));
+        shown++;
+      }
+      more.hidden = shown === entries.length;
+      if (focus) list.children[first]?.focus();
+    }
+    more.onclick = () => appendPage(true);
+    content.append(list, more);
+    appendPage(false);
+  }, { passive: true });
+}
+function reviewRecoveredInput(id, record) {
+  return loadingModal('Review recovered message', id,
+    () => api.reviewRecoveredInput(id, record.batchId, record.id), (content, item) => {
+      const sequence = modalSequence;
+      if (item.text) content.append(element('pre', 'command-preview', item.text));
+      if (item.images.length) content.append(imageNodes(item.images));
+      const actions = element('div', 'dialog-actions');
+      const back = element('button', 'quiet-button', 'Back');
+      const send = element('button', 'primary-button', 'Send recovered message');
+      back.onclick = () => { void showRecoveredInput(id); };
+      send.onclick = () => tryAction(async () => {
+        send.disabled = true;
+        try {
+          const result = await api.sendRecoveredInput(id, record.batchId, record.id, item.digest);
+          if (modalSequence === sequence && $('dialog').open) closeModal(false);
+          if (activeId === id) {
+            $('prompt').focus();
+            toast(result?.status === 'delivered' ? 'Recovered message delivered.' : 'Recovered message submitted.');
+          }
+          await refreshRecoveredInput(id);
+        } finally { send.disabled = false; }
+      });
+      actions.append(back, send);
+      content.append(actions);
+      back.focus();
+    }, { passive: true });
 }
 function actionButton(label, symbol, handler, danger = false) {
   const button = element('button', danger ? 'danger' : ''); button.append(icon(symbol), element('span', '', label)); button.onclick = () => { closeModal(false); tryAction(handler); }; return button;
@@ -1010,6 +1078,10 @@ api.onEvent(value => {
   switch (value.type) {
     case 'workspace': syncWorkspace(value.data); break;
     case 'agent': {
+      if (value.event.type === 'desktop_input_delivered') {
+        void refreshRecoveredInput(value.sessionId).catch(() => {});
+        break;
+      }
       if (value.event.type === 'extension_ui_closed') {
         for (let index = extensionQueue.length - 1; index >= 0; index--) if (extensionQueue[index].event.id === value.event.id && extensionQueue[index].sessionId === value.sessionId) extensionQueue.splice(index, 1);
         if (modalOwner?.requestId === value.event.id && modalOwner.sessionId === value.sessionId) closeModal(false);
@@ -1084,6 +1156,7 @@ $('model-button').onclick = () => tryAction(showModels);
 $('thinking-button').onclick = () => tryAction(showThinking);
 $('attach').onclick = () => { const id = activeId; if (!id) return; tryAction(async () => { const images = await api.chooseImages(); const next = [...(attachments.get(id) || []), ...images]; if (next.length > 6) throw Error('Attach at most six images.'); attachments.set(id, next); if (activeId === id) { renderAttachments(); renderChrome(); } }); };
 $('retry-session').onclick = () => { if (activeId) tryAction(() => openSession(activeId)); };
+$('review-recovered').onclick = () => { if (activeId) void showRecoveredInput(activeId); };
 $('conversation').addEventListener('scroll', () => {
   if (!activeId) return;
   const scroller = $('conversation'), view = viewOf(activeId);
@@ -1098,10 +1171,10 @@ $('load-earlier').onclick = () => tryAction(async () => {
   if (state.hasMore && state.messages.length <= view.limit) {
     $('load-earlier').disabled = true;
     try {
-      const page = await api.history(id, state.historyBefore, state.historyRevision);
+      const page = await api.history(id, state.historyBefore, state.historyRevision, state.historyAnchor);
       if (activeId !== id || conversations.get(id) !== state) return;
       if (page.reset) { await openSession(id, true); return; }
-      prependConversation(state, page.messages); state.historyBefore = page.before; state.hasMore = page.hasMore;
+      prependConversation(state, page.messages); state.historyBefore = page.before; state.historyAnchor = page.anchor; state.hasMore = page.hasMore;
     } catch (error) {
       if (activeId !== id) return;
       throw error;

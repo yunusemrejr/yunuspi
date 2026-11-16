@@ -42,6 +42,16 @@ import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapp
 import { collectSessionStats, readCostEvidence } from "./session-accounting.js";
 import { GuardianSupervisor, tagGuardianRequestMessage } from "./guardian/guardian-supervisor.js";
 import { sessionObservability, withSessionObservability } from "./session-observability.js";
+import { desktopInputDelivered, existingDesktopQueueRecovery, isDesktopInputId, markDesktopInputDelivered, writeDesktopQueueRecovery } from "./desktop-queue-recovery.js";
+const DESKTOP_QUEUED_INPUT = Symbol("Desktop queued input");
+function tagDesktopInput(message, input) {
+    if (input) {
+        Object.defineProperty(message, DESKTOP_QUEUED_INPUT, { value: input });
+        // Only an explicit resend needs a durable deduplication identity.
+        if (input.recovered) message.desktopInputId = input.id;
+    }
+    return message;
+}
 /**
  * Parse a skill block from message text.
  * Returns null if the text doesn't contain a skill block.
@@ -450,6 +460,7 @@ export class AgentSession {
     }
     /** Internal handler for agent events - shared by subscribe and reconnect */
     _handleAgentEvent = async (event) => {
+        const input = event.type === "message_end" && event.message.role === "user" ? event.message[DESKTOP_QUEUED_INPUT] : undefined;
         try { await this._guardian?.observeAgentEvent(event); }
         catch (error) { this._guardian?.quarantine(error); }
         // When a user message starts, check if it's from either queue and remove it BEFORE emitting
@@ -496,7 +507,17 @@ export class AgentSession {
                 event.message.role === "assistant" ||
                 event.message.role === "toolResult") {
                 // Regular LLM message - persist as SessionMessageEntry
-                this.sessionManager.appendMessage(event.message);
+                const recoveredId = event.message.role === "user" && input?.recovered ? input.id : undefined;
+                if (isDesktopInputId(recoveredId)) {
+                    // An extension may replace the message content during message_end.
+                    event.message.desktopInputId = recoveredId;
+                    this.sessionManager.appendMessage(event.message, { durable: true });
+                    this._desktopInputInFlight?.delete(recoveredId);
+                    // The transcript is authoritative if the optional fast marker fails.
+                    try { markDesktopInputDelivered(this.sessionManager, recoveredId); } catch { /* rebuild on retry */ }
+                    this._emit({ type: "desktop_input_delivered", recoveryMessageId: recoveredId });
+                }
+                else this.sessionManager.appendMessage(event.message);
             }
             // Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere
             // Track assistant message for auto-compaction (checked on agent_end)
@@ -994,7 +1015,7 @@ export class AgentSession {
                 const handled = await this._tryExecuteExtensionCommand(text, releaseInputQueue);
                 if (handled) {
                     // Extension command executed, no prompt to send
-                    preflightResult?.(true);
+                    preflightResult?.(true, "handled");
                     return;
                 }
             }
@@ -1016,7 +1037,7 @@ export class AgentSession {
                     this._guardian?.cancelRequest(requestId);
                     this._pendingInputControllers.delete(inputAbortController);
                     releaseInputQueue();
-                    preflightResult?.(true);
+                    preflightResult?.(true, "handled");
                     return;
                 }
                 if (inputResult.action === "transform") {
@@ -1037,15 +1058,15 @@ export class AgentSession {
                     throw new Error("Agent is already processing. Specify streamingBehavior ('steer' or 'followUp') to queue the message.");
                 }
                 if (options.streamingBehavior === "followUp") {
-                    await this._queueFollowUp(expandedText, currentImages, requestMessageMeta);
+                    await this._queueFollowUp(expandedText, currentImages, requestMessageMeta, options?.desktopInput);
                 }
                 else {
-                    await this._queueSteer(expandedText, currentImages, requestMessageMeta, source !== "extension");
+                    await this._queueSteer(expandedText, currentImages, requestMessageMeta, source !== "extension", options?.desktopInput);
                 }
                 this._guardian?.acceptRequest(requestId);
                 this._pendingInputControllers.delete(inputAbortController);
                 releaseInputQueue();
-                preflightResult?.(true);
+                preflightResult?.(true, "queued");
                 return;
             }
             // Flush any pending bash and custom messages before the new prompt
@@ -1084,11 +1105,11 @@ export class AgentSession {
             if (currentImages) {
                 userContent.push(...currentImages);
             }
-            messages.push(tagGuardianRequestMessage({
+            messages.push(tagDesktopInput(tagGuardianRequestMessage({
                 role: "user",
                 content: userContent,
                 timestamp: Date.now(),
-            }, requestMessageMeta));
+            }, requestMessageMeta), options?.desktopInput));
             // Snapshot this prompt's messages without consuming them. A Stop
             // during preflight or startup can still prevent the durable append.
             for (const msg of [...this._pendingNextTurnMessages]) {
@@ -1159,7 +1180,7 @@ export class AgentSession {
         }
         releaseInputQueue();
         this._guardian?.acceptRequest(inputMeta.requestId);
-        preflightResult?.(true);
+        preflightResult?.(true, "started");
         await this._runAgentPrompt(messages);
     }
     /**
@@ -1297,34 +1318,34 @@ export class AgentSession {
     /**
      * Internal: Queue a steering message (already expanded, no extension command check).
      */
-    async _queueSteer(text, images, requestMeta, interrupt) {
+    async _queueSteer(text, images, requestMeta, interrupt, desktopInput) {
         this._steeringMessages.push(text);
         this._emitQueueUpdate();
         const content = [{ type: "text", text }];
         if (images) {
             content.push(...images);
         }
-        this.agent.steer(tagGuardianRequestMessage({
+        this.agent.steer(tagDesktopInput(tagGuardianRequestMessage({
             role: "user",
             content,
             timestamp: Date.now(),
-        }, requestMeta), { interrupt });
+        }, requestMeta), desktopInput), { interrupt });
     }
     /**
      * Internal: Queue a follow-up message (already expanded, no extension command check).
      */
-    async _queueFollowUp(text, images, requestMeta) {
+    async _queueFollowUp(text, images, requestMeta, desktopInput) {
         this._followUpMessages.push(text);
         this._emitQueueUpdate();
         const content = [{ type: "text", text }];
         if (images) {
             content.push(...images);
         }
-        this.agent.followUp(tagGuardianRequestMessage({
+        this.agent.followUp(tagDesktopInput(tagGuardianRequestMessage({
             role: "user",
             content,
             timestamp: Date.now(),
-        }, requestMeta));
+        }, requestMeta), desktopInput));
     }
     /**
      * Throw an error if the text is an extension command.
@@ -1494,6 +1515,10 @@ export class AgentSession {
      */
     clearQueue(options) {
         if (options?.abortPendingInput) this._abortPendingInputPreflights();
+        if (this._desktopInputInFlight?.size) {
+            const { steering, followUp } = this.agent.getQueuedMessages();
+            for (const message of [...steering, ...followUp]) this._desktopInputInFlight.delete(message.desktopInputId);
+        }
         const steering = [...this._steeringMessages];
         const followUp = [...this._followUpMessages];
         this._steeringMessages = [];
@@ -1501,6 +1526,49 @@ export class AgentSession {
         this.agent.clearAllQueues();
         this._emitQueueUpdate();
         return { steering, followUp };
+    }
+    desktopInputStatus(id) {
+        if (desktopInputDelivered(this.sessionManager, id)) return "delivered";
+        if (this.sessionManager.getEntries().some(entry => entry.type === "message" && entry.message.role === "user" && entry.message.desktopInputId === id)) {
+            try { markDesktopInputDelivered(this.sessionManager, id); } catch { /* transcript is sufficient */ }
+            return "delivered";
+        }
+        return this._desktopInputInFlight?.has(id) ? "pending" : "missing";
+    }
+    reserveDesktopInput(id) {
+        const status = this.desktopInputStatus(id);
+        if (status === "missing") (this._desktopInputInFlight ??= new Set()).add(id);
+        return status;
+    }
+    releaseDesktopInput(id) {
+        this._desktopInputInFlight?.delete(id);
+    }
+    finishDesktopInputCommand(id) {
+        markDesktopInputDelivered(this.sessionManager, id);
+        this.releaseDesktopInput(id);
+        this._emit({ type: "desktop_input_delivered", recoveryMessageId: id });
+    }
+    recoverDesktopQueue(id) {
+        if (isDesktopInputId(id) && id === this._emptyDesktopQueueRecoveryId) return { id, count: 0 };
+        const existing = existingDesktopQueueRecovery(this.sessionManager, id);
+        if (existing) return existing;
+        this._abortPendingInputPreflights();
+        const { steering, followUp } = this.agent.getQueuedMessages();
+        const records = [];
+        for (const [kind, messages] of [["steer", steering], ["followUp", followUp]]) {
+            for (const message of messages) {
+                const input = message[DESKTOP_QUEUED_INPUT];
+                if (input && message.role === "user") records.push({ id: input.id, kind, text: input.text, images: input.images });
+            }
+        }
+        // No yield separates the queue snapshot, durable publish and clear.
+        // In particular, a selected but unconsumed turn cannot start here.
+        const receipt = writeDesktopQueueRecovery(this.sessionManager, id, records);
+        if (!receipt.count) this._emptyDesktopQueueRecoveryId = id;
+        this.clearQueue();
+        this.abortRetry();
+        this.agent.abort();
+        return receipt;
     }
     /** Number of pending messages (includes both steering and follow-up) */
     get pendingMessageCount() {
