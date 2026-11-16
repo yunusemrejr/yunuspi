@@ -149,6 +149,8 @@ export interface FailureClassification {
 	retryAfterMs: number | null;
 	/** The route consumed a whole child deadline without finishing. */
 	stall?: boolean;
+	/** The active response body's stream was interrupted after request acceptance. */
+	responseBodyInterrupted?: true;
 	/** Credit or billing exhaustion (402), distinct from transient rate pressure. */
 	billing?: boolean;
 }
@@ -340,6 +342,9 @@ export function cooldownFor(
  const hint = classification.retryAfterMs;
  if (typeof hint === "number" && Number.isFinite(hint) && hint >= 0)
   return Math.min(RETRY_AFTER_CEILING_MS, hint);
+ // A reader interruption is short-lived transport evidence. Match the usual
+ // initial assistant retry delay so sibling requests do not add a long hold.
+ if (classification.responseBodyInterrupted) return 2_000;
  const repeats = Number.isFinite(consecutive) ? Math.max(0, Math.floor(consecutive) - 1) : 0;
  const escalation = Math.min(CONSECUTIVE_ESCALATION_CAP_MS, repeats * CONSECUTIVE_ESCALATION_MS);
  if (classification.kind === "quota-rate" && provider !== undefined && REQUEST_RATE_PROVIDERS.has(provider))
@@ -594,7 +599,7 @@ export interface RecordFailureInput {
 	/** Raw provider/turn error text; classified internally. */
 	errorMessage?: string;
 	/** Transport response metadata, when exposed by the adapter. */
-	providerRetry?: { status?: number; retryAfterMs?: number };
+	providerRetry?: { status?: number; retryAfterMs?: number; responseBodyInterrupted?: true };
 	/** Where the failure was observed (observability), e.g. "message_end". */
 	source?: string;
 	/** Exact serving endpoint, only when the outgoing request was pinned. */
@@ -623,7 +628,9 @@ export interface RecordedFailure {
 export function recordFailure(input: RecordFailureInput): RecordedFailure | undefined {
 	const now = input.now ?? Date.now();
 	const status = input.providerRetry?.status;
-	const classified = classifyFailure(input.errorMessage) ?? (Number.isInteger(status) ? classifyFailure(String(status)) : undefined);
+	const classified: FailureClassification | undefined = input.providerRetry?.responseBodyInterrupted === true
+		? { kind: "route-failure", scope: "route", retryAfterMs: null, responseBodyInterrupted: true }
+		: classifyFailure(input.errorMessage) ?? (Number.isInteger(status) ? classifyFailure(String(status)) : undefined);
 	const hint = input.providerRetry?.retryAfterMs;
 	const original = classified && typeof hint === "number" && Number.isFinite(hint) && hint >= 0
 		? { ...classified, retryAfterMs: hint } : classified;

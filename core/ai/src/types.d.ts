@@ -352,6 +352,8 @@ export interface ProviderRetryAdvice {
     status?: number;
     retryAfterMs?: number;
     retryAllowed?: boolean;
+    /** The active response body's reader rejected before confirmed completion. */
+    responseBodyInterrupted?: true;
 }
 export interface ToolResultMessage<TDetails = any> {
     role: "toolResult";

@@ -2947,7 +2947,7 @@
       {
         "name": "observer-book",
         "source": "agent/extensions/lib/session-observer-impl.ts",
-        "line": 520
+        "line": 524
       },
       {
         "name": "project-memory",
@@ -3118,7 +3118,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 539,
+        "line": 594,
         "kind": "factory"
       },
       {
@@ -3227,7 +3227,7 @@
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 378,
+        "line": 433,
         "kind": "factory"
       },
       {
@@ -3283,7 +3283,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 585,
+        "line": 640,
         "kind": "factory"
       },
       {
@@ -3482,7 +3482,7 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 504,
+        "line": 559,
         "kind": "factory"
       },
       {
@@ -3512,7 +3512,7 @@
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 474,
+        "line": 529,
         "kind": "factory"
       },
       {
@@ -3548,7 +3548,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 421,
+        "line": 476,
         "kind": "factory"
       },
       {
@@ -3835,7 +3835,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          342
+          397
         ],
         "knownNames": [
           "asset_register",

@@ -247,7 +247,11 @@ export default function sessionObserver(pi: any, testing: any = {}) {
     judge: (site, state, questions, options) => {
       const origin = owner;
       return askJev(site, state, questions, { signal: options?.signal,
-        pi: { appendEntry(type: string, data: unknown) { if (owns(ctx) && owner === origin) pi.appendEntry(type, data); } } });
+        pi: { bindAuxiliaryUsage: () => owns(ctx) && owner === origin ? pi.bindAuxiliaryUsage?.() : undefined,
+          appendEntry(type: string, data: unknown) {
+          if (!(owns(ctx) && owner === origin)) return false;
+          pi.appendEntry(type, data);
+        } } });
     },
     salience: () => salience,
     position: () => sequence,

@@ -47,9 +47,10 @@ Cancellation and failed work are distinct. Child/controller reports are
 reconciled so replayed receipts do not create extra failures; missing historical
 evidence remains unknown. The same collector backs the zero-inference
 `agent/scripts/session-audit.mjs` command for historical audits. It returns
-counts without prompt bodies, error excerpts or paths. Discovery, file size and retained entries are
-bounded, and cancellation stops further work. The CLI retains its explicit
-operator-oriented all-session default and accepts `--scope workspace`.
+counts without prompt bodies, error excerpts or paths. The audit reads a bounded
+window from the end of each transcript and keeps the latest complete records.
+It reports when it sampled or skipped an oversized file. The CLI defaults to
+all sessions and accepts `--scope workspace`. Cancellation stops further reads.
 
 Session hooks are bounded and advisory. They avoid duplicate concurrent hints,
 discard abandoned calls on lifecycle changes, and cannot fail a tool because a
@@ -144,7 +145,7 @@ Automatic exit summaries always use the active session model, abort provider wor
 | Utility MCP | Explicit tool calls; two active workers and bounded queued requests | Tool results only; process startup and queue state add no messages |
 | Background services | Recognized persistent services default to no completion wake; explicit opt-in remains available | UI completion notices stay out of model context by default |
 
-Typed mechanical judgments can use TypeSafe Jev through the configured OpenRouter key. Consumers retain their heuristic path when confidence is low or inference is unavailable; controlled success and skip reasons feed the TUI and `/used` telemetry. Identical state and questions share a request and cached answer across caller sites in the same process. A cancelled waiter does not cancel other waiters; one surviving caller records the paid result and the others record zero-cost reuse. Slug failover, a five-minute breaker and bounded requests avoid repeated failing work. The `~typesafe/jev-latest` alias is tried first, so the newest model is used without a code change; the dated model the route served is reported in `/used`, the ledger and health, and kept as the next fallback. One additional site is the thinking level: once per human turn the cost governor may lower effort only when Jev is confident the request is simple and not deep, the cache miss fits its switch budget, and the user has not pinned a level (`PIJEV_EFFORT=off` disables it). These are client usage estimates, not invoice evidence; `PI_JEV=off` disables remote calls. Local confidence never establishes completion or replaces native compaction history.
+Typed mechanical judgments can use TypeSafe Jev through the configured OpenRouter key. Consumers retain their heuristic path when confidence is low or inference is unavailable. Success and skip reasons appear in the TUI and `/used`. Identical state and questions share one request and cached answer across callers in the same process. The submitting session owns each physical request's charge, including billed attempts that fail validation. Other callers record zero-cost reuse. When the five-minute breaker expires, the next eligible request tests recovery. The `~typesafe/jev-latest` alias is tried first, and `/used` and provider health show the dated model returned by the route. Once per human turn the cost governor may lower thinking effort if Jev finds the request simple, the cache miss fits the switch budget, and the user has left effort unpinned. `PIJEV_EFFORT=off` disables that adjustment. `/cost` distinguishes provider amounts, estimates, and missing billing evidence. `PI_JEV=off` disables remote calls. Local confidence never establishes completion or replaces native compaction history.
 
 Loading and inventory checks establish registered ownership, not live provider correctness. Offline scripted-stream tests validate request behavior without paid inference; unavailable live observations remain unverified.
 

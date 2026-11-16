@@ -56,3 +56,38 @@ test('traffic audit aggregates raw text without returning bodies or cross-sessio
     assert.match(report.traffic.interpretation,/not wire tokens/);
   } finally { await fs.rm(temp,{recursive:true,force:true}); }
 });
+
+test("oversized sessions retain their newest complete records within the byte and entry budgets", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "pi-audit-tail-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const tool = (name, text) => JSON.stringify({ type: "message", message: {
+    role: "toolResult", toolCallId: name, toolName: name, content: [{ type: "text", text }],
+  } });
+  const prefix = [JSON.stringify({ type: "session", cwd: directory }), tool("old", "🛰".repeat(600))].join("\n") + "\n";
+  const suffix = [tool("read", "complete 🌿"), "{malformed}", tool("edit", "complete 🌱"), '{"type":"message","message":'].join("\n");
+  await fs.writeFile(path.join(directory, "active.jsonl"), prefix + suffix);
+  // Exercise a byte window beginning both at a true delimiter and inside an older UTF-8 record.
+  for (const maxFileBytes of [Buffer.byteLength(suffix), Buffer.byteLength(suffix) + 17]) {
+    const report = await scanSessionAudit({ sessionsDir: directory, workspace: directory, maxFileBytes, maxEntriesPerFile: 2 });
+    assert.equal(report.sessions, 1);
+    assert.equal(report.truncatedSessions, 1);
+    assert.equal(report.sampledOversize, 1);
+    assert.equal(report.skippedOversize, 0);
+    assert.equal(report.inspected, 2);
+    assert.equal(report.malformedLines, 1);
+    assert.equal(report.partialLines, 1);
+    assert.deepEqual(report.tools, { edit: 1, read: 1 });
+    assert.doesNotMatch(JSON.stringify(report), /complete 🌿|complete 🌱|pi-audit-tail-/);
+  }
+});
+
+test("an oversized file containing only a clipped record contributes no session evidence", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "pi-audit-empty-tail-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.writeFile(path.join(directory, "huge.jsonl"), JSON.stringify({ type: "session", cwd: directory }) + "\n" +
+    JSON.stringify({ type: "message", message: { content: "x".repeat(500) } }) + "\n");
+  const report = await scanSessionAudit({ sessionsDir: directory, scope: "all", maxFileBytes: 50 });
+  assert.equal(report.sessions, 0);
+  assert.equal(report.skippedOversize, 1);
+  assert.equal(report.malformedLines, 0);
+});

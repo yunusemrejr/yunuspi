@@ -36,6 +36,19 @@ test('structured transport throttles keep the longest active shared deadline', (
   assert.equal(health.readHealth().providers.p.observed.retryAfterMs, 1000);
 });
 
+test('a response body interruption briefly gates the exact model and records failed recovery evidence', () => {
+  reset();
+  const now = Date.now();
+  const failure = health.recordFailure({ provider: 'deepseek', model: 'fixture', errorMessage: 'terminated',
+    source: 'message_end', providerRetry: { responseBodyInterrupted: true }, now });
+  assert.equal(failure.kind, 'route-failure');
+  assert.equal(failure.cooldownUntil, now + 2_000);
+  assert.equal(health.evaluateRoute({ provider: 'deepseek', model: 'fixture', now }).boundBy, 'route');
+  assert.equal(health.evaluateRoute({ provider: 'deepseek', model: 'sibling', now }).allowed, true);
+  assert.equal(health.evaluateRoute({ provider: 'deepseek', model: 'fixture', now: now + 2_000 }).allowed, true);
+  assert.equal(health.readHealth().providers.deepseek.models.fixture.recoveryHistory.at(-1).ok, false);
+});
+
 test('an in-flight success that started before a failure cannot clear it', () => {
   reset();
   const startedAt = Date.now() - 50;

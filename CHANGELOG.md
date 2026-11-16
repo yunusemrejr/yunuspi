@@ -1,3 +1,10 @@
+## 0.56.9 — Physical request billing and faster verification
+
+- Jev and Kev record each submitted request in the owning session, including billed responses that fail validation and trigger a fallback. Recovery tests a cooling route on the next eligible request, and coalesced calls share one bill.
+- Direct DeepSeek Chat preserves a validated final answer and its usage when the connection drops before the stream terminator. Earlier interruptions keep their partial evidence and enter the shared provider health record.
+- Creative verification reuses unchanged file digests and workspace revisions while checking for replacements and edits before accepting evidence.
+- Historical audits sample complete records from oversized transcripts and parse the newest records first within the configured limits.
+
 ## 0.56.8 — Verification, provider cooldowns, and saved billing evidence
 
 - Todo checks verification before committing the final plan. Batch aliases use the same validation, and edits that leave work open skip the transcript lookup.

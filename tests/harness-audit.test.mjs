@@ -29,15 +29,17 @@ test("publication builds owned core after script-disabled dependency installatio
 test("diagnostics distinguish model, tool, child and controller evidence",()=>{
   const entries=[
     {type:"message",message:{role:"assistant",stopReason:"error",errorMessage:"429 rate limit",content:[]}},
+    {type:"message",message:{role:"assistant",stopReason:"error",errorMessage:"terminated",providerRetry:{responseBodyInterrupted:true}}},
     {type:"message",message:{role:"toolResult",toolName:"bash",toolCallId:"one",isError:true,content:[{type:"text",text:"Blocked: outside workspace"}]}},
     {type:"custom",customType:"subagent-lifecycle-v1",data:{runId:"child",results:[{exitCode:1,error:"acceptance failed"}]}},
     {type:"custom",customType:"subagent-lifecycle-v1",data:{runId:"flow",mode:"workflow",state:"failed",results:[]}},
   ];
   const report=collectSessionDiagnostics(entries,{excerpts:false});
   assert.deepEqual(new Set(report.failures.map(f=>f.kind)),new Set(["model","tool","child","workflow"]));
+  assert.deepEqual(report.failures.filter(f=>f.kind==="model").map(f=>f.category),["transport","capacity"]);
   assert.equal(report.activity.childFailures,1);
   assert.ok(report.failures.every(f=>!("error" in f)));
-  const bounded=collectSessionDiagnostics(Array(3000).fill(entries[1]));
+  const bounded=collectSessionDiagnostics(Array(3000).fill(entries.find(entry=>entry.message?.role==="toolResult")));
   assert.equal(bounded.inspected,2000);assert.equal(bounded.count,1);assert.equal(bounded.truncated,true);
 });
 

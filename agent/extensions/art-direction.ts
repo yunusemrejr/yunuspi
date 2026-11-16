@@ -12,6 +12,7 @@ import { selectedMediaParams, planImageModel } from "./lib/media-model-routing.t
  * Blocking visual verdicts and unreviewed directions feed the completion
  * gate through the "creative" continuation source. */
 import fs from "node:fs/promises";
+import { constants, type BigIntStats } from "node:fs";
 import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { isIP } from "node:net";
@@ -40,6 +41,16 @@ import { branchHasMessage, stickyHeadText } from "./lib/wire-warmth.ts";
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
 const strList = (maxItems: number, maxLength: number) => Type.Array(Type.String({ maxLength }), { maxItems });
 const IMAGE_ATTACH_CAP = 1_100_000;
+const FILE_DIGEST_LIMIT = 640; // 512 loaded dependencies, 64 changed surfaces, and recent observations.
+type SourceKind = 'ui' | 'svg';
+type FileDigests = Map<string, { key: string; hash: string; kind?: SourceKind | null }>;
+const fileIdentity = (stat: BigIntStats) => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+const sourceKind = (file: string, bytes: Buffer): SourceKind | null => {
+  if (/\.svg$/i.test(file) && !/(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|skills|references)\//i.test(file)) return 'svg';
+  const content = bytes.subarray(0, 24000).toString('utf8');
+  return uiFileCue(file, content) && (/\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro|twig|erb|hbs|php|phtml)$/i.test(file)
+    || /document\.createElement|\.innerHTML\s*=|React\.createElement/.test(content)) ? 'ui' : null;
+};
 
 interface SessionCreative {
   direction?: CreativeDirection;
@@ -50,6 +61,7 @@ interface SessionCreative {
   autoSvgStamp?: string;
   browserOrigins: Map<string, { source: string; stamp: string }>;
   verifiedHashes: Map<string, string>;
+  fileDigests: FileDigests;
   /** A delivered film's direction was reviewed with video_qa record. */
   mediaReviewed?: boolean;
   /** Latched once a strong UI prompt activates the UI system-prompt block so follow-ups keep the same prompt prefix. */
@@ -102,7 +114,7 @@ export default function artDirection(pi: any) {
     assertOwner(ctx);
     const sid = JSON.stringify([path.resolve(ctx.cwd), ctx?.sessionManager?.getSessionId?.() ?? '']);
     let state = sessions.get(sid);
-    if (!state) { state = { receipts: [], blockingRuns: new Map(), evidence: createCreativeEvidence(), followups: 0, browserOrigins: new Map(), verifiedHashes: new Map(), loadedStats: new Map() }; sessions.set(sid, state); }
+    if (!state) { state = { receipts: [], blockingRuns: new Map(), evidence: createCreativeEvidence(), followups: 0, browserOrigins: new Map(), verifiedHashes: new Map(), fileDigests: new Map() }; sessions.set(sid, state); }
     while (sessions.size > 8) sessions.delete(sessions.keys().next().value!);
     if (activeKey !== sid || active?.sessionManager !== ctx.sessionManager) {
       disposeNotice?.(); active = ctx; activeKey = sid; epoch++;
@@ -130,26 +142,59 @@ export default function artDirection(pi: any) {
       return found.length > 0 && found.every(row => publicAddress(row.address));
     } catch { return false; }
   };
-  const hashFile = async (file: string, cwd: string, maxBytes = 4 * 1024 * 1024) => {
+  const digestFile = async (file: string, stat: BigIntStats, { digests, classify, allowAlias = false }: {
+    digests?: FileDigests; classify?: (bytes: Buffer) => SourceKind | null; allowAlias?: boolean;
+  } = {}) => {
+    const key = fileIdentity(stat);
+    const cached = digests?.get(file);
+    if (cached?.key === key && (!classify || cached.kind !== undefined)) return cached;
+    const resolved = await fs.realpath(file);
+    if (!allowAlias && resolved !== file) throw Error('UI evidence file changed before the read.');
+    const handle = await fs.open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    let bytes: Buffer;
+    try {
+      const opened = await handle.stat({ bigint: true });
+      if (!opened.isFile() || fileIdentity(opened) !== key) throw Error('UI evidence file changed before the read.');
+      // The callers have checked the initial size cap. Read at most that many
+      // bytes even if a file grows before the descriptor is closed.
+      bytes = Buffer.allocUnsafe(Number(stat.size));
+      let offset = 0;
+      while (offset < bytes.length) {
+        const { bytesRead } = await handle.read(bytes, offset, bytes.length - offset, offset);
+        if (!bytesRead) break;
+        offset += bytesRead;
+      }
+      if (offset !== bytes.length || fileIdentity(await handle.stat({ bigint: true })) !== key || fileIdentity(await fs.stat(file, { bigint: true })) !== key)
+        throw Error('UI evidence file changed during the read.');
+    } finally { await handle.close(); }
+    const hash = cached?.key === key ? cached.hash : createHash('sha256').update(bytes).digest('hex');
+    const result = { key, hash, kind: classify?.(bytes) };
+    if (digests) {
+      digests.delete(file);
+      digests.set(file, result);
+      if (digests.size > FILE_DIGEST_LIMIT) digests.delete(digests.keys().next().value!);
+    }
+    return result;
+  };
+  const hashFile = async (file: string, cwd: string, { maxBytes = 4 * 1024 * 1024, digests }: {
+    maxBytes?: number; digests?: FileDigests;
+  } = {}) => {
     const root = await fs.realpath(cwd), resolved = await fs.realpath(path.resolve(cwd, file));
     const relative = path.relative(root, resolved);
     if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw Error('UI evidence requires an existing file inside the workspace.');
-    const stat = await fs.stat(resolved);
+    const stat = await fs.stat(resolved, { bigint: true });
     if (!stat.isFile() || stat.size > maxBytes) throw Error('UI evidence file exceeds its bounded read.');
-    const bytes = await fs.readFile(resolved);
-    return { file: relative.replaceAll('\\', '/'), hash: createHash('sha256').update(bytes).digest('hex'), content: bytes.subarray(0, 24000).toString('utf8') };
+    const source = relative.replaceAll('\\', '/');
+    const { hash, kind } = await digestFile(resolved, stat, { digests, classify: digests ? bytes => sourceKind(source, bytes) : undefined });
+    return { file: source, hash, kind };
   };
-  // What a file a reviewed page loaded is now: its bytes (size and times for one over 8 MB), read again only when its
-  // size or times moved, so a rebuild or a touch that leaves the bytes alone changes nothing.
-  const identify = async (state: any, file: string): Promise<string> => {
+  // Review dependencies over 8 MB use their filesystem identity. Smaller files
+  // keep byte identity so a touch or byte-identical rebuild changes nothing.
+  const identify = async (state: SessionCreative, file: string): Promise<string> => {
     try {
-      const stat = await fs.stat(file);
+      const stat = await fs.stat(file, { bigint: true });
       if (!stat.isFile()) return 'missing';
-      const key = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}`, known = state.loadedStats.get(file);
-      if (known?.key === key) return known.identity;
-      const identity = stat.size > 8 * 1024 * 1024 ? key : createHash('sha256').update(await fs.readFile(file)).digest('hex');
-      state.loadedStats.set(file, { key, identity });
-      return identity;
+      return stat.size > 8 * 1024 * 1024 ? fileIdentity(stat) : (await digestFile(file, stat, { digests: state.fileDigests, allowAlias: true })).hash;
     } catch { return 'missing'; }
   };
   /** Record what a review's page loaded. A page on the web loads nothing from the workspace; one served locally by
@@ -171,7 +216,7 @@ export default function artDirection(pi: any) {
     const ticket = epoch;
     for (const row of state.evidence.changed()) {
       let hash = 'unavailable';
-      try { hash = (await hashFile(row.file, ctx.cwd)).hash; } catch (error: any) { if (error?.code === 'ENOENT') hash = 'missing'; }
+      try { hash = (await hashFile(row.file, ctx.cwd, { digests: state.fileDigests })).hash; } catch (error: any) { if (error?.code === 'ENOENT') hash = 'missing'; }
       if (ticket !== epoch) return state;
       state.evidence.observe(row.file, hash, row.kind);
     }
@@ -190,32 +235,41 @@ export default function artDirection(pi: any) {
     if (candidates.length > 64) state.evidence.incompleteChangeCoverage();
     for (const raw of candidates.slice(0, 64)) {
       try {
-        const row = await hashFile(raw, ctx.cwd);
+        const row = await hashFile(raw, ctx.cwd, { digests: state.fileDigests });
         if (ticket !== epoch) return;
         if (state.verifiedHashes.get(row.file) === row.hash) continue;
-        if (/\.svg$/i.test(row.file) && !/(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|skills|references)\//i.test(row.file)) state.evidence.observe(row.file, row.hash, 'svg');
-        else if (uiFileCue(row.file, row.content) && (/\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|astro|twig|erb|hbs|php|phtml)$/i.test(row.file) || /document\.createElement|\.innerHTML\s*=|React\.createElement/.test(row.content))) state.evidence.observe(row.file, row.hash, 'ui');
+        if (row.kind) state.evidence.observe(row.file, row.hash, row.kind);
       } catch { /* the native mutation owner records unavailable paths */ }
     }
     if (ticket !== epoch) return;
     await refresh(ctx);
     if (ticket !== epoch) return;
-    if (state.evidence.changed().length) pi.events?.emit?.('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['render_see', 'ui_explore', 'visual_review', 'image_understand', 'browser_session', 'creative_direct', ...(state.evidence.changed().some(row => row.kind === 'svg') ? ['svg_inspect'] : [])] }); // svg_inspect only where an SVG changed: every wire addition re-bills the cached transcript
-    const svgs = state.evidence.changed().filter(row => row.kind === 'svg').slice(0, 8);
-    if (svgs.length && state.autoSvgStamp !== state.evidence.stamp()) {
+    const changed = state.evidence.changed();
+    const svgs = changed.filter(row => row.kind === 'svg').slice(0, 8);
+    if (changed.length) pi.events?.emit?.('adaptive-pipeline-selection', { sessionManager: ctx.sessionManager, names: ['render_see', 'ui_explore', 'visual_review', 'image_understand', 'browser_session', 'creative_direct', ...(svgs.length ? ['svg_inspect'] : [])] }); // svg_inspect only where an SVG changed: every wire addition re-bills the cached transcript
+    if (svgs.length) {
+      const stamp = state.evidence.stamp();
+      if (state.autoSvgStamp === stamp) return state;
       try {
         const report = await svgReviewRun({ paths: svgs.map(row => row.file) }, ctx.cwd);
         if (ticket !== epoch) return;
+        await refresh(ctx);
+        if (ticket !== epoch) return;
+        if (state.evidence.stamp() !== stamp) return state;
         for (const review of report.reviews) state.evidence.geometry(review.file, review.findings.filter(f => f.severity === 'high').length);
-        state.autoSvgStamp = state.evidence.stamp();
-        pi.appendEntry?.('creative-svg-auto-v1', { stamp: state.evidence.stamp(), reviews: report.reviews });
+        state.autoSvgStamp = stamp;
+        pi.appendEntry?.('creative-svg-auto-v1', { stamp, reviews: report.reviews });
       } catch { /* gaps stay open; automatic checks never prevent the edit */ }
     }
+    return state;
   };
   // Standing caveats of the review tools already in this conversation; another conversation, or a
   // compaction that dropped the replies carrying them, starts over.
   const standing = new Set<string>();
-  for (const name of ['session_start', 'session_switch', 'session_tree', 'session_fork']) pi.on?.(name, (_event: any, ctx: any) => { epoch++; calls.clear(); standing.clear(); observationTail = Promise.resolve(); if (ctx?.cwd) sessionOf(ctx); });
+  for (const name of ['session_start', 'session_switch', 'session_tree', 'session_fork']) pi.on?.(name, (_event: any, ctx: any) => {
+    epoch++; calls.clear(); standing.clear(); observationTail = Promise.resolve();
+    if (ctx?.cwd) sessionOf(ctx).state.fileDigests = new Map();
+  });
   pi.on?.('session_compact', () => { standing.clear(); });
   pi.on?.('session_shutdown', () => { epoch++; calls.clear(); standing.clear(); observationTail = Promise.resolve(); sessions.clear(); disposeNotice?.(); active = undefined; activeKey = ''; });
   pi.on?.('input', (event: any, ctx: any) => {
@@ -226,7 +280,7 @@ export default function artDirection(pi: any) {
       for (const row of state.evidence.changed()) state.verifiedHashes.set(row.file, row.hash);
       while (state.verifiedHashes.size > 64) state.verifiedHashes.delete(state.verifiedHashes.keys().next().value!);
       state.evidence = createCreativeEvidence();
-      state.loadedStats.clear();
+      state.fileDigests = new Map();
       state.browserOrigins.clear();
       state.uiPromptActive = false;
     }
@@ -269,9 +323,10 @@ export default function artDirection(pi: any) {
     if (!call || call.tool !== event.toolName || call.session !== ctx?.sessionManager || call.epoch !== epoch) return;
     calls.delete(event.toolCallId);
     const committed = event.details?.fileMutation?.resolved;
-    if ((!event.isError || committed) && ['write', 'edit'].includes(event.toolName) && typeof (committed ?? call.input.path) === 'string') await observePaths([committed ?? call.input.path], ctx);
+    let state;
+    if ((!event.isError || committed) && ['write', 'edit'].includes(event.toolName) && typeof (committed ?? call.input.path) === 'string') state = await observePaths([committed ?? call.input.path], ctx);
     if (call.epoch !== epoch) return;
-    const state = await refresh(ctx);
+    state ??= await refresh(ctx);
     if (event.isError || call.epoch !== epoch) return;
     // A film's direction is reviewed against its delivered frames with video_qa
     // record. visual_review's page rubric rejects raster media, so requiring it
@@ -281,7 +336,7 @@ export default function artDirection(pi: any) {
       for (const image of event.details.images ?? []) if (typeof image.hash === 'string' && !image.region) state.evidence.vision(image.hash);
     }
     if (event.toolName === 'read' && ctx.model?.input?.includes('image') && event.content?.some((part: any) => part.type === 'image')) {
-      try { state.evidence.vision((await hashFile(call.input.path, ctx.cwd, 20 * 1024 * 1024)).hash); } catch { /* unmatched pixels cannot certify a run */ }
+      try { state.evidence.vision((await hashFile(call.input.path, ctx.cwd, { maxBytes: 20 * 1024 * 1024 })).hash); } catch { /* unmatched pixels cannot certify a run */ }
     }
     // What the browser answered a workspace page with is what that page depends on, whichever reply reports it.
     if (event.toolName === 'browser_session' && event.details && 'localFiles' in event.details)
@@ -361,7 +416,7 @@ export default function artDirection(pi: any) {
           if (image) {
             content.push(image);
             const state = sessionOf(ctx).state;
-            const hash = (await hashFile(pixels, cwd, 20 * 1024 * 1024)).hash;
+            const hash = (await hashFile(pixels, cwd, { maxBytes: 20 * 1024 * 1024 })).hash;
             assertOwner({ [owner]: ticket });
             state.evidence.vision(hash);
           }
@@ -448,7 +503,7 @@ export default function artDirection(pi: any) {
         const began = Date.now();
         const run = await visualReviewRun({ source: params.source, width: params.width, height: params.height, colorScheme: params.colorScheme, direction, responsive }, cwd, signal, capture);
         await refresh(ctx);
-        state.evidence.run({ ...run, originalSource: run.source, source: sourceKey(run.source, cwd), surface } as any, (await hashFile(run.file, cwd, 20 * 1024 * 1024)).hash, false, stamp);
+        state.evidence.run({ ...run, originalSource: run.source, source: sourceKey(run.source, cwd), surface } as any, (await hashFile(run.file, cwd, { maxBytes: 20 * 1024 * 1024 })).hash, false, stamp);
         await recordLoaded(state, run.loaded, run.source, began);
         return { result: run, pixels: run.file };
       }
@@ -494,7 +549,7 @@ export default function artDirection(pi: any) {
       const began = Date.now();
       const result = await uiExploreRun(params, ctx.cwd as string, signal, capture);
       await refresh(ctx);
-      const hash = result.preview ? (await hashFile(result.preview, ctx.cwd, 20 * 1024 * 1024)).hash : '';
+      const hash = result.preview ? (await hashFile(result.preview, ctx.cwd, { maxBytes: 20 * 1024 * 1024 })).hash : '';
       state.evidence.matrix(surface, result, stamp, hash);
       await recordLoaded(state, result.loaded, params.source, began);
       return { result, pixels: result.preview };

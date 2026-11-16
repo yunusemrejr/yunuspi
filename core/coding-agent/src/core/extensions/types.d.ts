@@ -1048,6 +1048,8 @@ export interface ExtensionAPI {
     }): Promise<void>;
     /** Append a custom entry to the session for state persistence (not sent to LLM). */
     appendEntry<T = unknown>(customType: string, data?: T): void;
+    /** Bind a durable auxiliary receipt sink to the current session before dispatch. */
+    bindAuxiliaryUsage?(): (data: unknown) => boolean;
     /** Set the session display name (shown in session selector). */
     setSessionName(name: string): void;
     /** Get the current session name, if set. */
@@ -1324,6 +1326,7 @@ export interface ExtensionActions {
     sendMessage: SendMessageHandler;
     sendUserMessage: SendUserMessageHandler;
     appendEntry: AppendEntryHandler;
+    bindAuxiliaryUsage: () => (data: unknown) => boolean;
     setSessionName: SetSessionNameHandler;
     getSessionName: GetSessionNameHandler;
     setLabel: SetLabelHandler;

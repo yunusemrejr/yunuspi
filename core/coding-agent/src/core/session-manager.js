@@ -912,11 +912,11 @@ export class SessionManager {
         return entry.id;
     }
     /** Persist summary accounting without creating a navigable branch node. */
-    appendSummaryUsageReceipt(data) {
+    appendSummaryUsageReceipt(data, parentId = this.leafId) {
         this.flush();
         const entry = {
             type: "custom", customType: "auxiliary-model-usage-v1", accountingOnly: true,
-            id: generateId(this.byId), parentId: this.leafId, timestamp: new Date().toISOString(), data,
+            id: generateId(this.byId), parentId, timestamp: new Date().toISOString(), data,
         };
         this._appendEntry(entry, true);
         return entry;
@@ -1225,7 +1225,8 @@ export class SessionManager {
         };
         // Collect labels for entries in the path
         const pathEntryIds = new Set(pathWithoutLabels.map((e) => e.id));
-        const accountingEntries = this.getBranchAccountingEntries(path).map(entry => ({
+        const accountingEntries = this.getBranchAccountingEntries(path)
+            .filter(entry => entry.data?.owner !== "jev" || entry.data.status !== "pending").map(entry => ({
             ...entry, parentId: pathEntryIds.has(entry.parentId) ? entry.parentId : null,
         }));
         const labelsToWrite = [];

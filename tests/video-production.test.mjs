@@ -159,8 +159,16 @@ test('real browser take outside maintenance scope retains Chromium sandbox and c
   catch (error) { if (process.env.PI_BROWSER_REQUIRE === '1' || !/Executable doesn't exist|not installed|Distribution.*not found|browserType.launch/.test(error.message)) throw error; t.skip(error.message); return; }
   assert.equal(result.decodeVerified, true); assert.equal(result.frames, 30); assert.ok(result.capturedFrames > 5);
   const events = JSON.parse(await fs.readFile(result.events, 'utf8'));
-  const click = events.eventLog.find(e => e.kind === 'click'); assert.ok(click.t >= .4 && click.t < 1);
-  assert.ok(events.eventLog.some(e => e.kind === 'text-visible')); assert.equal(events.sourceFrames.length, 30);
+  const click = events.eventLog.find(e => e.kind === 'click');
+  const visible = events.eventLog.find(e => e.kind === 'text-visible');
+  assert.ok(click && visible, 'the take records the click and its observed response');
+  // Planned starts are earliest starts for a sequential take. A slow browser
+  // can finish the click after the next step's planned start.
+  const { at, duration } = params.steps[0];
+  assert.ok(click.t >= at + duration - 1 / params.fps && click.t <= visible.t,
+    `click at ${click.t}s precedes observed text at ${visible.t}s`);
+  assert.ok(visible.t < params.seconds, `the visible response arrived within the ${params.seconds}s take`);
+  assert.equal(events.sourceFrames.length, 30);
   assert.ok(events.sourceFrames.slice(1).every((f, i) => f.sourceT >= events.sourceFrames[i].sourceT));
   const frames = await exec('ffmpeg', ['-v', 'error', '-i', result.artifact.path, '-vf', 'select=eq(n\\,0)+eq(n\\,29)', '-vsync', '0', '-f', 'framemd5', '-']);
   const hashes = frames.stdout.split('\n').filter(line => line && !line.startsWith('#')).map(line => line.split(',').at(-1).trim());

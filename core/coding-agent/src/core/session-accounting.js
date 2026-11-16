@@ -57,6 +57,7 @@ export function hasRecordedTokenUsage(usage, noExecution = false) {
 
 const elevenLabsMediaOwner = owner => owner === 'audio_generate' || owner === 'narration_tts';
 const elevenLabsRequestId = id => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(id) ? id : undefined;
+const linkedJevMetric = data => typeof data?.billingReceiptId === 'string' && /^[0-9a-f-]{36}$/.test(data.billingReceiptId);
 function elevenLabsBillingUnits(value) {
   const amount = typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : value;
   return typeof amount === 'number' && Number.isFinite(amount) && amount >= 0 ? amount : undefined;
@@ -130,6 +131,7 @@ export function collectAuxiliaryModelUsage(entries) {
     const tokens = fields.filter(k => k !== 'reasoning').reduce((sum,k) => sum + (usage[k] ?? 0),0);
     const next = {id:data.id, owner:data.owner, route, status:data.status, usage, usageRecorded, tokens, evidence,
       accountingOnly:entry.accountingOnly === true || old?.accountingOnly === true, hasUsage:!!data.usage || old?.hasUsage === true};
+    if (data.owner === 'jev' && data.provider === 'openrouter' && typeof data.site === 'string' && /^[\w.-]{1,48}$/.test(data.site)) next.jevSite = data.site;
     if (data.provider === 'elevenlabs' && elevenLabsMediaOwner(data.owner)) {
       next.elevenLabsMedia = true;
       next.requestId = elevenLabsRequestId(data.requestId) ?? old?.requestId;
@@ -293,9 +295,13 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
     if (entry.type === 'custom' && ['jev-usage-v1','span-usage-v1'].includes(entry.customType)) {
       const data = entry.data;
       const span = entry.customType === 'span-usage-v1';
+      // A logical decision can be saved after navigation. Its source branch
+      // owns the submitted request, so following the metric must not move cost.
+      if (!span && linkedJevMetric(data)) continue;
       const known = valid(data?.costUsd) && (!span || data.costUsd > 0 || data.costSource === 'provider-reported');
       const cost = known ? data.costUsd : 0;
-      const evidence = {reported:span ? cost : 0, estimated:span ? 0 : cost, unknown:!known && data?.cached !== true, subscription:false, seen:known || data?.cached === true, estimatedUsage:!span && data?.cached !== true};
+      const reported = span || data?.costSource === 'provider-reported';
+      const evidence = {reported:reported ? cost : 0, estimated:reported ? 0 : cost, unknown:!known && data?.cached !== true, subscription:false, seen:known || data?.cached === true, estimatedUsage:!reported && data?.cached !== true};
       auxiliary = mergeCostEvidence(auxiliary, evidence);
       addRow('auxiliary', typeof data?.model === 'string' && data.model ? `openrouter/${data.model.slice(0,128)}` : `openrouter/${span?'span':'jev'}`, evidence);
     }
@@ -426,6 +432,13 @@ export function collectSessionMetrics(entries, live) {
  const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:Object.create(null),skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:Object.create(null),hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,confirmDialogs:0,confirmWaitMs:0,trimmedChars:0,addedChars:0,telemetry:false,rawReturnedChars:0,uncachedInput:0,cachedReuse:0,noCacheTurns:0,noCacheInput:0,invalidationTurns:0,invalidationExcessTokens:0,abortedTelemetry:0,assistantTurns:0,perModel:Object.create(null),jev:{hits:0,cached:0,tokens:0,costUsd:0,bySite:Object.create(null)},span:{hits:0,cached:0,tokens:0,costUsd:0,shadow:0,present:0}};
  const calls=new Set(), results=new Set(), agents=new Map(), workflows=new Map(), segments=new Map(), activities=new Map(), read=new Set(), partial=new Set(), routed=new Set(), callInputs=new Map(), aliases=new Map(), groups=[],nativeGroups=new Set(),legacyFusions=[];
  const number=v=>Number.isFinite(v)&&v>=0?v:0;
+ const addJevUsage=(site,hits,tokens,costUsd)=>{
+  m.jev.tokens+=tokens;
+  m.jev.costUsd+=costUsd;
+  if(!m.jev.bySite[site]&&Object.keys(m.jev.bySite).length<64)m.jev.bySite[site]={hits:0,tokens:0,costUsd:0};
+  const row=m.jev.bySite[site];
+  if(row){row.hits+=hits;row.tokens+=tokens;row.costUsd+=costUsd;}
+ };
  const name=p=>String(p).replace(/\\/g,'/').split('/').filter(Boolean).slice(-2,-1)[0]||String(p);
  const text=c=>typeof c==='string'?c:Array.isArray(c)?c.filter(p=>p?.type==='text').map(p=>p.text).join('\n'):'';
  const usage=u=>{if(u)for(const k of ['input','output','cacheRead','cacheWrite','reasoning'])m[k]+=number(u[k]);};
@@ -553,11 +566,10 @@ export function collectSessionMetrics(entries, live) {
   }
   if(e.type==='custom'&&e.customType==='jev-usage-v1'){
    const d=e.data??{};
-   m.jev.hits++;if(d.cached===true)m.jev.cached++;m.jev.tokens+=number(d.inputTokens);
-   m.jev.costUsd+=number(d.costUsd);
+   m.jev.hits++;if(d.cached===true)m.jev.cached++;
    const site=typeof d.site==='string'&&d.site?d.site.slice(0,48):'unknown';
-   if(!m.jev.bySite[site]&&Object.keys(m.jev.bySite).length<64)m.jev.bySite[site]={hits:0,tokens:0,costUsd:0};
-   const row=m.jev.bySite[site];if(row){row.hits++;row.tokens+=number(d.inputTokens);row.costUsd+=number(d.costUsd);}
+   const linked=linkedJevMetric(d);
+   addJevUsage(site,1,linked?0:number(d.inputTokens),linked?0:number(d.costUsd));
   }
   if(e.type==='custom'&&e.customType==='span-usage-v1'){
    const d=e.data??{};
@@ -629,6 +641,8 @@ export function collectSessionMetrics(entries, live) {
  m.auxiliary={calls:auxiliaryRequests.rows.length,pending:0,usageRecorded:0,unknownUsage:0,truncated:auxiliaryRequests.truncated,input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,tokens:0};
  const auxiliaryModels=new Map();
  for(const row of auxiliaryRequests.rows){
+  if(row.owner==='jev'&&row.route.startsWith('openrouter/'))
+   addJevUsage(row.jevSite??'unknown',0,number(row.usage.input),row.evidence.reported+row.evidence.estimated);
   if(row.status==='pending')m.auxiliary.pending++;
   if(row.usageRecorded)m.auxiliary.usageRecorded++;else m.auxiliary.unknownUsage++;
   const model=auxiliaryModels.get(row.route)??{route:row.route,calls:0,input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0};

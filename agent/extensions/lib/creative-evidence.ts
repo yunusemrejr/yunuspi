@@ -19,7 +19,8 @@ export function createCreativeEvidence() {
   // could name its files, evidence goes stale when one of them changes; once one could not, any workspace change counts.
   const loaded = new Map<string, string>();
   let unnamed = false, moved = 0;
-  const stamp = () => createHash('sha256').update(JSON.stringify([workspace, direction, [...changes].sort()])).digest('hex').slice(0, 20);
+  let revision: string | undefined;
+  const stamp = () => revision ??= createHash('sha256').update(JSON.stringify([workspace, direction, [...changes].sort()])).digest('hex').slice(0, 20);
   const current = (entry: { stamp: string } | undefined) => entry?.stamp === stamp();
   const interactionKey = (source: string) => /^https?:\/\//i.test(source) ? createHash('sha256').update(new URL(source).href).digest('hex') : source;
   const surfaces = (kind: 'ui' | 'svg') => {
@@ -70,16 +71,25 @@ export function createCreativeEvidence() {
     changed: () => [...changes].map(([file, row]) => ({ file, ...row })),
     incompleteChangeCoverage() { overflow = true; },
     observe(file: string, hash: string, kind: 'ui' | 'svg') {
-      if (hash === 'missing') { changes.delete(file); return; }
-      if (changes.size >= 64 && !changes.has(file)) { overflow = true; return; }
+      if (hash === 'missing') {
+        if (changes.delete(file)) revision = undefined;
+        return;
+      }
+      const previous = changes.get(file);
+      if (changes.size >= 64 && !previous) { overflow = true; return; }
+      if (previous?.hash === hash && previous.kind === kind) return;
       changes.set(file, { hash, kind });
+      revision = undefined;
     },
     /** A change somewhere in the workspace. It counts only while the files behind the reviews are not all known:
      * notes, a licence or a script no reviewed page loads cannot have altered what was reviewed. */
     workspace(token: string) {
       if (token === seen) return;
       seen = token;
-      if (unnamed || !loaded.size) workspace = token;
+      if ((unnamed || !loaded.size) && workspace !== token) {
+        workspace = token;
+        revision = undefined;
+      }
     },
     /** The local files a review's page asked for, each with its identity now. Without them the review could not
      * name its files (a page served by something else, or too many requests). */
@@ -94,8 +104,13 @@ export function createCreativeEvidence() {
       if (!loaded.has(file) || loaded.get(file) === identity) return;
       loaded.set(file, identity);
       workspace = `loaded:${++moved}`;
+      revision = undefined;
     },
-    direction(token: string) { direction = token; },
+    direction(token: string) {
+      if (token === direction) return;
+      direction = token;
+      revision = undefined;
+    },
     run(capture: Capture, imageHash: string, seen: boolean, capturedStamp = stamp()) {
       if (!capture.consistent || capturedStamp !== stamp() || !imageHash) throw Error('Capture revision changed or is unavailable; run visual_review again on the final source.');
       runs.set(capture.runId, { capture, stamp: capturedStamp, imageHash, seen });

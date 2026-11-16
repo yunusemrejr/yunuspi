@@ -117,6 +117,7 @@ const DETERMINISTIC_REJECTION_PATTERN = /data_inspection_failed|inappropriate co
 const PROVIDER_COOLDOWN_PATTERN = /\b429\b|\b503\b|rate.?limit|too many requests|service.?unavailable|temporar(?:ily)? unavailable|upstream_unavailable|json error injected into sse stream|stream_read_error|finish_reason: error/i;
 
 export function usesProviderCooldown(message) {
+    if (message.providerRetry?.responseBodyInterrupted === true) return false;
     const status = message.providerRetry?.status;
     return status === 429 || status === 503 || PROVIDER_COOLDOWN_PATTERN.test(message.errorMessage ?? "");
 }
@@ -296,6 +297,8 @@ export function isRetryableAssistantError(message) {
     }
     if (message.stopReason !== "error" || message.providerRetry?.retryAllowed === false)
         return false;
+    if (message.providerRetry?.responseBodyInterrupted === true)
+        return true;
     const errorMessage = message.errorMessage ?? "";
     if (NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(errorMessage))
         return false;

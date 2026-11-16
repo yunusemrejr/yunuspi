@@ -25,12 +25,12 @@ const jsonOk = (body) => ({ ok: true, status: 200, json: async () => body, text:
 const httpFail = (status, body) => ({ ok: false, status, json: async () => ({}), text: async () => body });
 
 function harness(fetchImpl) {
-  const timers = [];
-  const ledger = [];
-  const pi = { appendEntry: (type, data) => ledger.push({ type, data }) };
+  let elapsed = 0;
+  const ledger = [], receipts = [];
+  const pi = { appendEntry: (type, data) => (type === 'jev-usage-v1' ? ledger : receipts).push({ type, data }) };
   jev.resetJevClient();
-  jev.configureJevClient({ fetchImpl, now: () => Date.now(), schedule: (fn, ms) => { timers.push({ fn, ms }); return {}; }, openMs: 50 });
-  return { timers, ledger, pi };
+  jev.configureJevClient({ fetchImpl, now: () => Date.now() + elapsed, openMs: 5000 });
+  return { advance: ms => { elapsed += ms; }, ledger, receipts, pi };
 }
 
 const ANSWERS = { ping: { type: "noul", noul: 0.9 } };
@@ -115,46 +115,50 @@ test("a caller-selected deadline bounds the whole advisory call", async () => {
   assert.ok(Date.now() - started < 1_000, "the short caller deadline is honored instead of the full cascade deadline");
 });
 
-test("transport failure opens the breaker and background probe recovers", async () => {
+test("transport failure opens the breaker and admits a single real request after cooldown", async () => {
   let mode = "down";
   let fetches = 0;
-  const { timers, pi } = harness(async (url) => {
+  const entered = Promise.withResolvers(), release = Promise.withResolvers();
+  const { advance, pi } = harness(async (url) => {
     if (String(url).includes("/api/v1/models")) return emptyModels();
     fetches++;
     if (mode === "down") throw Error("socket hang up");
+    entered.resolve();
+    await release.promise;
     return decisionsOk();
   });
   const call = () => jev.askJev("probe", "hello world", { ping: { type: "noul", instructions: "Affirmative?" } }, { pi });
   assert.equal((await call()).skipped, "unavailable");
   assert.equal(jev.jevHealth().state, "open");
-  assert.equal(timers.length, 1);
-  assert.ok(timers[0].ms <= 50 * 60 * 1000 + 1 || timers[0].ms >= 0);
   const before = fetches;
   assert.equal((await call()).skipped, "unhealthy");
   assert.equal(fetches, before, "open breaker fails fast without fetching");
   mode = "up";
-  await timers[0].fn();
-  for (let i = 0; i < 200 && jev.jevHealth().state === "open"; i++)
-    await new Promise((r) => setTimeout(r, 5));
-  assert.equal(jev.jevHealth().state, "closed");
-  const recovered = await call();
+  advance(5001);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(fetches, before, "elapsed time alone sends no paid probe");
+  const recovering = call();
+  await entered.promise;
+  assert.equal((await jev.askJev('contender', 'other request', { ping: { type: 'noul' } }, { pi })).skipped, 'unhealthy');
+  assert.equal(fetches, before + 1);
+  release.resolve();
+  const recovered = await recovering;
   assert.equal(recovered.ok, true);
-  assert.equal(recovered.usage.model, "~typesafe/jev-latest", "recovery restarts the cascade from the top");
+  assert.equal(jev.jevHealth().state, "closed");
 });
 
-test("failed probe re-arms the breaker for another window", async () => {
-  const { timers, pi } = harness(async (url) => {
+test("failed real trial re-arms the breaker for another window", async () => {
+  const { advance, pi } = harness(async (url) => {
     if (String(url).includes("/api/v1/models")) return emptyModels();
     return httpFail(500, "upstream error");
   });
   const call = () => jev.askJev("probe", "hello world", { ping: { type: "noul", instructions: "Affirmative?" } }, { pi });
   await call();
   assert.equal(jev.jevHealth().state, "open");
-  await timers[0].fn();
-  for (let i = 0; i < 200 && timers.length < 2; i++)
-    await new Promise((r) => setTimeout(r, 5));
+  advance(5001);
+  assert.equal((await call()).skipped, 'unavailable');
   assert.equal(jev.jevHealth().state, "open");
-  assert.equal(timers.length, 2, "probe rescheduled");
+  assert.equal((await call()).skipped, 'unhealthy');
 });
 
 test("auth failure stops the cascade and opens the breaker once", async () => {
@@ -231,7 +235,7 @@ test("an in-flight judgment snapshots state and questions for validation and cac
   assert.deepEqual(sent[0].state, originalState);
 });
 
-test("a cancelled leader does not own a surviving caller's paid judgment", async () => {
+test("a surviving coalescer uses the answer while the submitting session owns the billed request", async () => {
   let respond, started, fetches = 0;
   const begun = new Promise(resolve => { started = resolve; });
   harness(async () => {
@@ -252,12 +256,145 @@ test("a cancelled leader does not own a surviving caller's paid judgment", async
   respond(decisionsOk());
   const result = await follower;
   assert.equal(result.ok, true);
-  assert.equal(result.usage.cached, false);
+  assert.equal(result.usage.cached, true);
   assert.equal(fetches, 1);
-  assert.equal(leaderLedger.length, 0);
+  assert.deepEqual(leaderLedger.filter(row=>row.type==='auxiliary-model-usage-v1').map(row=>row.data.status),['pending','completed']);
   assert.equal(followerLedger.length, 1);
   assert.equal(followerLedger[0].data.site, "rank");
-  assert.ok(followerLedger[0].data.costUsd > 0);
+  assert.equal(followerLedger[0].data.costUsd, 0);
+});
+
+test('malformed billed answers and their fallback both reach the canonical ledger', async () => {
+  let calls = 0;
+  const { pi, ledger, receipts } = harness(async () => ++calls === 1
+    ? jsonOk({ answers: { ping: { type: 'noul', noul: 99 } }, usage: { input_tokens: 10, cost: .03 } })
+    : jsonOk({ answers: ANSWERS, usage: { input_tokens: 10, cost: .02 } }));
+  const { collectSessionCost, collectSessionMetrics } = await import('@yunuspi/coding-agent/session-accounting');
+  const params = ['bill-before-validation', 'synthetic evidence', { ping: { type: 'noul' } }];
+  assert.equal((await jev.askJev(...params, { pi })).ok, true);
+  assert.equal((await jev.askJev(...params, { pi })).usage.cached, true);
+  assert.equal(calls, 2);
+  assert.deepEqual(receipts.map(row=>row.data.status), ['pending','failed','pending','completed']);
+  assert.equal(ledger[0].data.billingReceiptId, receipts[3].data.id);
+  const entries = [...receipts,...ledger].map(({ type, data })=>({ type:'custom', customType:type, data }));
+  const cost = collectSessionCost(entries);
+  assert.equal(cost.reported, .05);
+  assert.equal(cost.estimated, 0);
+  assert.equal(cost.unknown, false);
+  const metrics = collectSessionMetrics(entries);
+  assert.equal(metrics.jev.costUsd,.05);
+  assert.equal(metrics.jev.tokens,20);
+  assert.deepEqual(metrics.jev.bySite['bill-before-validation'],{hits:2,tokens:20,costUsd:.05});
+  const { addAuxiliaryUsage, snapshotChildUsage } = await import(pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/shared/cost-accounting.ts')));
+  const child = { input:0, output:0, cacheRead:0, cacheWrite:0, turns:0, cost:0 };
+  for (const entry of entries) addAuxiliaryUsage(child,{ type:'entry_appended', entry });
+  assert.equal(snapshotChildUsage(child).costDetails.reported,.05);
+});
+
+test('last waiter cancellation settles the original billed response even when delivery was abandoned', async () => {
+  const sent = Promise.withResolvers(), response = Promise.withResolvers(), settled = Promise.withResolvers();
+  const controller = new AbortController();
+  let sends = 0;
+  harness(async (_url, {signal}) => {
+    sends++;
+    sent.resolve(signal);
+    return response.promise;
+  });
+  const rows = [];
+  const pi = { appendEntry(_type, data) { rows.push(data); if (data.status === 'cancelled') settled.resolve(); } };
+  const params = ['abandoned-bill','same evidence',{ping:{type:'noul'}}];
+  const first = jev.askJev(...params,{pi,signal:controller.signal});
+  const networkSignal = await sent.promise;
+  const second = jev.askJev(...params,{pi,signal:controller.signal});
+  controller.abort();
+  assert.equal((await first).skipped,'aborted');
+  assert.equal((await second).skipped,'aborted');
+  assert.equal(networkSignal.aborted,true);
+  response.resolve(jsonOk({ answers:ANSWERS, usage:{ cost:.037 } }));
+  await settled.promise;
+  assert.equal(sends,1);
+  assert.deepEqual(rows.map(row=>row.status),['pending','cancelled']);
+  assert.equal(rows[0].id, rows[1].id);
+  assert.deepEqual(rows[1].usage.cost,{total:.037,source:'provider-reported',complete:true});
+});
+
+test('an expired last caller records timeout and preserves unknown provider billing', async () => {
+  const sent = Promise.withResolvers(), settled = Promise.withResolvers(), controller = new AbortController();
+  harness(async (_url, {signal}) => {
+    sent.resolve();
+    return new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));
+  });
+  const rows = [];
+  const pi = {appendEntry(_type,data){rows.push(data);if(data.status==='timeout')settled.resolve();}};
+  const answer = jev.askJev('timeout','synthetic',{ping:{type:'noul'}},{pi,signal:controller.signal});
+  await sent.promise;
+  controller.abort(new DOMException('Deadline expired','TimeoutError'));
+  assert.equal((await answer).ok,false);
+  await settled.promise;
+  assert.deepEqual(rows.map(row=>row.status),['pending','timeout']);
+  assert.equal(rows[1].usage,undefined);
+});
+
+test('declared zero on a rejected request is known while a Kev Jev-name echo cannot invent a price', async () => {
+  const rejected = harness(async () => new Response(JSON.stringify({ usage:{cost:0} }),{status:402}));
+  assert.equal((await jev.askJev('zero','synthetic', {ping:{type:'noul'}}, {pi:rejected.pi})).ok,false);
+  assert.equal(rejected.receipts[1].data.usage.cost.total,0);
+  assert.equal(rejected.receipts[1].data.usage.cost.source,'provider-reported');
+  const echoed = harness(async () => jsonOk({ model:jev.JEV_LATEST_VERSIONED, answers:ANSWERS, usage:{input_tokens:100} }));
+  const result = await jev.askJev('wrong-route-echo','synthetic', {ping:{type:'noul'}}, {pi:echoed.pi,family:'kev'});
+  assert.equal(result.usage.model,jev.KEV_SLUG);
+  assert.equal(result.usage.costUsd,undefined);
+  assert.equal(echoed.receipts[1].data.settledModel,undefined);
+});
+
+test('a durable receipt settles in its submitting branch after the real SDK forks', async t => {
+  const { AgentSessionRuntime, DefaultResourceLoader, SessionManager, SettingsManager, createAgentSession } = await import('@yunuspi/coding-agent');
+  const { collectSessionCost } = await import('@yunuspi/coding-agent/session-accounting');
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(),'jev-fork-receipt-'));
+  t.after(() => fs.rmSync(cwd,{recursive:true,force:true}));
+  let extension;
+  const model = { id:'synthetic',name:'Synthetic',api:'openai-completions',provider:'audit',baseUrl:'https://invalid.example',
+    reasoning:false,input:['text'],cost:{input:0,output:0,cacheRead:0,cacheWrite:0},contextWindow:8192,maxTokens:2048 };
+  const modelRuntime = { getModel:()=>model,getAvailable:()=>[model],hasConfiguredAuth:()=>true,isUsingSubscription:()=>false,
+    streamSimple(){assert.fail('a separate model turn was not authorized');} };
+  async function makeSession(sessionManager) {
+    const settingsManager = SettingsManager.inMemory();
+    const resourceLoader = new DefaultResourceLoader({ cwd,agentDir:cwd,settingsManager,noExtensions:true,noSkills:true,
+      noPromptTemplates:true,noThemes:true,noContextFiles:true,extensionFactories:[api=>{extension=api;}] });
+    await resourceLoader.reload();
+    const sdk = await createAgentSession({cwd,agentDir:cwd,model,modelRuntime,settingsManager,resourceLoader,sessionManager,tools:[]});
+    await sdk.session.bindExtensions({mode:'print'});
+    return {...sdk,services:{cwd,agentDir:cwd}};
+  }
+  const manager = SessionManager.create(cwd,cwd);
+  const user = content => ({role:'user',content,timestamp:Date.now()});
+  const rootId = manager.appendMessage(user('root'));
+  manager.appendMessage(user('submitting branch'));
+  const original = await makeSession(manager);
+  const source = manager.getLeafId();
+  const host = new AgentSessionRuntime(original.session, original.services, async ({sessionManager})=>makeSession(sessionManager));
+  t.after(() => host.session.dispose());
+  const sent = Promise.withResolvers(), response = Promise.withResolvers();
+  harness(async () => { sent.resolve(); return response.promise; });
+  const answer = jev.askJev('fork-bill','synthetic evidence',{ping:{type:'noul'}},{pi:extension});
+  try {
+    await sent.promise;
+    const saved = () => SessionManager.open(manager.getSessionFile(),cwd).getEntries();
+    assert.equal(collectSessionCost(saved()).pending,1);
+    manager.branch(rootId);
+    const alternate = manager.appendMessage(user('other branch'));
+    assert.equal((await host.fork(source,{position:'at'})).cancelled,false);
+    assert.notEqual(host.session.sessionManager.getSessionId(),manager.getSessionId());
+    assert.equal(collectSessionCost(host.session.sessionManager.getEntries()).pending,0);
+    response.resolve(jsonOk({answers:ANSWERS,usage:{cost:.04}}));
+    assert.equal((await answer).ok,true);
+    const old = SessionManager.open(manager.getSessionFile(),cwd);
+    assert.equal(old.getLeafId(),alternate);
+    assert.deepEqual(old.getEntries().filter(row=>row.accountingOnly).map(row=>[row.parentId,row.data.status]),
+      [[source,'pending'],[source,'completed']]);
+    assert.equal(collectSessionCost(old.getEntries()).reported,.04);
+    assert.equal(collectSessionCost(host.session.sessionManager.getEntries()).total,0);
+  } finally { response.resolve(decisionsOk()); await answer; }
 });
 
 test("preferred and cached judgments do not fetch the model catalog", async () => {
@@ -339,20 +476,20 @@ test("skips stay quiet: disabled, trivial, missing key, aborted", async () => {
   assert.equal((await jev.askJev("s", "hello world", { q: { type: "noul", instructions: "x" } }, { pi, signal: controller.signal })).skipped, "aborted");
 });
 
-test('offline mode prevents remote advisories and scheduled recovery probes', async () => {
+test('offline mode prevents real recovery attempts after cooldown', async () => {
   let fetches = 0;
-  const { pi, timers } = harness(async () => { fetches++; throw Error('offline fixture'); });
+  const { pi, advance } = harness(async () => { fetches++; throw Error('offline fixture'); });
   const ask = () => jev.askJev('offline', 'substantive request', { q: { type: 'noul', instructions: 'Assess' } }, { pi });
   await ask();
   const before = fetches;
+  advance(5001);
   try {
     for (const value of ['1', 'true', 'yes']) {
       process.env.PI_OFFLINE = value;
       assert.equal((await ask()).skipped, 'disabled');
       assert.equal(jev.jevEnabled({ PI_OFFLINE: value, PI_JEV: 'on' }), false);
     }
-    await timers[0].fn();
-    assert.equal(fetches, before, 'offline mode sends neither a request nor a background probe');
+    assert.equal(fetches, before, 'offline mode sends no requests');
   } finally {
     delete process.env.PI_OFFLINE;
   }

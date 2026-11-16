@@ -237,7 +237,7 @@ export declare class SessionManager {
     appendCompaction<T = unknown>(summary: string, firstKeptEntryId: string, tokensBefore: number, details?: T, fromHook?: boolean, usage?: Usage): string;
     /** Append a custom entry (for extensions) as child of current leaf, then advance leaf. Returns entry id. */
     appendCustomEntry(customType: string, data?: unknown): string;
-    appendSummaryUsageReceipt(data: unknown): CustomEntry;
+    appendSummaryUsageReceipt(data: unknown, parentId?: string | null): CustomEntry;
     /** Append a session info entry (e.g., display name). Returns entry id. */
     appendSessionInfo(name: string): string;
     /** Get the current session name from the latest session_info entry, if any. */

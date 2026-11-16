@@ -10,7 +10,7 @@ import { getPiUserAgent } from "../utils/pi-user-agent.js";
 import { getProviderEnvValue } from "../utils/provider-env.js";
 import { captureProviderRetryAdvice, retryProviderRequest } from "../utils/provider-retry.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
-import { iterateSseMessages } from "../utils/sse.js";
+import { iterateSseMessages, SseBodyReadError } from "../utils/sse.js";
 import { appendGrammarToolInputJsonDelta, createGrammarToolInputProperties, getGrammarToolInput, getJsonSchemaToolParameters, resolveGrammarConstrainedSampling, resolveJsonSchemaStrictSampling, } from "./constrained-sampling.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { clampOpenAIPromptCacheKey, isOpenAIEndpoint } from "./openai-prompt-cache.js";
@@ -167,11 +167,65 @@ function resolveCacheRetention(cacheRetention, env) {
     }
     return "short";
 }
-async function* iterateDeepSeekChunks(response, signal) {
+const DEEPSEEK_FINISH_REASONS = new Set(["stop", "length", "tool_calls", "content_filter", "insufficient_system_resource", "aborted"]);
+
+function deepSeekFinalFrameReason(chunk) {
+    const choice = Array.isArray(chunk?.choices) && chunk.choices.length === 1 ? chunk.choices[0] : undefined;
+    if (chunk?.object !== "chat.completion.chunk" || chunk.error || choice?.index !== 0 ||
+        !DEEPSEEK_FINISH_REASONS.has(choice.finish_reason)) return undefined;
+    const { delta } = choice;
+    if (!delta || typeof delta !== "object" || Array.isArray(delta) || !Object.entries(delta).every(([field, value]) =>
+        field === "role" || value == null || value === "" || (Array.isArray(value) && value.length === 0))) return undefined;
+    const { usage } = chunk;
+    if (!usage) return undefined;
+    const { prompt_tokens: prompt, completion_tokens: output, total_tokens: total,
+        prompt_cache_hit_tokens: hits, prompt_cache_miss_tokens: misses } = usage;
+    if (![prompt, output, total, hits, misses].every(value => Number.isSafeInteger(value) && value >= 0) ||
+        prompt + output !== total || hits + misses !== prompt) return undefined;
+    const cached = usage.prompt_tokens_details?.cached_tokens;
+    if (cached !== undefined && cached !== hits) return undefined;
+    const meters = usage.server_tool_use;
+    if (meters !== undefined && (!meters || typeof meters !== "object" || Array.isArray(meters) ||
+        !Object.values(meters).every(value => Number.isSafeInteger(value) && value >= 0))) return undefined;
+    return choice.finish_reason;
+}
+
+function deepSeekTailCanFinish(blocks, reason) {
+    if (reason !== "stop" && reason !== "tool_calls") return true;
+    const calls = blocks.filter(block => block.type === "toolCall");
+    if (reason === "tool_calls" && calls.length === 0) return false;
+    return calls.every(block => {
+        if (!block.id || !block.name || typeof block.partialArgs !== "string") return false;
+        try {
+            const args = JSON.parse(block.partialArgs);
+            return args !== null && typeof args === "object" && !Array.isArray(args);
+        } catch {
+            return false;
+        }
+    });
+}
+
+async function* iterateDeepSeekChunks(response, signal, canFinish) {
     if (!response.body) throw new Error("DeepSeek returned no stream body");
-    for await (const frame of iterateSseMessages(response.body, signal)) {
-        if (frame.data.trim() === "[DONE]") return;
-        if (frame.data) yield JSON.parse(frame.data);
+    let completionId, lastFinish;
+    let matchingIds = true;
+    try {
+        for await (const frame of iterateSseMessages(response.body, signal)) {
+            if (frame.data.trim() === "[DONE]") return;
+            if (!frame.data) continue;
+            const chunk = JSON.parse(frame.data);
+            if (frame.event === "error" && !chunk?.error) throw new Error("DeepSeek stream returned an error event");
+            const id = typeof chunk?.id === "string" && chunk.id.length > 0 ? chunk.id : undefined;
+            completionId ??= id;
+            matchingIds &&= id !== undefined && id === completionId;
+            lastFinish = matchingIds ? deepSeekFinalFrameReason(chunk) : undefined;
+            yield chunk;
+        }
+    } catch (error) {
+        // DeepSeek meters the complete final choice before [DONE]. Only loss
+        // of the transport tail can use that evidence; provider and parse errors stay errors.
+        if (!(error instanceof SseBodyReadError) || signal?.aborted || !lastFinish ||
+            !canFinish(lastFinish, error.pendingEvent)) throw error;
     }
 }
 
@@ -198,6 +252,7 @@ export const stream = (model, context, options) => {
         // `reasoning_details` are replay metadata, not user-visible stream deltas.
         // Keep them in memory during streaming and serialize once when the block is finalized.
         let streamedReasoningDetails;
+        let confirmedDeepSeekTailUsage = false;
         const applyStreamedReasoningDetails = (block) => {
             if (streamedReasoningDetails !== undefined) {
                 block.thinkingSignature = JSON.stringify(streamedReasoningDetails);
@@ -228,7 +283,11 @@ export const stream = (model, context, options) => {
                 if (directDeepSeek) {
                     const response = await client.chat.completions.create(params, requestOptions).asResponse();
                     // The SDK turns inline SSE errors into exceptions before exposing raw usage.
-                    return { data: iterateDeepSeekChunks(response, options?.signal), response };
+                    const data = iterateDeepSeekChunks(response, options?.signal, (reason, pendingEvent) => {
+                        confirmedDeepSeekTailUsage = true;
+                        return !pendingEvent && deepSeekTailCanFinish(output.content, reason);
+                    });
+                    return { data, response };
                 }
                 return client.chat.completions.create(params, requestOptions).withResponse();
             }, {
@@ -541,6 +600,10 @@ export const stream = (model, context, options) => {
             }
             output.stopReason = options?.signal?.aborted ? "aborted" : "error";
             captureProviderRetryAdvice(output, error);
+            if (output.stopReason === "error" && error instanceof SseBodyReadError) {
+                output.providerRetry = { ...output.providerRetry, responseBodyInterrupted: true };
+                if (!confirmedDeepSeekTailUsage && output.usage.cost.source) output.usage.cost.complete = false;
+            }
             output.errorMessage = formatProviderError(normalizeProviderError(error));
             // Some providers via OpenRouter give additional information in this field.
             // normalizeProviderError already stringifies the parsed body (error.error)

@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
+import os from 'node:os';
+import path from 'node:path';
 import { createCreativeEvidence } from '../agent/extensions/lib/creative-evidence.ts';
 import { normalizeVerdict, summarizePageState, summarizeNoise, planUiMatrix } from '../agent/extensions/lib/creative-qa.ts';
+import { collectVerificationReceipts } from '../agent/extensions/lib/continuation-notice.ts';
 
 const capture = (overrides = {}) => ({ runId: 'run-1', source: 'index.html', revision: 'rev-1', consistent: true, file: 'capture.png', sections: [{ id: 'hierarchy', verdict: 'UNKNOWN', needsVision: true }], ...overrides });
 const verdict = value => [{ id: 'hierarchy', verdict: value, evidence: ['Primary form owns the left column; secondary help is below it.'] }];
@@ -155,6 +161,168 @@ test('each verification obligation has its own identity and deleting a surface r
   assert.equal(new Set(obligations.map(row => row.id)).size, obligations.length);
   evidence.observe('index.html', 'unavailable', 'ui'); assert.ok(evidence.gaps().length > 0);
   evidence.observe('index.html', 'missing', 'ui'); assert.deepEqual(evidence.gaps(), []);
+});
+
+test('creative verification computes one revision digest until its revision inputs change', t => {
+  const hashing = t.mock.method(crypto, 'createHash');
+  syncBuiltinESMExports();
+  try {
+    const evidence = createCreativeEvidence();
+    for (let i = 0; i < 64; i++) evidence.observe(`page-${i}.html`, 'original', 'ui');
+    const rows = evidence.verification();
+    assert.equal(rows.length, 10);
+    const revision = rows[0].revision;
+    for (let i = 0; i < 5; i++) {
+      evidence.observe('page-0.html', 'original', 'ui');
+      assert.deepEqual(evidence.verification(), rows);
+    }
+    assert.equal(hashing.mock.callCount(), 1);
+    evidence.observe('page-0.html', 'revised', 'ui');
+    assert.notEqual(evidence.verification()[0].revision, revision);
+    assert.equal(hashing.mock.callCount(), 2);
+    evidence.observe('page-0.html', 'original', 'ui');
+    assert.deepEqual(evidence.verification(), rows);
+    assert.equal(hashing.mock.callCount(), 3);
+  } finally {
+    hashing.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
+
+test('creative context reuses unchanged source digests and invalidates evidence across filesystem changes', async t => {
+  const { default: artDirection } = await import('../agent/extensions/art-direction.ts');
+  const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'creative-context-digests-')));
+  const workspaces = [path.join(root, 'one'), path.join(root, 'two')];
+  const paths = workspaces.map(cwd => path.join(cwd, 'index.html'));
+  const contexts = workspaces.map(cwd => ({ cwd, sessionManager: { getSessionId: () => 'fixture' } }));
+  const [first, second] = contexts;
+  const [file, other] = paths;
+  const hooks = new Map();
+  const receipts = new Map();
+  const update = (name, event, ctx) => hooks.get(name)(event, ctx);
+  artDirection({ on: (name, fn) => hooks.set(name, fn), registerTool() {}, events: { on: (name, fn) => receipts.set(name, fn) } });
+  t.after(async () => { await update('session_shutdown', {}, first); await fs.rm(root, { recursive: true, force: true }); });
+  const fixedTime = new Date('2025-01-01T00:00:00Z');
+  const put = async (target, value) => {
+    await fs.writeFile(target, `<html><main>${value}</main></html>`);
+    await fs.utimes(target, fixedTime, fixedTime);
+  };
+  for (const cwd of workspaces) await fs.mkdir(cwd);
+  await put(file, 'a');
+  await put(other, 'z');
+  const open = fs.open;
+  const stat = fs.stat;
+  const reads = [];
+  const stats = [];
+  let rewriteAfterRead;
+  let growBeforeOpen = false;
+  let aliasBeforeStat = false;
+  const displaced = path.join(first.cwd, 'original');
+  t.mock.method(fs, 'open', async (target, ...args) => {
+    if (target === file && growBeforeOpen) {
+      growBeforeOpen = false;
+      await fs.appendFile(file, Buffer.alloc(4 * 1024 * 1024));
+    }
+    const handle = await open(target, ...args);
+    if (!paths.includes(target)) return handle;
+    const read = handle.read.bind(handle);
+    handle.read = async (...params) => {
+      const result = await read(...params);
+      reads.push(target);
+      if (target === file && rewriteAfterRead) {
+        const value = rewriteAfterRead;
+        rewriteAfterRead = undefined;
+        await put(file, value);
+      }
+      return result;
+    };
+    return handle;
+  });
+  t.mock.method(fs, 'stat', async (target, ...args) => {
+    if (paths.includes(target)) stats.push(target);
+    if (target === file && aliasBeforeStat) {
+      aliasBeforeStat = false;
+      await fs.rename(file, displaced);
+      await fs.symlink(other, file);
+    }
+    return stat(target, ...args);
+  });
+  const revision = ctx => collectVerificationReceipts(10, ctx.sessionManager)[0]?.revision;
+  const messages = [{ role: 'user', content: 'Inspect the fixture UI.', timestamp: 1 }];
+  const render = ctx => update('context', { messages }, ctx);
+  const observe = async (ctx, target) => {
+    const toolCallId = 'fixture-write';
+    await update('tool_call', { toolName: 'write', toolCallId, input: { path: target } }, ctx);
+    await update('tool_result', { toolName: 'write', toolCallId, isError: false }, ctx);
+  };
+
+  await update('session_start', {}, first);
+  await observe(first, file);
+  assert.deepEqual(reads, [file], 'observation reads the changed file once');
+  assert.deepEqual(stats, [file, file, file], 'stat before and after the read and one post-mutation refresh');
+  for (let i = 0; i < 3; i++) await receipts.get('project-source-observed')({ ctx: first, revision: 1, tree: 'fixture', complete: true, paths: [file] });
+  assert.deepEqual(reads, [file], 'repeated workspace scan receipts reuse the unchanged source classification');
+  const initial = revision(first);
+  assert.ok(initial);
+  const expected = await render(first);
+  assert.match(expected.messages.at(-1).content, /index\.html/);
+  for (let i = 0; i < 5; i++) assert.deepEqual(await render(first), expected);
+  assert.equal(revision(first), initial);
+  assert.deepEqual(reads, [file], 'unchanged contexts do not read source bytes');
+
+  const before = await stat(file, { bigint: true });
+  await put(file, 'b');
+  const after = await stat(file, { bigint: true });
+  assert.equal(after.size, before.size);
+  assert.equal(after.mtimeNs, before.mtimeNs);
+  await render(first);
+  const rewritten = revision(first);
+  assert.notEqual(rewritten, initial, 'restored mtime cannot keep old evidence current');
+  assert.deepEqual(reads, [file, file]);
+
+  const replacement = path.join(first.cwd, 'replacement');
+  await put(replacement, 'c');
+  await fs.rename(replacement, file);
+  assert.notEqual((await stat(file, { bigint: true })).ino, after.ino);
+  await render(first);
+  const replaced = revision(first);
+  assert.notEqual(replaced, rewritten);
+  assert.deepEqual(reads, [file, file, file]);
+
+  await put(file, 'd');
+  rewriteAfterRead = 'e';
+  await render(first);
+  const interrupted = revision(first);
+  await render(first);
+  const refreshed = revision(first);
+  assert.notEqual(refreshed, interrupted, 'an overlapping read does not cache the digest of a superseded file version');
+  assert.equal(reads.length, 5);
+
+  await put(file, 'g');
+  growBeforeOpen = true;
+  await render(first);
+  assert.equal(reads.length, 5, 'a file that grew past its cap is rejected before reading');
+
+  await put(file, 'h');
+  aliasBeforeStat = true;
+  await render(first);
+  assert.equal(reads.length, 5, 'a late symlink outside the workspace is rejected before reading');
+  await fs.unlink(file);
+  await fs.rename(displaced, file);
+
+  await update('session_switch', {}, second);
+  assert.equal(await render(second), undefined, 'the other workspace does not inherit verification state');
+  await observe(second, other);
+  assert.equal(reads.at(-1), other);
+  await put(file, 'f');
+  await update('session_switch', {}, first);
+  await render(first);
+  const returned = revision(first);
+  assert.notEqual(returned, refreshed);
+  assert.equal(reads.at(-1), file);
+  await fs.unlink(file);
+  assert.equal(await render(first), undefined);
+  assert.equal(revision(first), undefined, 'deleted surfaces retire their verification obligations');
 });
 
 test('SVG captures cannot approve application UI and abandoned alternatives do not own its task', () => {

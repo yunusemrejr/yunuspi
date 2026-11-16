@@ -1,4 +1,5 @@
-import { opendir, open, realpath, stat } from "node:fs/promises";
+import { constants } from "node:fs";
+import { opendir, open, realpath, stat, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 import { collectSessionDiagnostics } from "./session-diagnostics.ts";
 import { collectContextTraffic } from "./session-report.ts";
@@ -42,7 +43,6 @@ export interface SessionAuditOptions {
 interface Candidate {
 	file: string;
 	mtimeMs: number;
-	size: number;
 }
 
 interface ScanState {
@@ -51,6 +51,7 @@ interface ScanState {
 	sessions: number;
 	inspected: number;
 	truncatedSessions: number;
+	sampledOversize: number;
 	skippedOversize: number;
 	malformedLines: number;
 	partialLines: number;
@@ -85,17 +86,10 @@ interface ParsedHeader {
 }
 
 interface ParsedEntries {
-	header?: ParsedHeader;
 	entries: any[];
 	malformedLines: number;
 	partialLines: number;
-	physicalEntries: number;
-	byteTruncated: boolean;
-}
-
-interface ReadResult {
-	text: string;
-	byteTruncated: boolean;
+	entryTruncated: boolean;
 }
 
 const isAbortError = (error: unknown): boolean =>
@@ -142,6 +136,7 @@ function emptyState(): ScanState {
 		sessions: 0,
 		inspected: 0,
 		truncatedSessions: 0,
+		sampledOversize: 0,
 		skippedOversize: 0,
 		malformedLines: 0,
 		partialLines: 0,
@@ -248,16 +243,15 @@ async function scanDirectory(
 						state.scopeExcluded++;
 						continue;
 					}
-					let headerText;
+					let header;
 					try {
-						headerText = await readBoundedFile(file, SESSION_AUDIT_LIMITS.maxHeaderBytes, config.signal);
+						header = await withAuditFile(file, config.signal, (handle, size) => readHeader(handle, size, config.signal));
 					} catch (error) {
 						if (isAbortError(error)) throw error;
 						checkAborted(config.signal);
 						state.headerReadFailures++;
 						continue;
 					}
-					const header = parseHeader(headerText.text);
 					if (!header?.cwd || !(await matchesWorkspace(header.cwd, workspacePath))) {
 						state.scopeExcluded++;
 						continue;
@@ -265,7 +259,7 @@ async function scanDirectory(
 				}
 				keepCandidate(
 					candidates,
-					{ file, mtimeMs: Number(details.mtimeMs) || 0, size: Number(details.size) || 0 },
+					{ file, mtimeMs: Number(details.mtimeMs) || 0 },
 					config.maxFiles,
 				);
 			}
@@ -280,45 +274,41 @@ async function scanDirectory(
 	}
 }
 
-async function readBoundedFile(
+async function withAuditFile<T>(
 	file: string,
-	maxBytes: number,
-	signal?: AbortSignal,
-): Promise<ReadResult> {
+	signal: AbortSignal | undefined,
+	read: (handle: FileHandle, size: number) => Promise<T>,
+): Promise<T> {
 	checkAborted(signal);
-	const handle = await open(file, "r");
-	const chunks: Buffer[] = [];
-	let total = 0;
+	const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
 	try {
-		while (total < maxBytes) {
-			checkAborted(signal);
-			const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes - total));
-			const result = await handle.read(chunk, 0, chunk.length, null);
-			if (result.bytesRead === 0) break;
-			chunks.push(chunk.subarray(0, result.bytesRead));
-			total += result.bytesRead;
-			if (result.bytesRead < chunk.length) break;
-			await yieldToEventLoop(signal);
-		}
-		let byteTruncated = false;
-		try {
-			const latest = await handle.stat();
-			byteTruncated = latest.size > maxBytes;
-		} catch (error) {
-			if (isAbortError(error)) throw error;
-			checkAborted(signal);
-		}
-		return { text: Buffer.concat(chunks, total).toString("utf8"), byteTruncated };
+		const info = await handle.stat();
+		if (!info.isFile()) throw new Error("Expected a regular transcript file");
+		return await read(handle, info.size);
 	} finally {
 		await handle.close().catch(() => undefined);
 	}
 }
 
-function parseHeaderLine(line: string): ParsedHeader | undefined {
-	const first = line.replace(/^\uFEFF/, "").replace(/\r$/, "").trim();
-	if (!first) return undefined;
+async function readRange(handle: FileHandle, start: number, length: number, signal?: AbortSignal): Promise<Buffer> {
+	const bytes = Buffer.allocUnsafe(length);
+	let total = 0;
+	while (total < length) {
+		checkAborted(signal);
+		const { bytesRead } = await handle.read(bytes, total, Math.min(length - total, 64 * 1024), start + total);
+		if (!bytesRead) break;
+		total += bytesRead;
+	}
+	checkAborted(signal);
+	return bytes.subarray(0, total);
+}
+
+async function readHeader(handle: FileHandle, size: number, signal?: AbortSignal): Promise<ParsedHeader | undefined> {
+	const bytes = await readRange(handle, 0, Math.min(size, SESSION_AUDIT_LIMITS.maxHeaderBytes), signal);
+	const newline = bytes.indexOf(10);
+	if (newline < 0 && bytes.length < size) return undefined;
 	try {
-		const value = JSON.parse(first);
+		const value = JSON.parse(bytes.toString("utf8", 0, newline < 0 ? bytes.length : newline).replace(/^\uFEFF/, ""));
 		if (value?.type !== "session") return undefined;
 		return {
 			type: "session",
@@ -329,62 +319,40 @@ function parseHeaderLine(line: string): ParsedHeader | undefined {
 	}
 }
 
-function parseHeader(text: string): ParsedHeader | undefined {
-	const end = text.indexOf("\n");
-	return parseHeaderLine(end < 0 ? text : text.slice(0, end));
+
+async function readRecentEntries(handle: FileHandle, size: number, maxBytes: number, signal?: AbortSignal) {
+	const start = Math.max(0, size - maxBytes);
+	// The extra byte tells us if the nominal start is already a record boundary.
+	const offset = start > 0 ? start - 1 : 0;
+	const bytes = await readRange(handle, offset, size - offset, signal);
+	const boundary = start > 0 ? bytes.indexOf(10) : -1;
+	return {
+		bytes: start > 0 && boundary < 0 ? bytes.subarray(0, 0) : bytes.subarray(boundary + 1),
+		oversize: start > 0,
+		byteTruncated: start > 0 || bytes.length < size - offset,
+	};
 }
 
-async function parseEntries(text: string, maxEntries: number, byteTruncated: boolean, signal?: AbortSignal): Promise<ParsedEntries> {
-	let offset = 0;
-	let firstLine = true;
-	let header: ParsedHeader | undefined;
-	let partialLines = 0;
-	// A ring keeps the newest bounded entries without repeatedly shifting a
-	// 2,000-item array when a live file contains many small records.
-	const ring: any[] = new Array(maxEntries);
-	let ringSize = 0;
-	let ringStart = 0;
+async function parseEntries(bytes: Buffer, maxEntries: number, signal?: AbortSignal): Promise<ParsedEntries> {
+	const entries: any[] = [];
+	let end = bytes.lastIndexOf(10);
+	const partialLines = bytes.toString("utf8", end + 1).trim() ? 1 : 0;
 	let malformedLines = 0;
-	let physicalEntries = 0;
-	while (offset < text.length) {
+	let linesRead = 0;
+	// Decode newest complete records first. The entry cap bounds JSON parsing
+	// even when a transcript contains many small events inside its byte window.
+	while (end >= 0 && entries.length < maxEntries) {
 		checkAborted(signal);
-		const newline = text.indexOf("\n", offset);
-		const complete = newline >= 0;
-		const rawLine = text.slice(offset, complete ? newline : text.length);
-		if (firstLine) {
-			header = parseHeaderLine(rawLine);
-			firstLine = false;
+		const previous = end > 0 ? bytes.lastIndexOf(10, end - 1) : -1;
+		const line = bytes.toString("utf8", previous + 1, end);
+		if (line.trim()) {
+			try { entries.push(JSON.parse(line)); }
+			catch { malformedLines++; }
 		}
-		if (!complete) {
-			if (rawLine.trim()) partialLines++;
-			break;
-		}
-		offset = newline + 1;
-		const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
-		if (!line.trim()) continue;
-		physicalEntries++;
-		let value;
-		try {
-			value = JSON.parse(line);
-		} catch {
-			malformedLines++;
-			continue;
-		}
-		if (ringSize < maxEntries) ring[ringSize++] = value;
-		else {
-			ring[ringStart] = value;
-			ringStart = (ringStart + 1) % maxEntries;
-		}
-		if ((physicalEntries & 63) === 0) {
-			// Parsing is synchronous, so the yield is deliberately periodic and
-			// keeps large but bounded historical files cooperative with the UI.
-			await yieldToEventLoop(signal);
-		}
+		end = previous;
+		if ((++linesRead & 63) === 0) await yieldToEventLoop(signal);
 	}
-	const entries = ringSize < maxEntries
-		? ring.slice(0, ringSize)
-		: ring.slice(ringStart).concat(ring.slice(0, ringStart));
-	return { header, entries, malformedLines, partialLines, physicalEntries, byteTruncated };
+	return { entries: entries.reverse(), malformedLines, partialLines, entryTruncated: end >= 0 };
 }
 
 async function canonicalPath(value: unknown): Promise<string | undefined> {
@@ -448,6 +416,7 @@ function reportFor(
 		sessions: state.sessions,
 		inspected: state.inspected,
 		truncatedSessions: state.truncatedSessions,
+		sampledOversize: state.sampledOversize,
 		skippedOversize: state.skippedOversize,
 		malformedLines: state.malformedLines,
 		partialLines: state.partialLines,
@@ -485,7 +454,7 @@ function reportFor(
 			maxDirectories: config.maxDirectories,
 		},
 		limitations: [
-			"Counts cover only the newest bounded top-level session files and the newest bounded entries from each file; older evidence remains unknown.",
+			"Counts cover the newest complete entries within each selected file's byte window and entry limit. Line diagnostics cover the scanned window; older evidence remains unknown.",
 			"Child transcript bodies and nested session files are not scanned; child and workflow values are counted only when their records are retained in the parent transcript.",
 			"Failure categories cover at most 12 newest diagnostics per retained session; missing or malformed evidence remains unknown.",
 			"No prompts, raw paths, raw errors, model calls or network requests are included.",
@@ -508,33 +477,38 @@ export async function scanSessionAudit(options: SessionAuditOptions): Promise<Re
 
 	for (const candidate of candidates) {
 		checkAborted(config.signal);
-		if (candidate.size > config.maxFileBytes) {
-			state.skippedOversize++;
-			continue;
-		}
 		let read;
 		try {
-			read = await readBoundedFile(candidate.file, config.maxFileBytes, config.signal);
+			read = await withAuditFile(candidate.file, config.signal, async (handle, size) => {
+				if (config.scope === "workspace") {
+					const header = await readHeader(handle, size, config.signal);
+					if (!(await matchesWorkspace(header?.cwd, workspace))) return undefined;
+				}
+				return readRecentEntries(handle, size, config.maxFileBytes, config.signal);
+			});
 		} catch (error) {
 			if (isAbortError(error)) throw error;
 			checkAborted(config.signal);
 			state.readFailures++;
 			continue;
 		}
-		const header = parseHeader(read.text);
-		if (
-			config.scope === "workspace" &&
-			(!workspace || !header?.cwd || !(await matchesWorkspace(header.cwd, workspace)))
-		) {
+		if (!read) {
 			state.scopeExcluded++;
 			continue;
 		}
-		const parsed = await parseEntries(read.text, config.maxEntriesPerFile, read.byteTruncated, config.signal);
+		const parsed = await parseEntries(read.bytes, config.maxEntriesPerFile, config.signal);
 		state.malformedLines += parsed.malformedLines;
 		state.partialLines += parsed.partialLines;
+		if (read.oversize) {
+			if (!parsed.entries.length) {
+				state.skippedOversize++;
+				continue;
+			}
+			state.sampledOversize++;
+		}
 		state.sessions++;
 		state.inspected += parsed.entries.length;
-		if (parsed.physicalEntries > config.maxEntriesPerFile || parsed.byteTruncated) state.truncatedSessions++;
+		if (parsed.entryTruncated || read.byteTruncated) state.truncatedSessions++;
 		try {
 			const report = collectSessionDiagnostics(parsed.entries, { excerpts: false });
 			addActivity(state, report);

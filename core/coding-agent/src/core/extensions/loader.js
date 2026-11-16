@@ -177,6 +177,7 @@ export function createExtensionRuntime() {
         sendMessage: notInitialized,
         sendUserMessage: notInitialized,
         appendEntry: notInitialized,
+        bindAuxiliaryUsage: notInitialized,
         setSessionName: notInitialized,
         getSessionName: notInitialized,
         setLabel: notInitialized,
@@ -559,6 +560,10 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
         appendEntry(customType, data) {
             assertActive();
             runtime.appendEntry(customType, data);
+        },
+        bindAuxiliaryUsage() {
+            assertActive();
+            return runtime.bindAuxiliaryUsage();
         },
         setSessionName(name) {
             assertActive();

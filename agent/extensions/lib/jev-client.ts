@@ -11,11 +11,10 @@ import { sessionObservability } from './session-observability.ts';
  *   is not a separate healthy model. Account-level failures stop both routes.
  * - Both routes failing opens the existing breaker. Recovery is bounded;
  *   a cooling route is retried by one real request after its cooldown.
- * - Answers are deduplicated per session (identical state+questions pay
- *   once) and every paid call is ledgered as a `jev-usage-v1` session
- *   entry so cost and metrics treat Jev like any other provider route.
+ * - Coalesced waiters share the same physical requests. Billing belongs to
+ *   the submitting session, and logical answers retain their Jev metrics.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -175,6 +174,8 @@ export type JevAskResult =
         /** Undefined when neither the provider nor route price evidence
          * establishes a cost; consumers must treat it as unknown, not zero. */
         costUsd: number | undefined;
+        costSource?: "provider-reported" | "estimate";
+        billingReceiptId?: string;
         ms: number;
         cached: boolean;
       };
@@ -184,7 +185,6 @@ export type JevAskResult =
 type Deps = {
   fetchImpl: typeof fetch;
   now: () => number;
-  schedule: (fn: () => void, ms: number) => { unref?: () => void };
   openMs: number;
   requestTimeoutMs: number;
 };
@@ -192,11 +192,6 @@ type Deps = {
 const deps: Deps = {
   fetchImpl: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args),
   now: () => Date.now(),
-  schedule: (fn, ms) => {
-    const timer = setTimeout(fn, ms);
-    (timer as unknown as { unref?: () => void }).unref?.();
-    return timer as unknown as { unref?: () => void };
-  },
   openMs: 5 * 60 * 1000,
   requestTimeoutMs: JEV_REQUEST_TIMEOUT_MS,
 };
@@ -216,7 +211,7 @@ let stickySlug: string | undefined;
 let resolvedSlug: string | undefined;
 let breakerOpen = false;
 let breakerOpenedAt = 0;
-let probeScheduled = false;
+let breakerTrial: AbortSignal | undefined;
 let lastError = "";
 let discovered: { at: number; slugs: string[] } = { at: 0, slugs: [] };
 let discoveryInflight: Promise<string[]> | null = null;
@@ -226,7 +221,6 @@ type InflightEntry = {
   controller: AbortController;
   waiters: number;
   settled: boolean;
-  charged: boolean;
 };
 const inflight = new Map<string, InflightEntry>();
 
@@ -239,7 +233,7 @@ function resetJevClientLocal(): void {
   secondOpinionTokens = SECOND_OPINION_BURST; secondOpinionAt = 0;
   breakerOpen = false;
   breakerOpenedAt = 0;
-  probeScheduled = false;
+  breakerTrial = undefined;
   lastError = "";
   discovered = { at: 0, slugs: [] };
   discoveryInflight = null;
@@ -346,6 +340,8 @@ function ledger(
     model: string;
     inputTokens: number;
     costUsd: number | undefined;
+    costSource?: "provider-reported" | "estimate";
+    billingReceiptId?: string;
     ms: number;
     cached: boolean;
   },
@@ -357,8 +353,23 @@ function ledger(
   }
 }
 
-const PROBE_STATE = "ok";
-const PROBE_QUESTIONS = { ping: { type: "noul", instructions: "Is this text affirmative?" } };
+type DecisionUsage = { inputTokens?: number; costUsd?: number; costSource?: "provider-reported" | "estimate" };
+type DecisionReceipt = { id: string; owner: "jev"; provider: "openrouter"; model: string;
+  status: "pending" | "completed" | "failed" | "cancelled" | "timeout"; site?: string; settledModel?: string; usage?: unknown };
+type DecisionAccounting = (receipt: DecisionReceipt) => boolean;
+function bindDecisionAccounting(pi: unknown, site: string): DecisionAccounting | undefined {
+  const target = pi as { bindAuxiliaryUsage?: () => ((data: unknown) => boolean) | undefined;
+    appendEntry?: (type: string, data: unknown) => void | boolean };
+  let bound: ReturnType<NonNullable<typeof target.bindAuxiliaryUsage>>;
+  try { bound = target?.bindAuxiliaryUsage?.(); } catch { return undefined; }
+  const append = target?.appendEntry;
+  if (!bound && typeof append !== "function") return undefined;
+  return receipt => {
+    const data = /^[\w.-]{1,48}$/.test(site) ? { ...receipt, site } : receipt;
+    try { return (bound ? bound(data) : append?.call(target, "auxiliary-model-usage-v1", data)) !== false; }
+    catch { return false; }
+  };
+}
 
 async function postDecisions(
   slug: string,
@@ -367,38 +378,68 @@ async function postDecisions(
   key: string,
   signal?: AbortSignal,
   timeoutMs = JEV_REQUEST_TIMEOUT_MS,
-): Promise<{ answers: Record<string, JevAnswer>; model?: string; inputTokens?: number; costUsd?: number }> {
+  accounting?: DecisionAccounting,
+  estimatedInputTokens?: number,
+): Promise<{ answers: Record<string, JevAnswer>; model?: string; billingReceiptId?: string } & DecisionUsage> {
+  const payload = JSON.stringify({ model: slug, state, questions });
   signal?.throwIfAborted();
   const finish = beginHarnessActivity('jev');
-  let returned = false;
+  let returned = false, dispatched = false;
+  let bill: DecisionUsage = {};
+  let settledModel: string | undefined;
+  const id = accounting && randomUUID();
+  const record = (status: DecisionReceipt['status']) => {
+    if (!id) return false;
+    const usage = status !== 'pending' && !dispatched ? { dispatchOutcome: 'not-dispatched' as const }
+      : bill.inputTokens !== undefined || bill.costUsd !== undefined ? {
+      ...(bill.inputTokens !== undefined ? { input: bill.inputTokens, output: 0 } : {}),
+      ...(bill.costUsd !== undefined ? { cost: { total: bill.costUsd, source: bill.costSource, complete: true } } : {}),
+    } : undefined;
+    return accounting?.({ id, owner: 'jev', provider: 'openrouter', model: slug, status,
+      ...(settledModel ? { settledModel } : {}), ...(usage ? { usage } : {}) }) === true;
+  };
+  const readUsage = (value: any) => {
+    const inputTokens = value?.usage?.input_tokens, costUsd = value?.usage?.cost;
+    bill = {
+      ...(Number.isSafeInteger(inputTokens) && inputTokens >= 0 ? { inputTokens } : {}),
+      ...(typeof costUsd === 'number' && Number.isFinite(costUsd) && costUsd >= 0 ? { costUsd, costSource: 'provider-reported' } : {}),
+    };
+    if (JEV_FAMILY_SLUG.test(slug) && typeof value?.model === 'string' && JEV_SERVED_SLUG.test(value.model)) settledModel = value.model;
+  };
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(new DOMException("Judge route timeout", "TimeoutError")), timeoutMs);
   const onAbort = () => controller.abort();
   signal?.addEventListener("abort", onAbort, { once: true });
   try {
+    record("pending");
+    controller.signal.throwIfAborted();
+    dispatched = true;
     const response = await deps.fetchImpl(JEV_DECISIONS_URL, {
       method: "POST",
+      redirect: "error",
       headers: {
         Authorization: `Bearer ${key}`,
         "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com/yunusemrejr/yunuspi",
         "X-Title": "yunuspi",
       },
-      body: JSON.stringify({ model: slug, state, questions }),
+      body: payload,
       signal: controller.signal,
     });
     if (!response.ok) {
       const body = await boundedBody(response, 4096).catch(() => "");
+      try { readUsage(JSON.parse(body)); } catch { /* Error content is not billing evidence. */ }
       // Provider error bodies may echo the submitted state. Retain only the
       // status and safe model-rejection category in health/UI diagnostics.
       const err = Error(`decisions ${response.status}${isModelRejection(response.status, body) ? ': invalid model' : ''}`) as Error & { status?: number };
       err.status = response.status;
       throw err;
     }
-        const body = await boundedJson(response) as { answers?: Record<string, JevAnswer>; model?: string; usage?: { input_tokens?: number; cost?: number } };
-        controller.signal.throwIfAborted();
-        if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object" || Array.isArray(body.answers))
-          throw Error("decisions: malformed answers");
+    const body = await boundedJson(response) as { answers?: Record<string, JevAnswer>; model?: string };
+    readUsage(body);
+    controller.signal.throwIfAborted();
+    if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object" || Array.isArray(body.answers))
+      throw Error("decisions: malformed answers");
     // Validate the requested typed values before they reach routing, caches,
     // intent guards or review planning. HTTP success is not a valid judgment.
     const unit = (value: unknown) => typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 1;
@@ -412,15 +453,20 @@ async function postDecisions(
         throw Error('decisions: malformed answers');
       }
     }
+    const model = settledModel;
+    const inputTokens = bill.inputTokens ?? estimatedInputTokens;
+    const rate = resolveJevInputPricePerM(model ?? slug);
+    if (bill.costUsd === undefined && inputTokens !== undefined && rate !== undefined) {
+      bill.costUsd = inputTokens / 1_000_000 * rate;
+      bill.costSource = 'estimate';
+    }
+    const billingReceiptId = record('completed') ? id : undefined;
     returned = true;
-    return { answers: body.answers,
-      // The decisions route reports the concrete dated model it served. Keep it
-      // only when it is a Jev family slug; provider echo may not rename a call.
-      ...(typeof body.model === "string" && JEV_SERVED_SLUG.test(body.model) ? { model: body.model } : {}),
-      inputTokens: Number.isSafeInteger(body.usage?.input_tokens) && body.usage!.input_tokens! >= 0 ? body.usage!.input_tokens : undefined,
-      costUsd: typeof body.usage?.cost === "number" && Number.isFinite(body.usage.cost) && body.usage.cost >= 0 ? body.usage.cost : undefined };
+    return { answers: body.answers, model, inputTokens, costUsd: bill.costUsd, costSource: bill.costSource, billingReceiptId };
   } finally {
-    finish(returned ? 'ok' : signal?.aborted && signal.reason?.name !== 'TimeoutError' ? 'cancelled' : 'error');
+    const cancelled = signal?.aborted && signal.reason?.name !== 'TimeoutError';
+    if (!returned) record(cancelled ? 'cancelled' : controller.signal.aborted ? 'timeout' : 'failed');
+    finish(returned ? 'ok' : cancelled ? 'cancelled' : 'error');
     clearTimeout(timer);
     signal?.removeEventListener("abort", onAbort);
   }
@@ -440,37 +486,6 @@ function openBreaker(reason: string): void {
   breakerOpen = true;
   breakerOpenedAt = deps.now();
   lastError = reason.slice(0, 240);
-  scheduleProbe();
-}
-
-function scheduleProbe(): void {
-  if (probeScheduled) return;
-  probeScheduled = true;
-  const epoch = generation;
-  deps.schedule(() => {
-    if (epoch !== generation) return;
-    probeScheduled = false;
-    void recoverProbe();
-  }, Math.max(0, breakerOpenedAt + deps.openMs - deps.now()));
-}
-
-async function recoverProbe(): Promise<void> {
-  if (!breakerOpen) return;
-  if (!jevEnabled()) return;
-  const key = openRouterKey();
-  if (!key) {
-    openBreaker("recover probe: no OpenRouter key");
-    return;
-  }
-  // Reuse the same bounded route selection, validation and accounting owner.
-  // No alias discovery or request can outlive the normal overall deadline.
-  const epoch = generation;
-  breakerOpen = false;
-  for (const route of Object.values(routeHealth)) route.retryAt = 0;
-  const result = await boundedAsk(PROBE_STATE, PROBE_QUESTIONS, {});
-  if (epoch !== generation) return;
-  if (!result.ok) { if (!breakerOpen) openBreaker("recover probe: routes unavailable"); }
-  else lastError = "";
 }
 
 export type JevAskOpts = {
@@ -644,12 +659,18 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
     identity = createHash('sha256').update(serialized).update(`\0${opts.family ?? ''}`).digest('hex');
   } catch { return {ok:false,skipped:'invalid-input'}; }
   let entry=inflight.get(identity);
+  const submittingWaiter = !entry;
   if (!entry) {
     if(inflight.size>=64)return {ok:false,skipped:'busy'};
     const controller=new AbortController();
-    entry={controller,waiters:0,settled:false,charged:false,promise:Promise.resolve({ok:false,skipped:'unavailable'})};
+    const accounting = bindDecisionAccounting(opts.pi, site);
+    entry={controller,waiters:0,settled:false,promise:Promise.resolve({ok:false,skipped:'unavailable'})};
     entry.promise=(async()=>{
-      try { return await boundedAsk(state,questions,{...opts,signal:controller.signal}); }
+      try {
+        const result = await boundedAsk(state,questions,{...opts,signal:controller.signal},accounting);
+        if (result.ok && !result.usage.cached) ledger(opts.pi, { site, ...result.usage });
+        return result;
+      }
       catch { return {ok:false,skipped:'unavailable'}; }
       finally {
         entry!.settled=true;
@@ -667,7 +688,8 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
     entry!.waiters=Math.max(0,entry!.waiters-1);
     if(entry!.waiters===0&&!entry!.settled){
       if(inflight.get(identity)===entry)inflight.delete(identity);
-      entry!.controller.abort(new DOMException('All Jev callers cancelled', 'AbortError'));
+      const timedOut = opts.signal?.reason?.name === 'TimeoutError';
+      entry!.controller.abort(new DOMException(timedOut ? 'Jev caller deadline exceeded' : 'All Jev callers cancelled', timedOut ? 'TimeoutError' : 'AbortError'));
     }
   };
   try {
@@ -676,12 +698,9 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
     if (aborted) return {ok:false,skipped:'aborted'};
     const result=waited.result!;
     if (!result.ok) return result;
-    if (!result.usage.cached && !entry.charged) {
-      entry.charged = true;
-      ledger(opts.pi, { site, ...result.usage });
-      return { ...result, answers: structuredClone(result.answers) };
-    }
-    const usage={...result.usage,inputTokens:0,costUsd:0,cached:true};
+    if (!result.usage.cached && submittingWaiter) return { ...result, answers: structuredClone(result.answers) };
+    const { billingReceiptId: _receipt, costSource: _source, ...reused } = result.usage;
+    const usage={...reused,inputTokens:0,costUsd:0,cached:true};
     ledger(opts.pi,{site,...usage});
     return {ok:true,answers:structuredClone(result.answers),usage};
   } finally {
@@ -700,20 +719,27 @@ async function waitForInflight(entry: InflightEntry, signal?: AbortSignal, onAbo
 
 /** One deadline covers the entire alias cascade and discovery, not each
  * alias independently. Cancellation never poisons provider health. */
-async function boundedAsk(state: unknown, questions: Record<string, unknown>, opts: JevAskOpts): Promise<JevAskResult> {
+async function boundedAsk(state: unknown, questions: Record<string, unknown>, opts: JevAskOpts, accounting?: DecisionAccounting): Promise<JevAskResult> {
   const controller = new AbortController();
   const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
   const timer = setTimeout(() => controller.abort(new DOMException('JEV deadline exceeded', 'TimeoutError')), cascadeDeadline(opts));
   try {
-    const result = await askJevOnce(state, questions, { ...opts, signal });
+    const result = await askJevOnce(state, questions, { ...opts, signal }, accounting);
     return controller.signal.aborted && !opts.signal?.aborted ? { ok: false, skipped: 'timeout' } : result;
-  } finally { clearTimeout(timer); }
+  } finally {
+    clearTimeout(timer);
+    if (breakerTrial === signal) {
+      breakerTrial = undefined;
+      if (breakerOpen && !opts.signal?.aborted) breakerOpenedAt = deps.now();
+    }
+  }
 }
 
 async function askJevOnce(
   state: unknown,
   questions: Record<string, unknown>,
-  opts: JevAskOpts = {},
+  opts: JevAskOpts,
+  accounting?: DecisionAccounting,
 ): Promise<JevAskResult> {
   if (!jevEnabled()) return { ok: false, skipped: "disabled" };
   if (state === undefined || state === null || (typeof state === "string" && !state.trim()))
@@ -745,11 +771,9 @@ async function askJevOnce(
     }
   }
   // A provider outage cannot invalidate a still-current, paid-for judgment.
-  // Cache hits need no transport or recovery probe.
-  if (breakerOpen) {
-    scheduleProbe();
-    return { ok: false, skipped: "unhealthy" };
-  }
+  // Only a real caller may test the route after its cooldown. Cache hits
+  // still resolve during the cooldown and never take the trial slot.
+  if (breakerOpen && (breakerTrial || deps.now() < breakerOpenedAt + deps.openMs)) return { ok: false, skipped: "unhealthy" };
   const epoch = generation;
   // Cache hits above do not advance traffic. Equal-load healthy families
   // alternate; a recovering route admits only one probationary request.
@@ -757,6 +781,7 @@ async function askJevOnce(
     && !(routeHealth[family].retryAt && routeHealth[family].active));
   eligible.sort((a, b) => routeHealth[a].active - routeHealth[b].active || (a === nextFamily ? -1 : 1));
   if (!eligible.length) return { ok: false, skipped: "unhealthy" };
+  if (breakerOpen) breakerTrial = opts.signal;
   // A forced second opinion must not disturb the alternation of ordinary traffic.
   if (!opts.family) nextFamily = eligible[0] === "jev" ? "kev" : "jev";
   for (const family of eligible) {
@@ -786,8 +811,9 @@ async function askJevOnce(
         if (remaining <= 0 || familySignal.aborted) break;
         const slug = slugs[index];
         try {
-          const response = await postDecisions(slug, state, questions, key, familySignal, remaining);
+          const response = await postDecisions(slug, state, questions, key, familySignal, remaining, accounting, inputTokens);
           if (epoch !== generation) return { ok: false, skipped: "aborted" };
+          if (breakerTrial && breakerTrial === opts.signal) breakerOpen = false;
           route.retryAt = 0; route.failures = 0;
           if (family === "jev") stickySlug = slug;
           // The decisions route names the dated model it served. Report that
@@ -797,10 +823,10 @@ async function askJevOnce(
           if (served) resolvedSlug = served;
           lastError = "";
           const tokens = response.inputTokens ?? inputTokens;
-          const routePrice = resolveJevInputPricePerM(served ?? slug);
-          const costUsd = response.costUsd ?? (routePrice === undefined ? undefined : (Math.max(0, tokens) / 1_000_000) * routePrice);
           cacheSet(cacheKey(slug, state, questions), { answers: response.answers, inputTokens: tokens, model: served ?? slug });
-          return { ok: true, answers: response.answers, usage: { model: served ?? slug, inputTokens: tokens, costUsd, ms: deps.now() - started, cached: false } };
+          return { ok: true, answers: response.answers, usage: { model: served ?? slug, inputTokens: tokens,
+            costUsd: response.costUsd, costSource: response.costSource, billingReceiptId: response.billingReceiptId,
+            ms: deps.now() - started, cached: false } };
         } catch (error) {
           if (opts.signal?.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
           const status = (error as { status?: number }).status;

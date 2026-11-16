@@ -59,6 +59,13 @@ function consumeLine(text, final = false) {
         rest: text.slice(nextIndex),
     };
 }
+/** A rejection from the response body's reader, before any SSE decoding. */
+export class SseBodyReadError extends Error {
+    constructor(cause, pendingEvent) {
+        super(cause instanceof Error ? cause.message : String(cause), { cause });
+        this.pendingEvent = pendingEvent;
+    }
+}
 export async function* iterateSseMessages(body, signal) {
     const reader = body.getReader();
     const decoder = new TextDecoder();
@@ -69,7 +76,19 @@ export async function* iterateSseMessages(body, signal) {
             if (signal?.aborted) {
                 throw new Error("Request was aborted");
             }
-            const { value, done } = await reader.read();
+            let read;
+            try {
+                read = await reader.read();
+            } catch (error) {
+                if (signal?.aborted || error?.name === "AbortError") throw error;
+                // Include incomplete UTF-8 and the unparsed last line. Blank
+                // separators and comment-only keepalives carry no event data.
+                const trailing = buffer + decoder.decode();
+                const pendingEvent = state.event !== null || state.data.length > 0 ||
+                    (trailing.trim() !== "" && !trailing.startsWith(":"));
+                throw new SseBodyReadError(error, pendingEvent);
+            }
+            const { value, done } = read;
             if (done) {
                 break;
             }

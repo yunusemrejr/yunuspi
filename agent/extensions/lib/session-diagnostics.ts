@@ -195,8 +195,10 @@ export function collectSessionDiagnostics(allEntries: any[], { excerpts = true }
   };
   for (let i = entries.length - 1; i >= 0; i--) {
     const e = entries[i], msg = e?.type === "message" ? e.message : undefined;
-    if (msg?.role === "assistant" && msg.stopReason === "error")
-      add("model", "provider", `model:${e.id ?? i}`, String(msg.errorMessage ?? text(msg.content)).slice(0,16000));
+    if (msg?.role === "assistant" && msg.stopReason === "error") {
+      const evidence = msg.providerRetry?.responseBodyInterrupted === true ? { outcomeReason: "transport" } : undefined;
+      add("model", "provider", `model:${e.id ?? i}`, String(msg.errorMessage ?? text(msg.content)).slice(0,16000), undefined, evidence);
+    }
     const toolFailed = msg?.isError || msg?.toolName === "web_search" && msg.details?.queryCount > 0 && msg.details?.successfulQueries === 0;
     if (msg?.role === "toolResult" && toolFailed)
       add("tool", msg.toolName ?? "unknown", `tool:${msg.toolCallId ?? i}`, text(msg.content), msg.toolCallId);
