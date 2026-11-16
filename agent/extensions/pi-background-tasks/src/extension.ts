@@ -35,6 +35,7 @@ import {
   readPackageInfo,
 } from "./core/update-check.js";
 import { BackgroundTaskRegistry, MAX_TASK_TIMEOUT_SECONDS } from "./core/registry.js";
+import { backgroundCostRoute, recoverBackgroundCost } from "./core/bg-cost.ts";
 import { registerContinuationSource } from "../../lib/continuation-notice.ts";
 import {
   BG_TERMINAL_CHANNEL,
@@ -239,6 +240,7 @@ import { createCompletionNotifier } from './core/completion-wake.ts';
 export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   const seenTaskIds = new Set<string>();
   let currentCtx: ExtensionContext | undefined;
+  let billingCtx: ExtensionContext | undefined;
   let dockOpen = false;
   let statusInterval: NodeJS.Timeout | undefined;
   let disposeContinuationNotice: (() => void) | undefined;
@@ -251,6 +253,15 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     sendCompletionNotification: completionNotifier,
     publishTerminal: (task) => {
       eventService.publishTerminal(task);
+    },
+    recordBilling: (task, terminal) => {
+      if (!task.ownerSessionId || billingCtx?.sessionManager.getSessionId() !== task.ownerSessionId) return;
+      pi.appendEntry("auxiliary-model-usage-v1", {
+        ...backgroundCostRoute, id: task.id,
+        status: terminal ? task.status === "completed" ? "completed" : task.status === "killed" ? "cancelled" : "failed" : "pending",
+        ...(!terminal ? { metadataRef: path.relative(task.cwd, task.metadataAbsPath).split(path.sep).join("/") } : {}),
+        ...(terminal && task.costEvidence ? { usage: { costDetails: task.costEvidence } } : {}),
+      });
     },
   });
   // Host-operation safety names these when it blocks kill/pkill, so the
@@ -385,6 +396,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     options: StartTaskOptions = {},
   ): Promise<BgTask> {
     currentCtx = ctx;
+    billingCtx = ctx;
     return registry.startTask({ cwd: ctx.cwd, sessionId: ctx.sessionManager.getSessionId(), modelRegistry: ctx.modelRegistry, model: ctx.model }, command, options);
   }
 
@@ -539,6 +551,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   pi.on("session_start", async (_event, ctx) => {
     registry.setShuttingDown(false);
     currentCtx = ctx;
+    billingCtx = ctx;
     unregisterBackgroundWork?.();
     unregisterBackgroundWork = undefined;
     try {
@@ -546,6 +559,11 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     } catch { /* without a session identity bg_wait cannot scope this work; bg_status still reports it */ }
     registerContinuationNotice(ctx);
     await registry.ensureRuntimeDir(ctx);
+    const sessionId = ctx.sessionManager.getSessionId();
+    void recoverBackgroundCost(ctx.sessionManager.getEntries?.() ?? [], ctx.cwd, sessionId).then(receipts => {
+      if (billingCtx?.sessionManager !== ctx.sessionManager || ctx.sessionManager.getSessionId() !== sessionId) return;
+      for (const receipt of receipts) pi.appendEntry("auxiliary-model-usage-v1", receipt);
+    }).catch(() => { /* Preserve pending evidence when recovery cannot read task metadata. */ });
     shownStatus = null;
     updateUi(ctx);
     if (statusInterval) clearInterval(statusInterval);
@@ -555,6 +573,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   });
 
   pi.on("session_shutdown", async (_event, ctx) => {
+    const previousBillingCtx = billingCtx;
     registry.setShuttingDown(true);
     unregisterBackgroundWork?.();
     unregisterBackgroundWork = undefined;
@@ -596,6 +615,7 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
         );
       }
     } finally {
+      if (billingCtx === previousBillingCtx) billingCtx = undefined;
       eventService.close();
     }
   });

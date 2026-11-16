@@ -1,3 +1,10 @@
+## 0.56.4 — Background billing and safer edits
+
+- Managed background agents contribute their recorded usage to the parent session when they finish, even with notifications disabled. Resume can recover missing terminal receipts from the owning task.
+- Extension model completions, compaction and branch summaries use provider admission and record outcomes against the route that actually ran.
+- Edit batches keep exact matches distinct, reject ambiguous or partial Unicode matches, and preserve mixed line endings and text outside the edited spans. Completed writes retain their result if Stop arrives while they finish.
+- Verification rescans reuse unchanged file digests and retain evidence from readable files when one entry disappears.
+
 ## 0.56.3 — Hosted usage receipts and faster history paging
 
 - Hosted web, extraction, and configured reranking requests record usage separately, including work that fails after submission. The parent total includes delegated hosted charges and marks missing amounts as partial.

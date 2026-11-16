@@ -2,14 +2,14 @@
  * Extension runner - executes extensions and manages their lifecycle.
  */
 import type { AgentMessage } from "@yunuspi/agent-core";
-import type { ImageContent, Provider, ProviderHeaders } from "@yunuspi/ai";
+import type { Api, AssistantMessage, ImageContent, Model, Provider, ProviderHeaders, ProviderRequestOptions } from "@yunuspi/ai";
 import type { KeyId } from "@yunuspi/tui";
 import type { ResourceDiagnostic } from "../diagnostics.ts";
 import type { KeybindingsConfig } from "../keybindings.ts";
 import type { ModelRegistry } from "../model-registry.ts";
 import type { SessionManager } from "../session-manager.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
-import type { BeforeAgentStartEvent, BeforeAgentStartEventResult, BeforeProviderHeadersEvent, BeforeProviderRequestEvent, ContextEvent, EntryRenderer, Extension, ExtensionActions, ExtensionCommandContext, ExtensionCommandContextActions, ExtensionContext, ExtensionContextActions, ExtensionError, ExtensionEvent, ExtensionFlag, ExtensionMode, ExtensionRuntime, ExtensionShortcut, ExtensionUIContext, InputEvent, InputEventResult, InputSource, LoadExtensionsResult, MarkdownTransformer, MessageEndEvent, MessageRenderer, ProjectTrustContext, ProjectTrustEvent, ProjectTrustEventResult, ProviderConfig, RegisteredTool, ReplacedSessionContext, ResolvedCommand, ResourcesDiscoverEvent, SessionBeforeCompactResult, SessionBeforeForkResult, SessionBeforeSwitchResult, SessionBeforeTreeResult, SessionShutdownEvent, ToolCallEvent, ToolCallEventResult, ToolResultEvent, ToolResultEventResult, UserBashEvent, UserBashEventResult } from "./types.ts";
+import type { AuxiliaryProviderRequestPurpose, BeforeAuxiliaryProviderRequestEvent, BeforeAgentStartEvent, BeforeAgentStartEventResult, BeforeProviderHeadersEvent, BeforeProviderRequestEvent, ContextEvent, EntryRenderer, Extension, ExtensionActions, ExtensionCommandContext, ExtensionCommandContextActions, ExtensionContext, ExtensionContextActions, ExtensionError, ExtensionEvent, ExtensionFlag, ExtensionMode, ExtensionRuntime, ExtensionShortcut, ExtensionUIContext, InputEvent, InputEventResult, InputSource, LoadExtensionsResult, MarkdownTransformer, MessageEndEvent, MessageRenderer, ProjectTrustContext, ProjectTrustEvent, ProjectTrustEventResult, ProviderConfig, RegisteredTool, ReplacedSessionContext, ResolvedCommand, ResourcesDiscoverEvent, SessionBeforeCompactResult, SessionBeforeForkResult, SessionBeforeSwitchResult, SessionBeforeTreeResult, SessionShutdownEvent, ToolCallEvent, ToolCallEventResult, ToolResultEvent, ToolResultEventResult, UserBashEvent, UserBashEventResult } from "./types.ts";
 /** Combined result from all before_agent_start handlers */
 interface BeforeAgentStartCombinedResult {
     messages?: NonNullable<BeforeAgentStartEventResult["message"]>[];
@@ -19,7 +19,7 @@ interface BeforeAgentStartCombinedResult {
  * Events handled by the generic emit() method.
  * Events with dedicated emitXxx() methods are excluded for stronger type safety.
  */
-type RunnerEmitEvent = Exclude<ExtensionEvent, ToolCallEvent | ProjectTrustEvent | ToolResultEvent | UserBashEvent | ContextEvent | BeforeProviderRequestEvent | BeforeProviderHeadersEvent | BeforeAgentStartEvent | MessageEndEvent | ResourcesDiscoverEvent | InputEvent>;
+type RunnerEmitEvent = Exclude<ExtensionEvent, ToolCallEvent | ProjectTrustEvent | ToolResultEvent | UserBashEvent | ContextEvent | BeforeProviderRequestEvent | BeforeAuxiliaryProviderRequestEvent | BeforeProviderHeadersEvent | BeforeAgentStartEvent | MessageEndEvent | ResourcesDiscoverEvent | InputEvent>;
 type RunnerEmitResult<TEvent extends RunnerEmitEvent> = TEvent extends {
     type: "session_before_switch";
 } ? SessionBeforeSwitchResult | undefined : TEvent extends {
@@ -158,6 +158,7 @@ export declare class ExtensionRunner {
     emitContext(messages: AgentMessage[], metadata?: Pick<ContextEvent, "requestMessages" | "requestId" | "turnId" | "requestMessageIndex">): Promise<AgentMessage[]>;
     emitBeforeProviderRequest(payload: unknown, metadata?: Pick<BeforeProviderRequestEvent, "model" | "signal">): Promise<unknown>;
     emitBeforeProviderHeaders(headers: ProviderHeaders): Promise<ProviderHeaders>;
+    completeAuxiliaryProviderRequest<T extends ProviderRequestOptions<any>>(purpose: AuxiliaryProviderRequestPurpose, model: Model<Api>, options: T | undefined, complete: (options: T | undefined) => Promise<AssistantMessage>): Promise<AssistantMessage>;
     emitBeforeAgentStart(prompt: string, images: ImageContent[] | undefined, systemPrompt: string, systemPromptOptions: BuildSystemPromptOptions, requestSignal?: AbortSignal): Promise<BeforeAgentStartCombinedResult | undefined>;
     emitResourcesDiscover(cwd: string, reason: ResourcesDiscoverEvent["reason"]): Promise<{
         skillPaths: Array<{

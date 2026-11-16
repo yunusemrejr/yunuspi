@@ -8,7 +8,7 @@
  * - Interact with the user via UI primitives
  */
 import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback, ThinkingLevel, ToolExecutionMode } from "@yunuspi/agent-core";
-import type { Api, AssistantMessageEvent, AssistantMessageEventStream, ConstrainedSamplingConfig, Context, ImageContent, Model, OAuthCredentials, OAuthLoginCallbacks, Provider, ProviderHeaders, RefreshModelsContext, SimpleStreamOptions, TextContent, ToolResultMessage, Usage } from "@yunuspi/ai";
+import type { Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, ConstrainedSamplingConfig, Context, ImageContent, Model, OAuthCredentials, OAuthLoginCallbacks, Provider, ProviderHeaders, RefreshModelsContext, SimpleStreamOptions, TextContent, ToolResultMessage, Usage } from "@yunuspi/ai";
 import type { AutocompleteItem, AutocompleteProvider, Component, EditorComponent, EditorTheme, KeyId, OverlayHandle, OverlayOptions, TUI } from "@yunuspi/tui";
 import type { Static, TSchema } from "typebox";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
@@ -537,6 +537,17 @@ export interface BeforeProviderRequestEvent {
     /** The request lifetime, including caller cancellation and stream deadlines. */
     signal?: AbortSignal;
 }
+export type AuxiliaryProviderRequestPurpose = "extension" | "compaction" | "branch-summary";
+/** Observe a session-owned auxiliary request after payload transforms and before dispatch. */
+export interface BeforeAuxiliaryProviderRequestEvent {
+    readonly type: "before_auxiliary_provider_request";
+    readonly purpose: AuxiliaryProviderRequestPurpose;
+    readonly model: Readonly<Pick<Model<Api>, "provider" | "id" | "baseUrl" | "api" | "cost" | "compat">>;
+    readonly payload: unknown;
+    readonly signal?: AbortSignal;
+}
+/** A callback bound to exactly one admitted auxiliary request and its final outcome. */
+export type AuxiliaryProviderRequestObserver = (message: AssistantMessage) => void | Promise<void>;
 /**
  * Fired after request headers are assembled, before the provider HTTP call.
  * Handlers mutate `headers` in place (e.g. to inject tracing/session headers);
@@ -844,7 +855,7 @@ export declare function isToolCallEventType<TName extends string, TInput extends
     input: TInput;
 };
 /** Union of all event types */
-export type ExtensionEvent = ProjectTrustEvent | ResourcesDiscoverEvent | SessionEvent | ContextEvent | BeforeProviderRequestEvent | BeforeProviderHeadersEvent | AfterProviderResponseEvent | BeforeAgentStartEvent | AgentStartEvent | AgentEndEvent | AgentSettledEvent | UIPromptStartEvent | UIPromptEndEvent | TurnStartEvent | TurnEndEvent | MessageStartEvent | MessageUpdateEvent | MessageEndEvent | ToolExecutionStartEvent | ToolExecutionUpdateEvent | ToolExecutionEndEvent | ModelSelectEvent | ThinkingLevelSelectEvent | UserBashEvent | InputEvent | ToolCallEvent | ToolResultEvent;
+export type ExtensionEvent = ProjectTrustEvent | ResourcesDiscoverEvent | SessionEvent | ContextEvent | BeforeProviderRequestEvent | BeforeAuxiliaryProviderRequestEvent | BeforeProviderHeadersEvent | AfterProviderResponseEvent | BeforeAgentStartEvent | AgentStartEvent | AgentEndEvent | AgentSettledEvent | UIPromptStartEvent | UIPromptEndEvent | TurnStartEvent | TurnEndEvent | MessageStartEvent | MessageUpdateEvent | MessageEndEvent | ToolExecutionStartEvent | ToolExecutionUpdateEvent | ToolExecutionEndEvent | ModelSelectEvent | ThinkingLevelSelectEvent | UserBashEvent | InputEvent | ToolCallEvent | ToolResultEvent;
 export interface ContextEventResult {
     messages?: AgentMessage[];
 }
@@ -960,6 +971,7 @@ export interface ExtensionAPI {
     on(event: "session_tree", handler: ExtensionHandler<SessionTreeEvent>): void;
     on(event: "context", handler: ExtensionHandler<ContextEvent, ContextEventResult>): void;
     on(event: "before_provider_request", handler: ExtensionHandler<BeforeProviderRequestEvent, BeforeProviderRequestEventResult>): void;
+    on(event: "before_auxiliary_provider_request", handler: ExtensionHandler<BeforeAuxiliaryProviderRequestEvent, AuxiliaryProviderRequestObserver>): void;
     on(event: "before_provider_headers", handler: ExtensionHandler<BeforeProviderHeadersEvent>): void;
     on(event: "after_provider_response", handler: ExtensionHandler<AfterProviderResponseEvent>): void;
     on(event: "before_agent_start", handler: ExtensionHandler<BeforeAgentStartEvent, BeforeAgentStartEventResult>): void;

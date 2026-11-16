@@ -46,6 +46,7 @@ import {
 // on 2026-08-31 together with their durable-fs.ts dependency.
 import { closeAndFsyncOutputStream, writeJsonAtomic } from "./attested-pi-run.js";
 import { resolvePiLaunch, type PiLaunchSpec } from "./pi-launch.js";
+import { backgroundCostControlSource, createBackgroundCostCapture, unknownBackgroundCost } from "./bg-cost.ts";
 import {
   runWindowsTaskkill,
   type TaskkillOutcome,
@@ -159,6 +160,7 @@ export interface BackgroundTaskRegistryOptions {
   onChange?: () => void;
   sendCompletionNotification: CompletionNotificationSender;
   publishTerminal?: (task: BgTaskSnapshot) => void;
+  recordBilling?: (task: BgTask, terminal: boolean) => void;
   spawn?: BackgroundTaskSpawn;
   killProcess?: KillProcessFn;
   killTree?: KillTreeFn;
@@ -253,12 +255,14 @@ export function buildModelWindowIndex(
 export function createPiTelemetryWrapperSource(
   index: ModelWindowIndex,
   launch: PiLaunchSpec = resolvePiLaunch(),
+  billingToken?: string,
 ): string {
   return `#!/usr/bin/env node
 const { spawn } = require("node:child_process");
 const index = ${JSON.stringify(index)};
 const launch = ${JSON.stringify(launch)};
 const WINDOWS_COMMAND_LINE_LIMIT = 32767;
+${backgroundCostControlSource(billingToken)}
 
 const tokenUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0 };
 let costTotal = 0;
@@ -515,6 +519,12 @@ try {
 }
 
 if (child) {
+  let terminating = false;
+  const drainOnTerm = () => { terminating = true; };
+  // The registry sends TERM to the process group. Pi already receives it,
+  // and the wrapper must stay alive to forward its shutdown billing. The
+  // registry still escalates the group to KILL if the child will not close.
+  if (billingToken && parsed.parseJson) process.on("SIGTERM", drainOnTerm);
   if (!parsed.parseJson) {
     child.stdout.pipe(process.stdout);
   } else {
@@ -531,11 +541,13 @@ if (child) {
   });
   child.on("close", (code, signal) => {
     if (parsed.parseJson && buffer.trim()) processLine(buffer);
+    if (parsed.parseJson && billingHeader) billingFrame("end", { complete: code === 0 && !signal && !terminating });
     // Never call process.exit() here: the final message telemetry may still be
     // buffered on wrapper stdout, and forced exit can publish a stale context
     // snapshot from the preceding assistant turn. exitCode lets Node drain the
     // pipe; signal termination is deferred through the same stdout barrier.
     process.stdout.write("", () => {
+      process.off("SIGTERM", drainOnTerm);
       if (signal) process.kill(process.pid, signal);
       else process.exitCode = code ?? 0;
     });
@@ -551,6 +563,8 @@ function processLine(line) {
     process.stdout.write(line + "\\n");
     return;
   }
+  if (!event || typeof event !== "object") return;
+  billingEvent(event);
   if (event.type === "tool_execution_start") {
     const toolName = event.toolName || event.tool_name || "tool";
     markToolStarted(event.toolCallId || event.tool_call_id, toolName);
@@ -746,6 +760,8 @@ export class BackgroundTaskRegistry {
   private readonly onChange: () => void;
   private readonly sendCompletionNotification: CompletionNotificationSender;
   private readonly publishTerminalSnapshot: (task: BgTaskSnapshot) => void;
+  private readonly billingCapture = new WeakMap<BgTask, ReturnType<typeof createBackgroundCostCapture>>();
+  private readonly recordBilling?: BackgroundTaskRegistryOptions["recordBilling"];
   private readonly windowsKillStates = new WeakMap<BgTask, WindowsKillState>();
   private readonly terminalPublishAttempts = new WeakMap<BgTask, number>(); /* PI_BG_TERMINAL_PUBLISH_BOUND */
   private readonly terminalPublishAbandoned = new WeakSet<BgTask>();
@@ -781,6 +797,7 @@ export class BackgroundTaskRegistry {
     this.onChange = options.onChange ?? noopOnChange;
     this.sendCompletionNotification = options.sendCompletionNotification;
     this.publishTerminalSnapshot = options.publishTerminal ?? noopOnChange;
+    this.recordBilling = options.recordBilling;
   }
 
   isShuttingDown(): boolean {
@@ -969,6 +986,7 @@ export class BackgroundTaskRegistry {
       outputPath,
       outputAbsPath,
       metadataAbsPath,
+      ownerSessionId: ctx.sessionId,
       cwd: ctx.cwd,
       startTime: this.now(),
       exitCode: undefined,
@@ -1027,13 +1045,16 @@ export class BackgroundTaskRegistry {
             dir.abs,
             `${id}.pi-telemetry-wrapper.cjs`,
           );
+          const capture = createBackgroundCostCapture(normalizedCommand);
+          this.billingCapture.set(task, capture);
           await writeFile(
             wrapperAbsPath,
             createPiTelemetryWrapperSource(
               buildModelWindowIndex(ctx),
               piTelemetryLaunch,
+              capture.token,
             ),
-            "utf8",
+            { encoding: "utf8", mode: 0o600 },
           );
           commandToSpawn = `pi() { ${shellQuote(process.execPath)} ${shellQuote(wrapperAbsPath)} "$@"; }\n${normalizedCommand}`;
           task.telemetryWrapped = true;
@@ -1064,6 +1085,7 @@ export class BackgroundTaskRegistry {
 
       task.child = child;
       task.pid = child.pid;
+      if (task.pid && task.isAgent) this.publishBilling(task, false);
       if (this.platform !== "win32") ownProcessGroup(child.pid);
       task.stopDiskWatch = watchDisk(ctx.cwd, diskLimits, (reason) => {
         if (task.status !== "running") return;
@@ -1521,6 +1543,7 @@ export class BackgroundTaskRegistry {
       return;
     }
     const record: TelemetryControlPayload = parsed;
+    if (this.billingCapture.get(task)?.accept(record, trimmed.length)) return;
     const type = record.type;
     if (type === "background-task-context-usage") {
       const context = normalizeContextUsage(record);
@@ -2220,6 +2243,8 @@ export class BackgroundTaskRegistry {
     }
 
     task.endTime = this.now();
+    if (task.pid && task.isAgent) task.costEvidence = this.billingCapture.get(task)?.settle() ?? unknownBackgroundCost();
+    this.billingCapture.delete(task);
     if (finalError) task.error = finalError;
     try {
       await this.writeMetadataSnapshot(task, {
@@ -2243,6 +2268,7 @@ export class BackgroundTaskRegistry {
       });
     }
 
+    if (task.costEvidence) this.publishBilling(task, true);
     for (const waiter of task.waiters.splice(0)) waiter();
     this.onChange();
     this.publishTerminal(task);
@@ -2287,6 +2313,14 @@ export class BackgroundTaskRegistry {
     while (this.tasks.size > this.maxRecentTasks && removable.length > 0) {
       const task = removable.shift();
       if (task) this.tasks.delete(task.id);
+    }
+  }
+
+  private publishBilling(task: BgTask, terminal: boolean): void {
+    try {
+      this.recordBilling?.(task, terminal);
+    } catch (error) {
+      this.logger.error(`[background-tasks] failed to record billing for ${task.id}:`, error);
     }
   }
 }

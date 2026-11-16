@@ -3,7 +3,7 @@ import { access as fsAccess, readFile as fsReadFile, writeFile as fsWriteFile } 
 import { Type } from "typebox";
 import { splitBom } from "../../utils/text.js";
 import { getExperimentalToolSampling } from "../experimental.js";
-import { applyEditsToNormalizedContent, detectLineEnding, generateDiffString, generateUnifiedPatch, normalizeToLF, restoreLineEndings, } from "./edit-diff.js";
+import { applyEditsWithOriginalLineEndings, decodeEditText, generateDiffString, generateUnifiedPatch, normalizeToLF, } from "./edit-diff.js";
 import { withFileMutationQueue } from "./file-mutation-queue.js";
 import { resolveToCwd } from "./path-utils.js";
 import { missingPathHint, withHint } from "./path-hints.js";
@@ -97,8 +97,7 @@ export function createEditToolDefinition(cwd, options) {
             return withFileMutationQueue(absolutePath, async () => {
                 // Do not reject from an abort event listener here: that would release the
                 // mutation queue while an in-flight filesystem operation may still finish.
-                // Checking signal.aborted after each await observes the same aborts while
-                // keeping the queue locked until the current operation has settled.
+                // Check cancellation before committing the write, then keep its receipt.
                 const throwIfAborted = () => {
                     if (signal?.aborted)
                         throw new Error("Operation aborted");
@@ -117,25 +116,23 @@ export function createEditToolDefinition(cwd, options) {
                 throwIfAborted();
                 // Read the file.
                 const buffer = await ops.readFile(absolutePath);
-                const rawContent = buffer.toString("utf-8");
                 throwIfAborted();
+                const rawContent = decodeEditText(buffer);
                 // Strip BOM before matching. The model will not include an invisible BOM in oldText.
                 const { bom, text: content } = splitBom(rawContent);
-                const originalEnding = detectLineEnding(content);
                 const normalizedContent = normalizeToLF(content);
                 const beforeHash = __piContentHash(normalizedContent);
                 if (typeof input.expectedHash === "string" && input.expectedHash && input.expectedHash !== beforeHash) {
                     throw new Error(`Edits rejected: ${path} changed since it was last read (optimistic-concurrency conflict; expected hash ${input.expectedHash}, current ${beforeHash}). No file was changed. ${__piEditConflictHelp(normalizedContent, edits)}`);
                 }
                 let result;
-                try { result = applyEditsToNormalizedContent(normalizedContent, edits, path); }
+                try { result = applyEditsWithOriginalLineEndings(content, normalizedContent, edits, path); }
                 catch (error) { throw new Error(`${error.message}\nNo file was changed. Current content hash: ${beforeHash}. ${__piEditConflictHelp(normalizedContent, edits)}`, { cause: error }); }
-                const { baseContent, newContent } = result;
+                const { baseContent, newContent, writeContent } = result;
                 const afterHash = __piContentHash(newContent);
                 throwIfAborted();
-                const finalContent = bom + restoreLineEndings(newContent, originalEnding);
+                const finalContent = bom + writeContent;
                 await ops.writeFile(absolutePath, finalContent);
-                throwIfAborted();
                 const diffResult = generateDiffString(baseContent, newContent);
                 const patch = generateUnifiedPatch(path, baseContent, newContent);
                 return {

@@ -21,6 +21,12 @@ async function fixture(t, { stopReason = "stop", history = false } = {}) {
     extensionFactories: [api => {
       api.on("agent_end", () => api.sendMessage({ customType: "prompt-analysis", content: "Advisory analysis finished.",
         display: true, excludeFromContext: true }, { triggerTurn: false }));
+      api.on("session_shutdown", () => {
+        api.appendEntry("auxiliary-model-usage-v1", {
+          id: "shutdown-spend", owner: "shutdown-fixture", provider: "audit", model: "print-fixture", status: "completed",
+          usage: { costDetails: { reported: 0.03, estimated: 0, unknown: false, subscription: false, seen: true } },
+        });
+      });
     }],
   });
   await loader.reload();
@@ -118,4 +124,15 @@ test("JSON print mode retains both assistant and post-turn intelligence events",
   assert.ok(assistantIndex >= 0);
   assert.ok(markerIndex > assistantIndex);
   assert.equal(events[assistantIndex].message.content[0].text, "OK");
+});
+
+test("JSON print mode forwards persisted billing receipts from session shutdown", async t => {
+  const f = await fixture(t);
+  const result = await captureOutput(() => runPrintMode(f.runtime, { mode: "json", initialMessage: "Reply exactly OK" }));
+  assert.equal(result.code, 0);
+  const receipts = f.session.sessionManager.getEntries().filter(entry => entry.customType === "auxiliary-model-usage-v1");
+  assert.equal(receipts.length, 1);
+  const events = result.stdout.trim().split("\n").map(line => JSON.parse(line));
+  assert.deepEqual(events.filter(event => event.type === "entry_appended").map(event => event.entry), receipts);
+  assert.ok(events.findIndex(event => event.type === "entry_appended") > events.findIndex(event => event.type === "agent_end"));
 });

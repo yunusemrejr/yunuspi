@@ -1727,7 +1727,11 @@ export class AgentSession {
     // =========================================================================
     /** Generate Pi's built-in compaction summary for manual and automatic compaction. */
     async _runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, signal, env, reason) {
-        return compact(preparation, requestModel, apiKey, headers, customInstructions, signal, this.thinkingLevel, this.agent.streamFunction, env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }), undefined);
+        return compact(preparation, requestModel, apiKey, headers, customInstructions, signal, this.thinkingLevel, this._completeSessionSummary.bind(this, "compaction"), env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }), undefined);
+    }
+    async _completeSessionSummary(purpose, model, context, options) {
+        return this._extensionRunner.completeAuxiliaryProviderRequest(purpose, model, options, async (requestOptions) =>
+            (await this.agent.streamFunction(model, context, requestOptions)).result());
     }
     _clearManualCompactionState() {
         this._compactionAbortController = undefined;
@@ -2481,7 +2485,9 @@ export class AgentSession {
                 extensionsResult.runtime.flagValues.set(name, value);
             }
         }
-        this._extensionRunner = new ExtensionRunner(extensionsResult.extensions, extensionsResult.runtime, this._cwd, this.sessionManager, new ModelRegistry(this._modelRuntime));
+        const registry = new ModelRegistry(this._modelRuntime, () => runner);
+        const runner = new ExtensionRunner(extensionsResult.extensions, extensionsResult.runtime, this._cwd, this.sessionManager, registry);
+        this._extensionRunner = runner;
         this._guardianAnalysisUnsubscribe?.();
         this._guardianAnalysisUnsubscribe = extensionsResult.runtime.onEvent("guardian:prompt-analysis:v1", (event) => {
             try { this._guardian?.observePromptAnalysis(event); } catch { /* a malformed advisory event is an abstention */ }
@@ -2884,7 +2890,7 @@ export class AgentSession {
                     customInstructions,
                     replaceInstructions,
                     reserveTokens: branchSummarySettings.reserveTokens,
-                    streamFn: this.agent.streamFunction,
+                    streamFn: this._completeSessionSummary.bind(this, "branch-summary"),
                     retry: this.settingsManager.getRetrySettings(),
                     callbacks: this._summarizationRetryCallbacks({ source: "branchSummary" }),
                 });

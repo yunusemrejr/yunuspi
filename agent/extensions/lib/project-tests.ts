@@ -43,14 +43,44 @@ const textOf = (content: any) => typeof content === 'string' ? content : Array.i
  * the conservative restore path. */
 const PROJECT_HASH_LIMIT = 1 << 20;
 const PROJECT_HASH_FILES = 64;
-function projectContentHash(root: string, file: string): string | undefined {
+type SourceDigests = Map<string, { version: string; hash: string }>;
+const sourceVersion = ({ dev, ino, size, mtimeNs, ctimeNs }: fs.BigIntStats) => `${dev}:${ino}:${size}:${mtimeNs}:${ctimeNs}`;
+function projectContentHash(root: string, file: string, digests?: SourceDigests): string | undefined {
+  const absolute = path.resolve(root, file);
   try {
-    const absolute = path.resolve(root, file);
     if (!containsPath(root, absolute)) return undefined;
-    const stat = fs.statSync(absolute);
+    const stat = fs.lstatSync(absolute, { bigint: true });
     if (!stat.isFile() || stat.size > PROJECT_HASH_LIMIT) return undefined;
-    return `${stat.size}:${createHash('sha256').update(fs.readFileSync(absolute)).digest('hex')}`;
-  } catch { return undefined; }
+    const version = sourceVersion(stat);
+    const cached = digests?.get(absolute);
+    if (cached?.version === version) return cached.hash;
+    // Reject a link, growth or a moving file rather than cache a digest of
+    // someone else's path or a mixture of different source versions.
+    const resolved = fs.realpathSync(absolute);
+    if (!containsPath(fs.realpathSync(root), resolved)) return undefined;
+    const fd = fs.openSync(resolved, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0));
+    let hash: string;
+    try {
+      const opened = fs.fstatSync(fd, { bigint: true });
+      if (!opened.isFile() || sourceVersion(opened) !== version) return undefined;
+      const bytes = Buffer.allocUnsafe(Number(opened.size) + 1);
+      let length = 0;
+      while (length < bytes.length) {
+        const next = fs.readSync(fd, bytes, length, bytes.length - length, length);
+        if (!next) break;
+        length += next;
+      }
+      if (length !== Number(opened.size) || sourceVersion(fs.fstatSync(fd, { bigint: true })) !== version ||
+          sourceVersion(fs.lstatSync(absolute, { bigint: true })) !== version) return undefined;
+      hash = `${opened.size}:${createHash('sha256').update(bytes.subarray(0, length)).digest('hex')}`;
+    } finally { fs.closeSync(fd); }
+    if (digests) {
+      digests.delete(absolute);
+      digests.set(absolute, { version, hash });
+      if (digests.size > 4 * PROJECT_HASH_FILES) digests.delete(digests.keys().next().value!);
+    }
+    return hash;
+  } catch { digests?.delete(absolute); return undefined; }
 }
 /** Current bytes must match the bytes the persisted receipts were earned on,
  * for every restored file, before kept state is trusted across a reload. */
@@ -361,6 +391,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   let pauseReason: 'error' | 'stop' | 'reload' | undefined;
   let scanTail = Promise.resolve(), notedRevision = -1, delivered = '', deliveryInFlight = '', deliveryVersion = 0;
   let hashes: Record<string, string> = {};
+  const sourceDigests: SourceDigests = new Map();
   let lastCtx: any;
   const starts = new Map<string, { revision: number; tree?: string; check: { key: string; label: string }; epoch: number; observeOnly?: boolean; chain?: { key: string; label: string; observeOnly: boolean }[] }>();
   const earlyTerminals = new Map<string, any>();
@@ -406,7 +437,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
     let budgeted = PROJECT_HASH_FILES;
     for (const file of files) {
       if (budgeted <= 0) break;
-      const digest = state.root ? projectContentHash(state.root, file) : undefined;
+      const digest = state.root ? projectContentHash(state.root, file, sourceDigests) : undefined;
       if (digest) { hashes[file] = digest; budgeted--; }
     }
     save();
@@ -429,13 +460,13 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       }
       if (ticket !== epoch || !active) return;
       options.onFacts?.(next, observeChanges, token);
-      if (state.root && state.root !== next.root) { state = fresh(next.root); baseline = undefined; hashes = {}; starts.clear(); }
+      if (state.root && state.root !== next.root) { state = fresh(next.root); baseline = undefined; hashes = {}; sourceDigests.clear(); starts.clear(); }
       state.root = next.root;
       const nextSources = next.truncated && baseline ? Object.fromEntries(Object.entries({ ...baseline, ...next.sources }).slice(-4000)) : next.sources;
       const currentHashes: Record<string, string> = {}, identities: Record<string, string> = {};
       let remaining = PROJECT_HASH_FILES;
       for (const [file, fingerprint] of Object.entries(nextSources ?? {}) as [string, string][]) {
-        const current = remaining-- > 0 ? projectContentHash(state.root, file) : undefined;
+        const current = remaining-- > 0 ? projectContentHash(state.root, file, sourceDigests) : undefined;
         identities[file] = current ?? fingerprint;
         if (current) currentHashes[file] = current;
       }
@@ -581,6 +612,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
   } catch { /* the message path below remains a fallback */ }
   const api = {
     async restore(ctx: any) {
+      sourceDigests.clear();
       disposeContinuationNotice();
       disposeContinuationNotice = registerContinuationSource({ session: ctx.sessionManager, name: 'project tests', verification: () => projectTestsVerificationLine(), verificationReceipts: () => projectTestsVerificationReceipt(), pending: () => enabled() && active && !options.shadow && capable() && !isSessionStopped(ctx) && state.followups < MAX_FOLLOWUPS && advice() ? ['resolve pending verification scope and current execution evidence'] : [] });
       epoch++; deliveryVersion++; active = true; state = fresh(); hashes = {}; pauseReason = undefined; facts = undefined; baseline = undefined; notedRevision = -1; delivered = ''; deliveryInFlight = ''; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] };
@@ -712,7 +744,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
         if (['write', 'edit'].includes(event.toolName) && (!event.isError || event.details?.fileMutation) && typeof raw === 'string') {
           const relative = path.relative(state.root || ctx.cwd, path.resolve(ctx.cwd, raw));
           if (!relative.startsWith('../') && !path.isAbsolute(relative) && isProjectTestSource(relative) && (before === state.revision || !state.changed.includes(relative))) {
-            const current = projectContentHash(state.root || ctx.cwd, relative);
+            const current = projectContentHash(state.root || ctx.cwd, relative, sourceDigests);
             if (!current || current !== previousHash) {
               const sid = ctx?.sessionManager?.getSessionId?.() ?? '';
               if (sid) recordWorkspaceMutation(ctx.cwd, sid, relative, event.toolName);
@@ -809,7 +841,7 @@ export function createProjectTestLifecycle(pi: any, options: { shadow?: boolean;
       }
       finally { if (deliveryInFlight === key) deliveryInFlight = ''; }
     },
-    shutdown() { disposeContinuationNotice(); active = false; epoch++; starts.clear(); earlyTerminals.clear(); unmatched = { revision: -1, commands: [] }; },
+    shutdown() { disposeContinuationNotice(); active = false; epoch++; starts.clear(); earlyTerminals.clear(); sourceDigests.clear(); unmatched = { revision: -1, commands: [] }; },
     snapshot: summary,
   };
   pi.registerTool({

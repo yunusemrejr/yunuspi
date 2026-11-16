@@ -517,6 +517,7 @@ export declare class AgentSession {
      */
     setFollowUpMode(mode: "all" | "one-at-a-time"): void;
     private _runDefaultCompaction;
+    private _completeSessionSummary;
     private _clearManualCompactionState;
     /**
      * Manually compact the session context.

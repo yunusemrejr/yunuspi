@@ -508,9 +508,11 @@ export async function completeSummarization(model, context, options, streamFn, r
         cacheRetention: "none",
         sessionId: options.sessionId ?? uuidv7(),
     };
-    const produce = async () => streamFn
-        ? (await streamFn(model, context, requestOptions)).result()
-        : completeSimple(model, context, requestOptions);
+    const produce = async () => {
+        if (!streamFn) return completeSimple(model, context, requestOptions);
+        const response = await streamFn(model, context, requestOptions);
+        return "result" in response ? response.result() : response;
+    };
     return retryAssistantCall(produce, retry, requestOptions.signal, callbacks);
 }
 /**

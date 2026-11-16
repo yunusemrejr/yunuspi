@@ -4,10 +4,11 @@
  * When navigating to a different point in the session tree, this generates
  * a summary of the branch being left so context isn't lost.
  */
-import type { AgentMessage, StreamFn } from "@yunuspi/agent-core";
+import type { AgentMessage } from "@yunuspi/agent-core";
 import type { RetryCallbacks, RetryPolicy } from "@yunuspi/ai";
 import type { Model, Usage } from "@yunuspi/ai/compat";
 import type { ReadonlySessionManager, SessionEntry } from "../session-manager.ts";
+import type { SummarizationDispatch } from "./compaction.ts";
 import { type FileOperations } from "./utils.ts";
 export interface BranchSummaryResult {
     summary?: string;
@@ -55,7 +56,7 @@ export interface GenerateBranchSummaryOptions {
     /** Tokens reserved when selecting branch history (default 16384) */
     reserveTokens?: number;
     /** Optional session stream function. Used to preserve SDK request behavior without mutating agent state. */
-    streamFn?: StreamFn;
+    streamFn?: SummarizationDispatch;
     /** Retry policy for transient summarization errors. Reuses coding-agent's `settings.retry`. */
     retry?: RetryPolicy;
     /** Optional callbacks for retry reporting (e.g. TUI retry indicators). */

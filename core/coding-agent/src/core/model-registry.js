@@ -5,8 +5,10 @@ export { clearApiKeyCache } from "./provider-composer.js";
  */
 export class ModelRegistry {
     runtime;
-    constructor(runtime) {
+    extensionRunner;
+    constructor(runtime, extensionRunner) {
         this.runtime = runtime;
+        this.extensionRunner = extensionRunner;
     }
     /** Reload models.json asynchronously. Await before making synchronous registry reads. */
     refresh(options) {
@@ -63,10 +65,14 @@ export class ModelRegistry {
         return this.runtime.getProvider(provider);
     }
     complete(model, context, options) {
-        return this.runtime.complete(model, context, options);
+        const dispatch = (requestOptions) => this.runtime.complete(model, context, requestOptions);
+        const runner = this.extensionRunner?.();
+        return runner ? runner.completeAuxiliaryProviderRequest("extension", model, options, dispatch) : dispatch(options);
     }
     completeSimple(model, context, options) {
-        return this.runtime.completeSimple(model, context, options);
+        const dispatch = (requestOptions) => this.runtime.completeSimple(model, context, requestOptions);
+        const runner = this.extensionRunner?.();
+        return runner ? runner.completeAuxiliaryProviderRequest("extension", model, options, dispatch) : dispatch(options);
     }
     getProviderDisplayName(provider) {
         return this.runtime.getProvider(provider)?.name ?? provider;

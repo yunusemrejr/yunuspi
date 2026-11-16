@@ -4,6 +4,7 @@
 export declare function detectLineEnding(content: string): "\r\n" | "\n";
 export declare function normalizeToLF(text: string): string;
 export declare function restoreLineEndings(text: string, ending: "\r\n" | "\n"): string;
+export declare function decodeEditText(bytes: Uint8Array): string;
 /**
  * Normalize text for fuzzy matching. Applies progressive transformations:
  * - Strip trailing whitespace from each line
@@ -64,13 +65,12 @@ export declare function closestLinesHint(content: string, oldText: string): stri
 /**
  * Apply one or more exact-text replacements to LF-normalized content.
  *
- * All edits are matched against the same original content. Replacements are
- * then applied in reverse order so offsets remain stable. If any edit needs
- * fuzzy matching, the operation runs in fuzzy-normalized content space and then
- * overlays those line-level changes onto the original content so unchanged line
- * blocks keep their original bytes.
+ * Match every edit against the original. An unmatched edit may use a uniquely
+ * matched equivalent in a shared normalized view, mapped back to complete
+ * source graphemes. Only the requested spans are replaced.
  */
 export declare function applyEditsToNormalizedContent(normalizedContent: string, edits: Edit[], path: string): AppliedEditsResult;
+export declare function applyEditsWithOriginalLineEndings(content: string, normalizedContent: string, edits: Edit[], path: string): AppliedEditsResult & { writeContent: string };
 /** Generate a standard unified patch. */
 export declare function generateUnifiedPatch(path: string, oldContent: string, newContent: string, contextLines?: number): string;
 /**

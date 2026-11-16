@@ -2787,12 +2787,12 @@
       {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 603
+        "line": 623
       },
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 637
+        "line": 657
       },
       {
         "name": "budget",
@@ -2867,7 +2867,7 @@
       {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 692
+        "line": 712
       },
       {
         "name": "lens-allow-edit",
@@ -2922,7 +2922,7 @@
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 660
+        "line": 680
       },
       {
         "name": "memory-prime",
@@ -2967,7 +2967,7 @@
       {
         "name": "provider-health",
         "source": "agent/extensions/provider-gate.ts",
-        "line": 495
+        "line": 508
       },
       {
         "name": "reminder",
@@ -3052,7 +3052,7 @@
       {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 629
+        "line": 649
       },
       {
         "name": "team",
@@ -3149,25 +3149,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 858,
+        "line": 878,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 815,
+        "line": 835,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 728,
+        "line": 748,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 787,
+        "line": 807,
         "kind": "literal"
       },
       {
@@ -3379,7 +3379,7 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 815,
+        "line": 847,
         "kind": "literal"
       },
       {
@@ -3587,25 +3587,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 858,
+        "line": 878,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 815,
+        "line": 835,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 728,
+        "line": 748,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 787,
+        "line": 807,
         "kind": "literal"
       },
       {
@@ -3719,7 +3719,7 @@
       {
         "name": "project_tests",
         "source": "agent/extensions/lib/project-tests.ts",
-        "line": 815,
+        "line": 847,
         "kind": "literal"
       },
       {
@@ -4036,7 +4036,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 661,
+      "sourceFiles": 662,
       "registrationSites": 60,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 77,

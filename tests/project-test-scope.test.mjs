@@ -31,6 +31,56 @@ test('non-check shell calls scan on result only; real checks still bind the curr
  assert.notEqual(api.snapshot().need,null,'an edit during a passing check still invalidates that receipt');
 });
 
+test('verification rescans reuse unchanged bytes and invalidate a same-size rewrite with restored mtime', async t => {
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-source-digest-'));
+ const file=path.join(cwd,'value.js'),ctx={cwd};
+ const tools={};
+ const api=createProjectTestLifecycle({registerTool:d=>tools[d.name]=d,getActiveTools:()=>['project_tests','bash'],appendEntry(){}});
+ const open=fs.openSync,read=fs.readFileSync;
+ let sourceReads=0;
+ fs.openSync=(filename,...args)=>{if(filename===file)sourceReads++;return open(filename,...args);};
+ fs.readFileSync=(filename,...args)=>{if(filename===file)sourceReads++;return read(filename,...args);};
+ t.after(()=>{fs.openSync=open;fs.readFileSync=read;api.shutdown();fs.rmSync(cwd,{recursive:true,force:true});});
+ const mtime=new Date('2025-01-01T00:00:00.000Z');
+ fs.writeFileSync(file,'const n=1;\n');
+ fs.utimesSync(file,mtime,mtime);
+ await api.restore(ctx);
+ const afterScan=sourceReads;
+ assert.ok(afterScan>0);
+ const probe={toolName:'bash',toolCallId:'probe',input:{command:'git status --short'},content:[],isError:false};
+ for(let i=0;i<4;i++) await api.result(probe,ctx);
+ assert.equal(sourceReads,afterScan,'unchanged tree scans do not reopen the source file');
+
+ const before=api.snapshot().tree;
+ const stat=fs.statSync(file,{bigint:true});
+ fs.writeFileSync(file,'const n=2;\n');
+ fs.utimesSync(file,mtime,mtime);
+ const rewritten=fs.statSync(file,{bigint:true});
+ assert.equal(rewritten.mtimeNs,stat.mtimeNs);
+ assert.equal(rewritten.size,stat.size);
+ await api.result(probe,ctx);
+ assert.ok(sourceReads>afterScan,'a changed source version is read again');
+ assert.notEqual(api.snapshot().tree,before);
+ assert.deepEqual(api.snapshot().changed,['value.js']);
+});
+
+test('one disappearing source keeps independent file metadata and marks the scan partial', async t => {
+ const {projectTestFacts}=await import(pathToFileURL(path.join(agent,'scripts/workspace-facts.mjs')));
+ const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-source-stat-race-'));
+ const racing=path.join(cwd,'racing.js');
+ fs.mkdirSync(path.join(cwd,'sub'));
+ for(const file of [racing,path.join(cwd,'survives.js'),path.join(cwd,'sub','other.js')])fs.writeFileSync(file,'const n=1;\n');
+ const lstat=fs.promises.lstat;
+ fs.promises.lstat=(filename,...args)=>filename===racing
+   ? Promise.reject(Object.assign(new Error('fixture source vanished'),{code:'ENOENT'}))
+   : lstat(filename,...args);
+ t.after(()=>{fs.promises.lstat=lstat;fs.rmSync(cwd,{recursive:true,force:true});});
+ const facts=await projectTestFacts(cwd);
+ assert.equal(facts.truncated,true);
+ assert.deepEqual(Object.keys(facts.sources).sort(),['sub/other.js','survives.js']);
+ assert.deepEqual(Object.keys(facts.reviewSources).sort(),['sub/other.js','survives.js']);
+});
+
 test('a later failed receipt retires an older pass for the identical tree across scopes', async t => {
  const cwd=fs.mkdtempSync(path.join(os.tmpdir(),'test-latest-receipt-')),tools={};
  const ctx={cwd};

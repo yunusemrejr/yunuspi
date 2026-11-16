@@ -886,7 +886,7 @@ export async function projectTestFacts(cwd, signal, options = {}) {
   const maxEntries = Math.min(12000, Math.max(1, options.maxEntries ?? 8000));
   const maxDepth = Math.min(16, Math.max(1, options.maxDepth ?? 12));
   const deadline =
-    Date.now() + Math.min(2000, Math.max(1, options.timeoutMs ?? 800));
+    performance.now() + Math.min(2000, Math.max(1, options.timeoutMs ?? 800));
   const result = {
     root,
     source: "bounded local filenames and stat metadata",
@@ -905,16 +905,17 @@ export async function projectTestFacts(cwd, signal, options = {}) {
   };
   const queue = [{ dir: root, depth: 0 }];
   const manifests = [];
-  while (queue.length && !result.truncated) {
-    const { dir, depth } = queue.shift();
+  let exhausted = false;
+  for (let cursor = 0; cursor < queue.length && !exhausted; cursor++) {
+    const { dir, depth } = queue[cursor];
     try {
-      // One readdir per directory and its file stats in parallel: the walk is
-      // repeated after every mutating tool call, so per-entry awaits add up.
-      const stats = [];
+      const files = [];
+      signal?.throwIfAborted();
       for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
         signal?.throwIfAborted();
-        if (++result.entries > maxEntries || Date.now() >= deadline) {
+        if (++result.entries > maxEntries || performance.now() >= deadline) {
           result.truncated = true;
+          exhausted = true;
           break;
         }
         if (entry.isSymbolicLink() || reviewSkip(entry.name)) continue;
@@ -933,18 +934,34 @@ export async function projectTestFacts(cwd, signal, options = {}) {
             isProjectTestSource(relative) ||
             TEST_MANIFEST.test(entry.name) ||
             /(?:vitest|jest|pytest|test).*config\./i.test(entry.name);
-          if (testSource || isProjectReviewSource(relative))
-            stats.push(fs.lstat(absolute).then((stat) => ({ stat, relative, testSource })));
+          const reviewSource = isProjectReviewSource(relative);
+          if (testSource || reviewSource)
+            files.push({ absolute, relative, testSource, reviewSource });
         }
       }
-      for (const { stat, relative, testSource } of await Promise.all(stats)) {
-        if (!stat.isFile() || stat.isSymbolicLink()) continue;
-        const fingerprint = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
-        if (testSource) result.sources[relative] = fingerprint;
-        if (isProjectReviewSource(relative))
-          result.reviewSources[relative] = fingerprint;
-        if (TEST_PATH.test(relative) && result.tests.length < 40)
-          result.tests.push(relative);
+      // Bound outstanding I/O. A file disappearing during a build makes the
+      // scan partial, but must not hide independent files or sibling directories.
+      const batchSize = 32;
+      for (let offset = 0; offset < files.length; offset += batchSize) {
+        signal?.throwIfAborted();
+        if (performance.now() >= deadline) {
+          result.truncated = true;
+          exhausted = true;
+          break;
+        }
+        const batch = files.slice(offset, offset + batchSize);
+        const stats = await Promise.allSettled(batch.map(file => fs.lstat(file.absolute)));
+        for (const [index, outcome] of stats.entries()) {
+          if (outcome.status === "rejected") { result.truncated = true; continue; }
+          const stat = outcome.value;
+          if (!stat.isFile()) { result.truncated = true; continue; }
+          const { relative, testSource, reviewSource } = batch[index];
+          const fingerprint = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
+          if (testSource) result.sources[relative] = fingerprint;
+          if (reviewSource) result.reviewSources[relative] = fingerprint;
+          if (TEST_PATH.test(relative) && result.tests.length < 40)
+            result.tests.push(relative);
+        }
       }
     } catch (error) {
       signal?.throwIfAborted();

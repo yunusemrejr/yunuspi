@@ -28,6 +28,8 @@ Child runners include billed failed attempts, compactions and usage-bearing tool
 
 Nested run identities are retained in accounting receipts. Repeated status, workflow, step and completion snapshots count a physical child once. Inclusive parent totals do not add descendants twice. Later provider billing can correct an estimate for the same recorded turn, including a correction to zero; stale estimates cannot replace that billing evidence.
 
+Managed `bg_run` agent commands contribute their captured YunusPi usage when they finish, including hosted and nested work. Their durable task receipt is attached to the owning session and can be recovered on reopen. Status and wait results never add another charge. Shell work outside the managed process and runs with incomplete captures remain partial.
+
 ## Limits and activation
 
 Restart Pi and resume the session to load updated core adapters/footer code. Existing history benefits from improved aggregation, but missing historical rates, lost child evidence and unrecorded charges cannot be reconstructed. This change does not rewrite old session files or make paid inference probes.

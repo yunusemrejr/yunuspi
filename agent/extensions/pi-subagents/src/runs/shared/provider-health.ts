@@ -706,6 +706,8 @@ export interface RecordSuccessInput {
 	model?: string;
 	inputTokens?: number;
  economyUsage?: Omit<EconomyUsageSample, "at">;
+	/** Auxiliary latencies and prompt sizes must not replace main-turn economic samples. */
+	healthOnly?: boolean;
 	/**
 	 * Wall-clock time the successful request was admitted. A success is recovery
 	 * evidence only for failures recorded no later than this: a response that was
@@ -735,7 +737,7 @@ export function recordSuccess(input: RecordSuccessInput): void {
 			...(typeof input.inputTokens === "number" ? { inputTokens: Math.round(input.inputTokens) } : {}),
 		};
 		const supersedes = (failure: FailureRecord | undefined) =>
-			input.startedAt === undefined || !failure || failure.at <= input.startedAt;
+			input.startedAt === undefined || !failure || failure.at < input.startedAt;
 		if (supersedes(entry.failure)) {
 			entry.failure = undefined;
 			entry.cooldownUntil = 0;
@@ -752,13 +754,14 @@ export function recordSuccess(input: RecordSuccessInput): void {
             const sample: RecoveryObservation = {at:now,ok:true,rates:usage?.rates,
              ...(Number.isFinite(usage?.elapsedMs) && usage!.elapsedMs! > 0 && usage!.elapsedMs! <= 600_000 ? {elapsedMs:usage!.elapsedMs} : {}),
              ...(usage && Number.isSafeInteger(usage.input) && Number.isSafeInteger(usage.cacheRead) && Number.isSafeInteger(usage.cacheWrite) ? {inputTokens:usage.input+usage.cacheRead+usage.cacheWrite,outputTokens:usage.output} : {})};
-            observeRecovery(model, sample);
+            if (!input.healthOnly) observeRecovery(model, sample);
             if (input.endpoint && input.provider === "openrouter") {
              const endpoint = entry.models[endpointHealthKey(input.model, input.endpoint)] ??= {updatedAt:now,cooldownUntil:0};
              if (supersedes(endpoint.failure)) {endpoint.cooldownUntil=0; endpoint.failure=undefined;}
              endpoint.updatedAt=now;
-             observeRecovery(endpoint, sample);
+             if (!input.healthOnly) observeRecovery(endpoint, sample);
             }
+            if (input.healthOnly) return;
             if (usage && [usage.input,usage.output,usage.cacheRead,usage.cacheWrite].every(n=>Number.isSafeInteger(n)&&n>=0&&n<=100_000_000)
                 && Number.isFinite(usage.costUsd) && usage.costUsd>=0 && typeof usage.rates === "string" && usage.rates.length<=2048) {
                 const previous = Array.isArray(model.economyUsage) ? model.economyUsage : [];

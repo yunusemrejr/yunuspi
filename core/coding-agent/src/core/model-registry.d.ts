@@ -1,5 +1,6 @@
 import type { Api, AssistantMessage, AuthResult, Context, Model, ModelsApiStreamOptions, ModelsSimpleStreamOptions, ModelsRefreshOptions, ModelsRefreshResult, Provider, ProviderHeaders } from "@yunuspi/ai";
 import type { ModelRuntime } from "./model-runtime.ts";
+import type { ExtensionRunner } from "./extensions/runner.ts";
 import type { AuthStatus, ProviderConfigInput } from "./provider-composer.ts";
 export type { ProviderConfigInput } from "./provider-composer.ts";
 export type ResolvedRequestAuth = {
@@ -19,7 +20,8 @@ export { clearApiKeyCache } from "./provider-composer.ts";
  */
 export declare class ModelRegistry {
     private readonly runtime;
-    constructor(runtime: ModelRuntime);
+    private readonly extensionRunner?;
+    constructor(runtime: ModelRuntime, extensionRunner?: () => ExtensionRunner);
     /** Reload models.json asynchronously. Await before making synchronous registry reads. */
     refresh(options?: ModelsRefreshOptions): Promise<ModelsRefreshResult>;
     getError(): string | undefined;

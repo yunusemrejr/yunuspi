@@ -26,12 +26,13 @@
  *      ~2min budget, pause until the user's next message) — and every
  *      re-request passes through this gate again.
  *
- * Failure recording rides `message_end`: a failed assistant message is
+ * Main-turn failure recording rides `message_end`: a failed assistant message is
  * classified (quota-rate / provider-outage / route-failure / model-failure /
  * deterministic) and declared as executable cooldown BEFORE the next request
  * can fire; a successful assistant message clears it. This works in main
  * sessions AND subagent children (extensions load in every pi process), so
- * the shared file coordinates the whole fleet.
+ * the shared file coordinates the whole fleet. Auxiliary requests use a
+ * separate admission hook and a callback bound to the admitted request.
  *
  * Status messages describe policy and point at the inspectable state file
  * (provider-health.json); they never masquerade as enforcement — the
@@ -44,8 +45,10 @@
  * It skips loopback/mock endpoints.
  */
 
+import type { AssistantMessage } from "@yunuspi/ai";
 import { cacheProfileFor } from "./lib/lean-policy.ts";
 import type {
+	BeforeAuxiliaryProviderRequestEvent,
 	BeforeProviderRequestEvent,
 	ExtensionAPI,
 	ExtensionContext,
@@ -64,6 +67,7 @@ import {
 } from "./pi-subagents/src/runs/shared/provider-health.ts";
 
 type AnyCtx = ExtensionContext | undefined;
+type RequestModel = BeforeAuxiliaryProviderRequestEvent["model"];
 
 interface RouteRef {
 	provider: string;
@@ -178,7 +182,7 @@ function coolingAmbiguousRoute(payload: any, ctx: AnyCtx): { route: RouteRef; de
 	const candidates = routes
 		.filter((route) => !isLoopback(route))
 		.map((route) => {
-			const endpointInfo = requestEndpoint(payload, route, ctx);
+			const endpointInfo = requestEndpoint(payload, route, ctx?.model);
 			return {
 				route,
 				decision: evaluateRoute({
@@ -220,7 +224,7 @@ function setStatus(ctx: AnyCtx, text: string): void {
 	}
 }
 
-function requestEndpoint(payload: any, route: RouteRef, ctx: AnyCtx): { endpoint: string; name?: string } | undefined {
+function requestEndpoint(payload: any, route: RouteRef, model?: RequestModel): { endpoint: string; name?: string } | undefined {
 	const only = payload?.provider?.only;
 	if (
 		route.provider !== "openrouter" ||
@@ -231,8 +235,9 @@ function requestEndpoint(payload: any, route: RouteRef, ctx: AnyCtx): { endpoint
 		!only[0]
 	) return undefined;
 	const endpoint = only[0];
-	const name = ctx?.model?.compat?.openRouterRouting?.only?.[0] === endpoint
-		? ctx.model.compat.recoveryEndpointName
+	const name = model?.provider === route.provider && model.id === route.model
+		&& model.compat?.openRouterRouting?.only?.[0] === endpoint
+		? model.compat.recoveryEndpointName
 		: undefined;
 	return { endpoint, ...(typeof name === "string" && name ? { name } : {}) };
 }
@@ -321,6 +326,86 @@ function resetPendingAttempts(pending: Map<string, PendingAttempt[]>): void {
 	pending.clear();
 }
 
+async function admitRoute(
+	payload: unknown,
+	route: RouteRef,
+	model: RequestModel | undefined,
+	ctx: ExtensionContext,
+	signal?: AbortSignal,
+): Promise<Pick<PendingAttempt, "started" | "admittedAt" | "endpoint" | "estTokens">> {
+	const endpoint = requestEndpoint(payload, route, model);
+	const estTokens = estimateTokens(payload);
+	try {
+		const outcome = await gateRequest({
+			provider: route.provider,
+			model: route.model,
+			endpoints: endpoint ? [endpoint.endpoint, ...(endpoint.name ? [endpoint.name] : [])] : undefined,
+			estTokens,
+			session: sessionLabel(ctx),
+			signal,
+		});
+		setStatus(ctx, outcome.deferredMs > 0
+			? `provider-gate: deferred ${route.provider}/${route.model} ${Math.round(outcome.deferredMs / 1000)}s (cooldown elapsed; same continuation resumed)`
+			: "");
+		return { started: performance.now(), admittedAt: outcome.admittedAt,
+			endpoint: endpoint?.name ?? endpoint?.endpoint, estTokens };
+	} catch (error) {
+		if (error instanceof GateDeniedError) {
+			const d = error.details;
+			setStatus(ctx, `provider-gate: ${route.provider}/${route.model} cooling ${Math.ceil(d.waitMs / 1000)}s` +
+				` (${d.kind ?? "unknown"} via ${d.source ?? "unknown"}); state: provider-health.json`);
+		}
+		throw error;
+	}
+}
+
+function isAdmissionDenial(message: AssistantMessage): boolean {
+	return message.stopReason === "error" && message.errorMessage?.includes("429 rate limit: provider-gate ") === true;
+}
+
+function recordCompletion(
+	message: AssistantMessage,
+	attempt: Pick<PendingAttempt, "started" | "admittedAt" | "endpoint" | "estTokens" | "ambiguous" | "candidateProvider"> | undefined,
+	selected: RequestModel | undefined,
+	source: "message_end" | "auxiliary",
+): void {
+	const { provider, errorMessage, usage, timestamp } = message;
+	const model = source === "auxiliary" ? selected?.id ?? message.model : message.model;
+	const current = selected?.provider === provider && selected.id === model ? selected : undefined;
+	const cost = current?.cost;
+	const rates = cost && current ? economyRateIdentity(cost, current.baseUrl, current.api) : undefined;
+	const attributed = attempt && !attempt.ambiguous && (!attempt.candidateProvider || attempt.candidateProvider === provider)
+		? attempt : undefined;
+	const endpoint = attributed?.endpoint;
+	if (message.stopReason === "error") {
+		if (isAdmissionDenial(message) || attempt && !attempt.ambiguous && attempt.started === undefined) return;
+		const recorded = recordFailure({ provider, model, errorMessage, source, endpoint, estTokens: attributed?.estTokens, rates });
+		if (!recorded) invalidateEconomyUsage(provider, model);
+		return;
+	}
+	if (message.stopReason !== "stop" && message.stopReason !== "toolUse" || typeof usage?.input !== "number") return;
+
+	const startedAt = attributed?.admittedAt ?? (Number.isSafeInteger(timestamp) ? timestamp : undefined);
+	if (source === "auxiliary") {
+		recordSuccess({ provider, model, endpoint, inputTokens: usage.input, startedAt, healthOnly: true });
+		return;
+	}
+	const elapsedMs = typeof attributed?.started === "number" ? performance.now() - attributed.started : undefined;
+	const now = Date.now();
+	const validContent = Array.isArray(message.content) && message.content.some(part =>
+		(part?.type === "text" && typeof part.text === "string" && part.text.trim().length > 0)
+		|| (part?.type === "toolCall" && typeof part.name === "string" && part.arguments && typeof part.arguments === "object" && !Array.isArray(part.arguments)));
+	const economyUsage = validContent && Number.isSafeInteger(timestamp) && timestamp <= now && now - timestamp <= 300_000
+		&& cost && [cost.input, cost.output, cost.cacheRead, cost.cacheWrite].every(n => typeof n === "number" && Number.isFinite(n) && n >= 0)
+		&& [usage.input, usage.output, usage.cacheRead, usage.cacheWrite].every(n => Number.isSafeInteger(n) && n >= 0)
+		&& typeof usage.cost?.total === "number" && Number.isFinite(usage.cost.total) && usage.cost.total >= 0
+		? { ...(typeof elapsedMs === "number" && elapsedMs >= 0 && elapsedMs <= 600_000 ? { elapsedMs } : {}),
+			messageAt: timestamp, input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite,
+			costUsd: usage.cost.total, rates: rates! }
+		: undefined;
+	recordSuccess({ provider, model, endpoint, inputTokens: usage.input, economyUsage, startedAt });
+}
+
 export default function providerGateExtension(pi: ExtensionAPI): void {
 	if (process.env.PI_PROVIDER_GATE === "off") return;
 
@@ -351,7 +436,7 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 			// provider-neutral until message_end supplies the actual provider.
 			const model = payloadModel(payload);
 			const endpointInfo = model
-				? requestEndpoint(payload, { provider: "openrouter", model }, ctx as AnyCtx)
+				? requestEndpoint(payload, { provider: "openrouter", model }, ctx.model)
 				: undefined;
 			if (model && endpointInfo) {
 				const attempt: PendingAttempt = {
@@ -376,117 +461,45 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 			const bridge = ((globalThis as any)[Symbol.for("yunus-pi.cache-profile.v1")] ??= {}) as Record<string, unknown>;
 			bridge[`${route.provider}/${route.model}`] = { strategy: profile.strategy, ttlSeconds: profile.ttlSeconds, at: Date.now() };
 		} catch { /* cache telemetry must never block a request */ }
-		const session = sessionLabel(ctx as AnyCtx);
-		const endpointInfo = requestEndpoint(payload, route, ctx as AnyCtx);
 		const attempt: PendingAttempt = {
 			provider: route.provider,
 			model: route.model,
 			createdAt: performance.now(),
-			...(session ? { session } : {}),
-			...(endpointInfo ? { endpoint: endpointInfo.name ?? endpointInfo.endpoint } : {}),
+			session: sessionLabel(ctx),
 		};
-		const estTokens = estimateTokens(payload);
 		const requestSignal = signal ?? ctx.signal;
 		markPendingAttempt(pending, attempt);
 		try {
-			const outcome = await gateRequest({
-				provider: route.provider,
-				model: route.model,
-				endpoints: endpointInfo ? [endpointInfo.endpoint, ...(endpointInfo.name ? [endpointInfo.name] : [])] : undefined,
-				estTokens,
-				session,
-				signal: requestSignal,
-			});
-			if (outcome.deferredMs > 0) {
-				setStatus(
-					ctx as AnyCtx,
-					`provider-gate: deferred ${route.provider}/${route.model} ${Math.round(outcome.deferredMs / 1000)}s (cooldown elapsed; same continuation resumed)`,
-				);
-			} else {
-				setStatus(ctx as AnyCtx, "");
-			}
-			attempt.started = performance.now();
-			attempt.admittedAt = outcome.admittedAt;
-			attempt.estTokens = estTokens;
-			return undefined; // allow the payload unchanged
-		} catch (err) {
+			Object.assign(attempt, await admitRoute(payload, route, ctx.model, ctx, requestSignal));
+		} catch (error) {
 			// A stream deadline can close the turn before the gate settles.
-			// Keep this unadmitted marker until message_end can distinguish it
-			// from a provider that stalled after an actual dispatch.
+			// Keep this marker through message_end to distinguish local waits.
 			if (!requestSignal?.aborted) removePendingAttempt(pending, attempt);
-			if (err instanceof GateDeniedError) {
-				const d = err.details;
-				setStatus(
-					ctx as AnyCtx,
-					`provider-gate: ${route.provider}/${route.model} cooling ${Math.ceil(d.waitMs / 1000)}s` +
-						` (${d.kind ?? "unknown"} via ${d.source ?? "unknown"}); state: provider-health.json`,
-				);
-			}
-			throw err; // GateDeniedError carries PI_AUTONOMOUS_REQUEST_DENIED — the patched seam re-throws it before the HTTP call
+			throw error;
 		}
 	});
 
-	// Failure/success recording — the source of the shared executable state.
-	pi.on("message_end", (event: any, ctx: any) => {
-		const message = event?.message;
-		if (!message || message.role !== "assistant") return;
-		const provider =
-			typeof message.provider === "string" ? message.provider : undefined;
-		const model = typeof message.model === "string" ? message.model : undefined;
-		if (!provider) return;
-		const errorMessage = typeof message.errorMessage === "string" ? message.errorMessage : undefined;
-		// Gate denials are local decisions. They cannot supply route-health
-		// evidence or consume a different in-flight request's metadata.
-		if (message.stopReason === "error" && errorMessage?.includes("429 rate limit: provider-gate ")) return;
-		const session = sessionLabel(ctx as AnyCtx);
-		const attempt = takePendingAttempt(pending, provider, model, session);
-		const endpoint = attempt?.ambiguous || attempt?.candidateProvider && attempt.candidateProvider !== provider
-			? undefined
-			: attempt?.endpoint;
-		const observedElapsed = !attempt?.ambiguous && typeof attempt?.started === "number"
-			? performance.now() - attempt.started
-			: undefined;
-		if (message.stopReason === "error") {
-			if (attempt && !attempt.ambiguous && attempt.started === undefined) return;
-			const recorded = recordFailure({
-				provider,
-				model,
-				errorMessage,
-				source: "message_end",
-                endpoint,
-                estTokens: attempt?.ambiguous ? undefined : attempt?.estTokens,
-                rates: ctx?.model?.provider===provider && ctx.model.id===model ? economyRateIdentity(ctx.model.cost??{},ctx.model.baseUrl,ctx.model.api) : undefined,
-			});
-            if (!recorded) invalidateEconomyUsage(provider,model);
-			if (recorded) {
-				setStatus(
-					undefined,
-					`provider-gate: ${provider}/${model ?? "?"} ${recorded.kind} cooldown until ${new Date(recorded.cooldownUntil).toISOString()} (source: message_end)`,
-				);
+	pi.on("before_auxiliary_provider_request", async (event: BeforeAuxiliaryProviderRequestEvent, ctx) => {
+		if (gateDisabled()) return;
+		const { payload, model, signal } = event;
+		const route = routeFromModel(model, model.id);
+		if (!route || isLoopback(route)) return;
+		const attempt = await admitRoute(payload, route, model, ctx, signal);
+		return (message: AssistantMessage) => {
+			// Anthropic can report the concrete serving model or a fallback.
+			// Health applies to the admitted route. Keep the returned model
+			// intact for display and billing.
+			if (message.provider === route.provider) {
+				recordCompletion(message, attempt, model, "auxiliary");
 			}
-			return;
-		}
-		if (
-			(message.stopReason === "stop" || message.stopReason === "toolUse") &&
-			message.usage &&
-			typeof message.usage.input === "number"
-		) {
-			const usage = message.usage;
-            const current = ctx?.model;
-            const cost = current?.provider===provider && current?.id===model ? current.cost : undefined;
-            const validContent = Array.isArray(message.content) && message.content.some((part: any) =>
-                (part?.type === "text" && typeof part.text === "string" && part.text.trim().length>0)
-                || (part?.type === "toolCall" && typeof part.name === "string" && part.arguments && typeof part.arguments === "object" && !Array.isArray(part.arguments)));
-            const economyUsage = validContent && Number.isSafeInteger(message.timestamp) && message.timestamp<=Date.now() && Date.now()-message.timestamp<=300_000 && cost && [cost.input,cost.output,cost.cacheRead,cost.cacheWrite].every((n:unknown)=>typeof n === "number"&&Number.isFinite(n)&&n>=0)
-                && [usage.input,usage.output,usage.cacheRead,usage.cacheWrite].every((n:unknown)=>typeof n === "number"&&Number.isSafeInteger(n)&&n>=0)
-                && typeof usage.cost?.total === "number" && Number.isFinite(usage.cost.total) && usage.cost.total>=0
-                ? {...(typeof observedElapsed==="number" && observedElapsed>=0 && observedElapsed<=600_000 ? {elapsedMs:observedElapsed}:{}),messageAt:message.timestamp,input:usage.input,output:usage.output,cacheRead:usage.cacheRead,cacheWrite:usage.cacheWrite,costUsd:usage.cost.total,
-                    rates:economyRateIdentity(cost,current.baseUrl,current.api)} : undefined;
-            const startedAt = !attempt?.ambiguous && typeof attempt?.admittedAt === "number"
-                ? attempt.admittedAt
-                : Number.isSafeInteger(message.timestamp) ? message.timestamp : undefined;
-            recordSuccess({ provider, model, endpoint, inputTokens: usage.input, economyUsage, ...(startedAt !== undefined ? { startedAt } : {}) });
-		}
+		};
+	});
+
+	pi.on("message_end", (event, ctx) => {
+		const message = event?.message;
+		if (message?.role !== "assistant" || !message.provider || isAdmissionDenial(message)) return;
+		const attempt = takePendingAttempt(pending, message.provider, message.model, sessionLabel(ctx));
+		recordCompletion(message, attempt, ctx.model, "message_end");
 	});
 
 	// Observability surface: /provider-health prints the shared state —

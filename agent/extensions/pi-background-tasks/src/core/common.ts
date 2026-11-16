@@ -3,6 +3,7 @@ import { open } from "node:fs/promises";
 import { extname, isAbsolute, join, win32 } from "node:path";
 import { DEFAULT_MAX_BYTES } from "@yunuspi/coding-agent";
 import type { BackgroundTaskChildProcess } from "./registry.js";
+import type { BackgroundCostEvidence } from "./bg-cost.ts";
 
 export const TASK_STATUS_VALUES = [
   "running",
@@ -73,12 +74,14 @@ export interface BgTaskSnapshot {
   toolUsage?: TaskToolUsage | undefined;
   model?: string | undefined;
   telemetryUnavailableReason?: string | undefined;
+  costEvidence?: BackgroundCostEvidence | undefined;
 }
 
 export interface BgTask extends Omit<BgTaskSnapshot, "name"> {
   name: string;
   outputAbsPath: string;
   metadataAbsPath: string;
+  ownerSessionId?: string | undefined;
   child?: BackgroundTaskChildProcess | undefined;
   stream?: WriteStream | undefined;
   timeoutHandle?: NodeJS.Timeout | undefined;
@@ -750,6 +753,7 @@ export function snapshot(task: BgTask): BgTaskSnapshot {
     toolUsage: task.toolUsage,
     model: task.model,
     telemetryUnavailableReason: task.telemetryUnavailableReason,
+    ...(task.costEvidence ? { costEvidence: task.costEvidence } : {}),
   };
 }
 

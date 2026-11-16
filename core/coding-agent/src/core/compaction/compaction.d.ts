@@ -9,6 +9,8 @@ import { type RetryCallbacks, type RetryPolicy } from "@yunuspi/ai";
 import type { AssistantMessage, Context, Model, SimpleStreamOptions, Usage } from "@yunuspi/ai/compat";
 import { type SessionEntry } from "../session-manager.ts";
 import { type FileOperations } from "./utils.ts";
+/** A caller may observe the final response before the summary retry loop sees it. */
+export type SummarizationDispatch = StreamFn | ((...args: Parameters<StreamFn>) => AssistantMessage | Promise<AssistantMessage>);
 /** Details stored in CompactionEntry.details for file tracking */
 export interface CompactionDetails {
     readFiles: string[];
@@ -102,14 +104,14 @@ export declare function getSummarizationFailure(response: AssistantMessage, labe
  * the whole compaction on the first attempt. Deterministic errors and aborts return
  * immediately (see {@link retryAssistantCall}).
  */
-export declare function completeSummarization(model: Model<any>, context: Context, options: SimpleStreamOptions, streamFn?: StreamFn, retry?: RetryPolicy, callbacks?: RetryCallbacks): Promise<AssistantMessage>;
+export declare function completeSummarization(model: Model<any>, context: Context, options: SimpleStreamOptions, streamFn?: SummarizationDispatch, retry?: RetryPolicy, callbacks?: RetryCallbacks): Promise<AssistantMessage>;
 /**
  * Generate a summary of the conversation using the LLM.
  * If previousSummary is provided, uses the update prompt to merge.
  */
-export declare function generateSummary(currentMessages: AgentMessage[], model: Model<any>, reserveTokens: number, apiKey: string | undefined, headers?: Record<string, string>, signal?: AbortSignal, customInstructions?: string, previousSummary?: string, thinkingLevel?: ThinkingLevel, streamFn?: StreamFn, env?: Record<string, string>, retry?: RetryPolicy, callbacks?: RetryCallbacks, sessionId?: string): Promise<string>;
+export declare function generateSummary(currentMessages: AgentMessage[], model: Model<any>, reserveTokens: number, apiKey: string | undefined, headers?: Record<string, string>, signal?: AbortSignal, customInstructions?: string, previousSummary?: string, thinkingLevel?: ThinkingLevel, streamFn?: SummarizationDispatch, env?: Record<string, string>, retry?: RetryPolicy, callbacks?: RetryCallbacks, sessionId?: string): Promise<string>;
 /** Generate or update a conversation summary and return its provider usage. */
-export declare function generateSummaryWithUsage(currentMessages: AgentMessage[], model: Model<any>, reserveTokens: number, apiKey: string | undefined, headers?: Record<string, string>, signal?: AbortSignal, customInstructions?: string, previousSummary?: string, thinkingLevel?: ThinkingLevel, streamFn?: StreamFn, env?: Record<string, string>, retry?: RetryPolicy, callbacks?: RetryCallbacks, sessionId?: string): Promise<{
+export declare function generateSummaryWithUsage(currentMessages: AgentMessage[], model: Model<any>, reserveTokens: number, apiKey: string | undefined, headers?: Record<string, string>, signal?: AbortSignal, customInstructions?: string, previousSummary?: string, thinkingLevel?: ThinkingLevel, streamFn?: SummarizationDispatch, env?: Record<string, string>, retry?: RetryPolicy, callbacks?: RetryCallbacks, sessionId?: string): Promise<{
     text: string;
     usage: Usage;
 }>;
@@ -139,4 +141,4 @@ export declare function prepareCompaction(pathEntries: SessionEntry[], settings:
  * @param customInstructions - Optional custom focus for the summary
  * @param sessionId - Optional routing session ID forwarded without enabling prompt caching
  */
-export declare function compact(preparation: CompactionPreparation, model: Model<any>, apiKey: string | undefined, headers?: Record<string, string>, customInstructions?: string, signal?: AbortSignal, thinkingLevel?: ThinkingLevel, streamFn?: StreamFn, env?: Record<string, string>, retry?: RetryPolicy, callbacks?: RetryCallbacks, sessionId?: string): Promise<CompactionResult>;
+export declare function compact(preparation: CompactionPreparation, model: Model<any>, apiKey: string | undefined, headers?: Record<string, string>, customInstructions?: string, signal?: AbortSignal, thinkingLevel?: ThinkingLevel, streamFn?: SummarizationDispatch, env?: Record<string, string>, retry?: RetryPolicy, callbacks?: RetryCallbacks, sessionId?: string): Promise<CompactionResult>;

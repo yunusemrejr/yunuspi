@@ -963,6 +963,62 @@ export class ExtensionRunner {
         }
         return headers;
     }
+    async completeAuxiliaryProviderRequest(purpose, selectedModel, options, complete) {
+        const eventType = "before_auxiliary_provider_request";
+        this.assertActive();
+        if (!this.hasHandlers(eventType)) return complete(options);
+        let latestObservers = [];
+        let dispatchSequence = 0;
+        const response = await complete({
+            ...options,
+            onPayload: async (payload, actualModel, signal) => {
+                const sequence = ++dispatchSequence;
+                latestObservers = [];
+                const requestSignal = signal ?? options?.signal;
+                requestSignal?.throwIfAborted();
+                const model = actualModel ?? selectedModel;
+                const transformed = await options?.onPayload?.(payload, model, requestSignal);
+                const outgoing = transformed === undefined ? payload : transformed;
+                this.assertActive();
+                const ctx = this.createContext();
+                const route = Object.freeze({
+                    provider: model.provider, id: model.id, baseUrl: model.baseUrl,
+                    api: model.api, cost: model.cost, compat: model.compat,
+                });
+                const event = { type: eventType, purpose, payload: outgoing, model: route, signal: requestSignal };
+                const observers = [];
+                for (const ext of this.extensions) {
+                    for (const handler of ext.handlers.get(eventType) ?? []) {
+                        try {
+                            requestSignal?.throwIfAborted();
+                            const observer = await handler(event, ctx);
+                            requestSignal?.throwIfAborted();
+                            if (typeof observer === "function") observers.push({ path: ext.path, observer });
+                        }
+                        catch (error) {
+                            if (error?.code === "PI_AUTONOMOUS_REQUEST_DENIED") throw error;
+                            requestSignal?.throwIfAborted();
+                            this.emitError({ extensionPath: ext.path, event: eventType,
+                                error: error instanceof Error ? error.message : String(error) });
+                        }
+                    }
+                }
+                requestSignal?.throwIfAborted();
+                if (sequence === dispatchSequence) latestObservers = observers;
+                return outgoing;
+            },
+        });
+        for (const { path, observer } of latestObservers) {
+            try {
+                await observer(response);
+            }
+            catch (error) {
+                this.emitError({ extensionPath: path, event: eventType,
+                    error: error instanceof Error ? error.message : String(error) });
+            }
+        }
+        return response;
+    }
     async emitBeforeAgentStart(prompt, images, systemPrompt, systemPromptOptions, requestSignal) {
         let currentSystemPrompt = systemPrompt;
         const ctx = Object.defineProperties({}, Object.getOwnPropertyDescriptors(this.createContext()));

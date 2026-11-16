@@ -19,16 +19,19 @@ export async function runPrintMode(runtimeHost, options) {
     let finalAssistantMessage;
     let unsubscribe;
     let unsubscribeBackpressure;
-    let disposed = false;
+    let disposal;
     const signalCleanupHandlers = [];
-    const disposeRuntime = async () => {
-        if (disposed)
-            return;
-        disposed = true;
-        unsubscribe?.();
-        unsubscribeBackpressure?.();
-        await runtimeHost.dispose();
-    };
+    const disposeRuntime = () => disposal ??= (async () => {
+        try {
+            // Shutdown hooks can append billing receipts that JSON clients need.
+            await runtimeHost.dispose();
+        }
+        finally {
+            unsubscribe?.();
+            unsubscribeBackpressure?.();
+            await flushRawStdout();
+        }
+    })();
     const registerSignalHandlers = () => {
         const signals = ["SIGTERM"];
         if (process.platform !== "win32") {
@@ -141,10 +144,13 @@ export async function runPrintMode(runtimeHost, options) {
         return 1;
     }
     finally {
-        for (const cleanup of signalCleanupHandlers) {
-            cleanup();
+        try {
+            await disposeRuntime();
         }
-        await disposeRuntime();
-        await flushRawStdout();
+        finally {
+            for (const cleanup of signalCleanupHandlers) {
+                cleanup();
+            }
+        }
     }
 }

@@ -30,13 +30,14 @@ export function createWriteToolDefinition(cwd, options) {
         parameters: writeSchema,
         constrainedSampling: getExperimentalToolSampling(),
         async execute(_toolCallId, { path, content }, signal, _onUpdate, ctx) {
+            if (!content.isWellFormed())
+                throw new Error("Write content must be valid Unicode. No file was changed.");
             const absolutePath = resolveToCwd(__piMutationPath(path), ctx?.cwd || cwd);
             const dir = dirname(absolutePath);
             return withFileMutationQueue(absolutePath, async () => {
                 // Do not reject from an abort event listener here: that would release the
                 // mutation queue while an in-flight filesystem operation may still finish.
-                // Checking signal.aborted after each await observes the same aborts while
-                // keeping the queue locked until the current operation has settled.
+                // Check cancellation before committing the write, then keep its receipt.
                 const throwIfAborted = () => {
                     if (signal?.aborted)
                         throw new Error("Operation aborted");
@@ -47,7 +48,6 @@ export function createWriteToolDefinition(cwd, options) {
                 throwIfAborted();
                 // Write the file contents.
                 await ops.writeFile(absolutePath, content);
-                throwIfAborted();
                 const documentMutation = documentMutationEvidence(absolutePath, undefined, content);
                 return {
                     content: [{ type: "text", text: `Successfully wrote to ${path}` }],
