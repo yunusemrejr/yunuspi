@@ -12,7 +12,7 @@ The YunusPi core has its own version lineage, starting at `0.1.0`, recorded in t
 
 Public export must preserve the reviewed `core/` source, root workspace metadata and build script from the YunusPi repository. These cannot be reconstructed from a private installation's upstream packages. Never publish an agent-only export as a complete release.
 
-Publication is a push to `main`. There are no release tags and no GitHub Releases to cut, and nothing waits on CI; the tags and releases up to v0.56.1 remain as history. Raise the root package version, with the lockfile, in the same commit as a change that is worth a new number.
+Publication is a push to `main`. There are no release tags and no GitHub Releases, and nothing waits on CI. Raise the root package version, with the lockfile, in the same commit as a change that is worth a new number.
 
 Use Semantic Versioning according to intended public behavior, not commit count or calendar age: patch for compatible fixes, documentation/test corrections and internal reliability work with no intentional public-contract change; minor for new user-visible capabilities or meaningful behavior/compatibility changes while the project remains pre-1.0; major only when an explicitly stabilized public contract later receives an incompatible change. Feature branches, PR numbers, CI run numbers, private installation state and generated capability counts are not versions. Mutable counts should remain code-owned rather than copied into prose.
 
