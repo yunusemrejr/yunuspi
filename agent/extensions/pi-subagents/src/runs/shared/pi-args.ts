@@ -291,6 +291,15 @@ export function applyThinkingSuffix(
 	return `${model}:${thinking}`;
 }
 
+/** The fallback routes of a child route that free models lead, as launch candidates carrying the launch's thinking suffix; none for any other route. */
+export function freeLedCandidates(
+	routes: readonly string[] | undefined,
+	thinking: string | false | undefined,
+	replaceExisting = false,
+): ModelRouteCandidate[] | undefined {
+	return routes?.map((route) => ({ route: applyThinkingSuffix(route, thinking, replaceExisting)! }));
+}
+
 function stripThinkingSuffix(model: string): string {
 	const colonIdx = model.lastIndexOf(":");
 	if (colonIdx === -1) return model;

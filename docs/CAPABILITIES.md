@@ -487,6 +487,24 @@ List executable agents and their capabilities and inspect or edit scoped definit
 
 **Documentation:** [`docs/SUBAGENT-CONTRACTS.md`](SUBAGENT-CONTRACTS.md)
 
+#### free-models
+
+Legwork children run on the best measured free OpenRouter model while the account's daily free requests last, and fall back through the next ones to the role's own model. Models are scored by a short probe and by their children's results; /team shows what is usable now and team.free turns it off.
+
+**Entrypoints:** `team.free`, `/team`, `legwork role`
+
+**Commands:** `/team`
+
+**Options:**
+
+- `team.free`: Use free OpenRouter models for legwork children. Values: `on`, `off`.
+
+**Related records:** `agent-model-management`, `provider-routing`
+
+**Source:** [`agent/extensions/free-models.ts`](../agent/extensions/free-models.ts), [`agent/extensions/lib/free-models.ts`](../agent/extensions/lib/free-models.ts), [`agent/extensions/pi-subagents/src/runs/shared/session-model.ts`](../agent/extensions/pi-subagents/src/runs/shared/session-model.ts)
+
+**Documentation:** [`docs/TEAM.md`](TEAM.md)
+
 #### provider-routing
 
 Inspect and persist OpenRouter provider selection pins for the selected model, with soft order, hard only, metric sorting or raw routing JSON.
@@ -1219,7 +1237,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1740)
 - /task-state — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 215)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 629)
-- /team — [`agent/extensions/team-command.ts`](../agent/extensions/team-command.ts) (line 437)
+- /team — [`agent/extensions/team-command.ts`](../agent/extensions/team-command.ts) (line 453)
 - /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1759)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3028)
 
@@ -1313,6 +1331,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/deliverables.ts`](../agent/extensions/deliverables.ts)
 - [`agent/extensions/design-studio.ts`](../agent/extensions/design-studio.ts)
 - [`agent/extensions/filesystem-safety.ts`](../agent/extensions/filesystem-safety.ts)
+- [`agent/extensions/free-models.ts`](../agent/extensions/free-models.ts)
 - [`agent/extensions/git-tools.ts`](../agent/extensions/git-tools.ts)
 - [`agent/extensions/goal.ts`](../agent/extensions/goal.ts)
 - [`agent/extensions/harness-backup.ts`](../agent/extensions/harness-backup.ts)
@@ -1396,6 +1415,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/elevenlabs.ts`](../agent/extensions/lib/elevenlabs.ts)
 - [`agent/extensions/lib/execution-evidence.ts`](../agent/extensions/lib/execution-evidence.ts)
 - [`agent/extensions/lib/film.ts`](../agent/extensions/lib/film.ts)
+- [`agent/extensions/lib/free-models.ts`](../agent/extensions/lib/free-models.ts)
 - [`agent/extensions/lib/git-authority.ts`](../agent/extensions/lib/git-authority.ts)
 - [`agent/extensions/lib/gltf-inspect.ts`](../agent/extensions/lib/gltf-inspect.ts)
 - [`agent/extensions/lib/goal-state.ts`](../agent/extensions/lib/goal-state.ts)

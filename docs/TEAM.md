@@ -24,7 +24,8 @@ Put the block in the agent settings file (`settings.json`). A project's settings
     "advisor": "provider-d/model-e",
     "roles": { "reviewer": "main" },
     "maxThinking": { "helper": "xhigh", "legwork": "high" },
-    "sideCalls": "legwork"
+    "sideCalls": "legwork",
+    "free": "on"
   },
   "run": { "softMinutes": 60, "softUsd": 1 }
 }
@@ -34,6 +35,7 @@ Put the block in the agent settings file (`settings.json`). A project's settings
 - `advisor`: `"off"` (the default) or a model.
 - `maxThinking`: the highest thinking level a helper or legwork child may use. It joins the session's own ceiling and the agent's caps; the lowest applies.
 - `sideCalls`: where the observer's notes and the memory summary at exit run, `"legwork"` or `"session"`. Calls that judge what you allowed always use the session's model.
+- `free`: `"on"` (the default) or `"off"`. With it on, legwork children use free OpenRouter models, below.
 - `run`: the soft budget of one run, below. `0` switches a limit off.
 
 A value the settings cannot accept stops the launch with one line naming the file and what is accepted. A model that is not available stops it with the setting and the model named. `/team` edits all of this.
@@ -57,6 +59,20 @@ A message from you that starts a run is followed by one line the model cannot ge
 `Now: Sat 14 Nov 2026, 16:02 (Europe/Istanbul). Session: $0.034, context 41k of 128k tokens, cache hits 96%. Last run: 12 min, $0.021.`
 
 A second line reminds it that the working notes apply to this message. Both are stored once and never rewritten, so they do not disturb the prompt cache. A figure that is not known (no price for the model, no earlier run) is left out. A message you send while a run is still working joins that run and gets no line of its own.
+
+## Free models
+
+With an OpenRouter key and `team.free` on, a child of the legwork role (scout, researcher, delegate, or any agent set to legwork) starts on the best free OpenRouter model instead of the legwork model, while the account's free requests for the day last. Helper and main children, forked children, and every session without an OpenRouter key are not touched. A free model that is rate limited or fails is rested, and the child moves on to the next free model, and last to the model its role would have used, without starting over.
+
+What counts as usable: a model whose name ends in `:free`, that takes tools, has a context of at least 64k tokens, is not about to be retired, and is in the session's model list. Router aliases such as `openrouter/free` and anything from Anthropic never count.
+
+**Limits.** OpenRouter gives an account a fixed number of free requests a day (shown in `/team` as "973 of 1000 left today") and 20 a minute. Free models are used only while the day's remainder, less 30 for each free child already running, is at least 40, and no more than two children run on free models at once. A model that failed rests 10 minutes, then 20, 40, up to 2 hours; one success clears it.
+
+**How a model is rated.** The first time a model is seen, the session tests it in the background with five short requests (at most 3 models per session start and 60 requests a day): call a tool with the exact path, use a tool's answer and ignore a distractor, answer in strict JSON, predict the output of a tricky JavaScript snippet, and find one line in about 6,000 tokens of logs. A model that fails any of the first three is never used. IQ is the share of those checks, and of the real children that ran on the model, that went well, from 0 to 100; speed is the median output tokens per second of the tests. Children that edit or write files need an IQ of 70, read-only children 50. Among the models that qualify, the pick is 60% IQ and 40% speed relative to the fastest. A model is tested again after 14 days. All of it is kept in `free-models.json` in the agent directory.
+
+**Data.** A free endpoint may keep and use the prompts it receives under its provider's own data policy. Turn `team.free` off, or set the legwork model yourself and keep the session off OpenRouter, for work that must not leave your control.
+
+`/team` shows the state in one line, for example `on · 973 of 1000 left today · 9 usable · next: nvidia/nemotron-3-ultra-550b-a55b:free (IQ 80, 54 tok/s)`, and `off` stops all of it: no requests, no tests, no free children.
 
 ## Run budget
 

@@ -85,6 +85,7 @@ import { buildTimeoutRecoverySummary, collectTrackedMutationEvidence, snapshotTr
 import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, hasSingleOutputChangedSinceSnapshot, injectOutputPathSystemPrompt, resolveSingleOutput, validateFileOnlyOutputMode, type SingleOutputSnapshot } from "../shared/single-output.ts";
 import { formatSubagentModelVerificationError, isContextOverflow } from "../shared/session-model.ts";
 import { modelRouteCandidateAt, type ModelRouteCandidate } from "../../shared/model-route.ts";
+import { beginFreeRun, recoveryRoutes, recoveryRoutesEnv } from "../../../../lib/free-models.ts";
 import { recordModelRoutingAttempt } from "../../../../lib/model-routing-metrics.ts";
 import {
 	SUBAGENT_STARTUP_RETRY_DELAYS_MS,
@@ -676,7 +677,7 @@ const __piSubagentGate = (() => {
     const release = (slot: string) => { if (slot) { try { unlinkSync(path.join(slotDir(), slot)); } catch { } } };
     return { acquire, release };
 })();
-const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: "[]" };
+const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: recoveryRoutesEnv(shared.modelCandidates) };
 	const mutationSnapshot = snapshotTrackedMutations(options.cwd ?? runtimeCwd);
 	let observedMutationAttempt = false;
 	let structuredOutputToolInvoked = false;
@@ -1229,7 +1230,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 						result.model = evt.message.provider && !evt.message.model.startsWith(`${evt.message.provider}/`) ? `${evt.message.provider}/${evt.message.model}` : evt.message.model;
 						if (expectedModelForVerification && !hasToolCall) {
 							const observed=evt.message.provider && !evt.message.model.startsWith(`${evt.message.provider}/`) ? `${evt.message.provider}/${evt.message.model}` : evt.message.model;
-							const modelVerificationError = formatSubagentModelVerificationError(expectedModelForVerification, observed, options.availableModels);
+							const modelVerificationError = formatSubagentModelVerificationError(expectedModelForVerification, observed, options.availableModels, recoveryRoutes(shared.modelCandidates));
 							if (modelVerificationError && !result.error) result.error = modelVerificationError;
 						}
 					}
@@ -2074,6 +2075,8 @@ async function runSyncCompletionInner(
 		},
 	};
 	let lastResult: SingleResult | undefined;
+	// A child that starts on a free model holds a lease on the day's free requests until it ends.
+	const freeRun = beginFreeRun(modelCandidates);
 	const modelsToTry: Array<ModelRouteCandidate | undefined> = candidates.length > 0 ? candidates : [undefined];
 	// Escalated to "file" after an unexplained zero-activity startup failure so
 	// retries keep the task text out of argv (endpoint pre-exec scans may deny it).
@@ -2263,6 +2266,7 @@ async function runSyncCompletionInner(
 		error: "Subagent did not produce a result.",
 	} satisfies SingleResult, options.context);
 	result.task = task;
+	freeRun?.finish({ model: result.model, ok: result.exitCode === 0 && !result.error, error: result.error });
 
 	result.usage = aggregateUsage;
 	result.attemptedModels = attemptedModels.length > 0 ? attemptedModels : undefined;

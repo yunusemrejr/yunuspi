@@ -19,6 +19,7 @@ import {
 import { Container, Input, SelectList, Spacer, Text, fuzzyFilter, getKeybindings } from "@yunuspi/tui";
 import {
 	BUILTIN_AGENT_ROLES,
+	FREE_SETTINGS,
 	SIDE_CALL_PLACES,
 	TEAM_ROLES,
 	loadTeamConfig,
@@ -27,6 +28,7 @@ import {
 	type TeamPatch,
 	type TeamRole,
 } from "./lib/team.ts";
+import { freeSummary } from "./lib/free-models.ts";
 import { getProjectAgentSettingsPath, getUserAgentSettingsPath } from "./pi-subagents/src/agents/agents.ts";
 import { THINKING_LEVELS } from "./pi-subagents/src/shared/model-info.ts";
 
@@ -39,6 +41,7 @@ export const ROW_LABELS = {
 	helperThinking: "Helper thinking ceiling",
 	legworkThinking: "Legwork thinking ceiling",
 	sideCalls: "Side calls (observer notes, memory summaries) run on",
+	free: "Free models: legwork children use OpenRouter's free models while the day's free requests last",
 	minutes: "Run budget: minutes",
 	usd: "Run budget: dollars",
 	roles: "Agent roles",
@@ -52,6 +55,7 @@ export const ROW_ORDER: readonly TeamRowId[] = [
 	"helperThinking",
 	"legworkThinking",
 	"sideCalls",
+	"free",
 	"minutes",
 	"usd",
 	"roles",
@@ -88,7 +92,8 @@ export function effectiveRoles(roles: Record<string, TeamRole> = {}): [string, T
 	return knownAgents(roles).map((agent) => [agent, roles[agent] ?? BUILTIN_AGENT_ROLES[agent] ?? "main"]);
 }
 
-export function teamRows(config: TeamConfig): TeamRow[] {
+/** `freeText` is the live state of the free models; without it the row shows the setting alone. */
+export function teamRows(config: TeamConfig, freeText: string = config.team.free): TeamRow[] {
 	const { team, run } = config;
 	const set = Object.keys(team.roles);
 	return ROW_ORDER.map((id) => {
@@ -104,6 +109,8 @@ export function teamRows(config: TeamConfig): TeamRow[] {
 				return { id, label, value: team.maxThinking.legwork };
 			case "sideCalls":
 				return { id, label, value: team.sideCalls };
+			case "free":
+				return { id, label, value: freeText };
 			case "minutes":
 				return { id, label, value: budgetText(run.softMinutes) };
 			case "usd":
@@ -124,7 +131,7 @@ function aligned(rows: [string, string][]): string {
 }
 
 /** `/team show`: the effective values as short aligned lines, with no UI. */
-export function showText(config: TeamConfig): string {
+export function showText(config: TeamConfig, freeText: string = config.team.free): string {
 	const { team, run } = config;
 	const rows: [string, string][] = [
 		["Helper model", modelText(team.helper)],
@@ -133,6 +140,7 @@ export function showText(config: TeamConfig): string {
 		["Helper thinking ceiling", team.maxThinking.helper],
 		["Legwork thinking ceiling", team.maxThinking.legwork],
 		["Side calls", team.sideCalls],
+		["Free models", freeText],
 		["Run budget minutes", budgetText(run.softMinutes)],
 		["Run budget dollars", budgetText(run.softUsd)],
 	];
@@ -266,6 +274,9 @@ export function withTeamChange(patch: TeamPatch, change: TeamChange): TeamPatch 
 		case "sideCalls":
 			next.team.sideCalls = String(change.value) as TeamConfig["team"]["sideCalls"];
 			return next;
+		case "free":
+			next.team.free = String(change.value) as TeamConfig["team"]["free"];
+			return next;
 		case "minutes":
 			next.run.softMinutes = Number(change.value);
 			return next;
@@ -349,6 +360,11 @@ async function chooseChange(
 			if (!picked || !(SIDE_CALL_PLACES as readonly string[]).includes(picked)) return undefined;
 			return { row: row.id, value: picked };
 		}
+		case "free": {
+			const picked = await ctx.ui.select(row.label, [...FREE_SETTINGS]);
+			if (!picked || !(FREE_SETTINGS as readonly string[]).includes(picked)) return undefined;
+			return { row: row.id, value: picked };
+		}
 		case "minutes":
 		case "usd": {
 			const hint = row.id === "minutes" ? "minutes, 0 switches the limit off" : "dollars, 0 switches the limit off";
@@ -409,7 +425,7 @@ async function openPicker(ctx: ExtensionCommandContext): Promise<void> {
 			ctx.ui.notify(errorText(error), "error");
 			return;
 		}
-		const rows = teamRows(config);
+		const rows = teamRows(config, freeSummary(config.team.free));
 		const rowTexts = rows.map((row) => `${row.label} — ${row.value}`);
 		const done = "Done";
 		const picked = await ctx.ui.select("Team", [...rowTexts, done]);
@@ -451,7 +467,7 @@ export default function teamCommand(pi: ExtensionAPI) {
 				return;
 			}
 			if (verb === "show" || !ctx.hasUI) {
-				ctx.ui.notify(showText(config), "info");
+				ctx.ui.notify(showText(config, freeSummary(config.team.free)), "info");
 				return;
 			}
 			await openPicker(ctx);

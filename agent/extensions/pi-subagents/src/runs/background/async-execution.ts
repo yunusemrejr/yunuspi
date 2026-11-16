@@ -14,7 +14,7 @@ import { appendAgentRefinementOverlay } from "../../agents/agent-refinements.ts"
 import { createAtomicJsonWriter, writePrivateAtomicJson } from "../../shared/atomic-json.ts";
 import { currentCompletionOwnerId } from "../../shared/completion-owner.ts";
 import { planChildLaunch, resolveStepBehavior, suppressProgressForReadOnlyTask, type ResolvedStepBehavior } from "../shared/child-launch-plan.ts";
-import { applyThinkingSuffix, projectLaunchResolvedChildExtensions, resolvePiLaunchToolPlan } from "../shared/pi-args.ts";
+import { applyThinkingSuffix, freeLedCandidates, projectLaunchResolvedChildExtensions, resolvePiLaunchToolPlan } from "../shared/pi-args.ts";
 import { injectOutputPathSystemPrompt, injectSingleOutputInstruction, normalizeSingleOutputOverride, resolveSingleOutputPath, validateFileOnlyOutputMode } from "../shared/single-output.ts";
 import { buildChainInstructions, isDynamicParallelStep, isParallelStep, resolveExistingReadPaths, writeInitialProgressFile, type ChainStep, type SequentialStep, type StepOverrides } from "../../shared/settings.ts";
 import { isDynamicRunnerGroup, isParallelGroup, type RunnerStep, type RunnerSubagentStep } from "../shared/parallel-utils.ts";
@@ -879,10 +879,12 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 
 		let primaryModel: string | undefined;
 		let shownRole: string | undefined;
+		let freeRoutes: string[] | undefined;
 		try {
 			const route = externalRunner ? undefined : resolveChildRoute({ agent: a, callRole: s.role, forked: params.contextForAgent?.(s.agent) === "fork", parentModel: ctx.currentModel, availableModels, cwd: runnerCwd });
 			primaryModel = route?.model;
 			shownRole = route?.shownRole;
+			freeRoutes = route?.routes;
 		} catch (error) {
 			throw new AsyncStartValidationError(error instanceof Error ? error.message : String(error));
 		}
@@ -904,7 +906,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 		}
 		const agentContract = s.agentContract ?? params.agentContract;
 		const permissionRules = resolvePermissionRules(ctx.permissions, a.permissions);
-		const modelRouteCandidates: ModelRouteCandidate[] = externalRunner ? [] : model ? [{ route: model }] : [];
+		const modelRouteCandidates: ModelRouteCandidate[] = externalRunner ? [] : model ? freeLedCandidates(freeRoutes, effectiveThinking, thinkingOverride !== undefined) ?? [{ route: model }] : [];
 		const modelCandidates = modelRouteCandidates.map((candidate) => candidate.route);
 		const fast = s.fast ?? params.fast ?? a.fast;
 		const toolPlan = resolvePiLaunchToolPlan({
@@ -1618,6 +1620,7 @@ export function executeAsyncSingle(
 	const taskText = readsInstruction + taskWithOutputInstruction;
 	let primaryModel: string | undefined;
 	let shownRole: string | undefined;
+	let freeRoutes: string[] | undefined;
 	try {
 		if (externalRunner) {
 			primaryModel = undefined;
@@ -1628,6 +1631,7 @@ export function executeAsyncSingle(
 			const route = resolveChildRoute({ agent: agentConfig, forked: params.context === "fork", parentModel: ctx.currentModel, availableModels, cwd: runnerCwd });
 			primaryModel = route.model;
 			shownRole = route.shownRole;
+			freeRoutes = route.routes;
 		}
 	} catch (error) {
 		return formatAsyncStartError("single", error instanceof Error ? error.message : String(error));
@@ -1669,7 +1673,7 @@ export function executeAsyncSingle(
 		? createStructuredOutputRuntime(params.structuredOutputSchema, path.join(asyncDir, "structured-output"), { acceptanceReport: resolveAcceptanceReportMode(params.acceptance) })
 		: undefined;
 	// A caller-supplied route list (resume) is reused; otherwise the child runs on the session route.
-	const modelRouteCandidates: ModelRouteCandidate[] = externalRunner ? [] : params.modelRouteCandidates?.length ? params.modelRouteCandidates : model ? [{ route: model }] : [];
+	const modelRouteCandidates: ModelRouteCandidate[] = externalRunner ? [] : params.modelRouteCandidates?.length ? params.modelRouteCandidates : model ? freeLedCandidates(freeRoutes, effectiveThinking, params.thinkingOverride !== undefined) ?? [{ route: model }] : [];
 	const modelCandidates = modelRouteCandidates.map((candidate) => candidate.route);
 	if (!externalRunner) {
 		try {

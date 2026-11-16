@@ -199,6 +199,7 @@ test('the picker shows every row with its exact label and current value', async 
     `${ROW_LABELS.helperThinking} — xhigh`,
     `${ROW_LABELS.legworkThinking} — high`,
     `${ROW_LABELS.sideCalls} — legwork`,
+    `${ROW_LABELS.free} — on · quota not read yet · no model measured yet`,
     `${ROW_LABELS.minutes} — 60`,
     `${ROW_LABELS.usd} — 1`,
     `${ROW_LABELS.roles} — built-in`,

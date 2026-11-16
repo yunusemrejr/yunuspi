@@ -96,6 +96,7 @@ import { buildTimeoutRecoverySummary, collectTrackedMutationEvidence, snapshotTr
 import { collectDynamicResults, DynamicFanoutError, materializeDynamicParallelStep, validateDynamicCollection } from "../shared/dynamic-fanout.ts";
 import { claimRunFanoutBatch, getRunFanoutBudgetSnapshot } from "../shared/run-fanout-budget.ts";
 import { nestedSummaryFromAsyncStatus, projectNestedEvents, resolveNestedAsyncDir, writeNestedEvent } from "../shared/nested-events.ts";
+import { beginFreeRun, recoveryRoutes, recoveryRoutesEnv } from "../../../../lib/free-models.ts";
 import { formatSubagentModelVerificationError, isContextOverflow } from "../shared/session-model.ts";
 import {
 	SUBAGENT_STARTUP_RETRY_DELAYS_MS,
@@ -648,6 +649,7 @@ function runPiStreaming(
 	expectedModelForVerification?: string,
 	modelVerificationRegistry?: Array<{ provider: string; id: string; fullId: string }>,
 	mutationTools?: readonly string[],
+	modelCandidates?: readonly string[],
 ): Promise<RunPiStreamingResult> {
 	return new Promise((resolve) => {
 		const startedAt = Date.now();
@@ -698,7 +700,7 @@ const __piSubagentGate = (() => {
     const release = (slot: string) => { if (slot) { try { unlinkSync(path.join(slotDir(), slot)); } catch { } } };
     return { acquire, release };
 })();
-const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: "[]" };
+const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: recoveryRoutesEnv(modelCandidates) };
 		const spawnSpec = getPiSpawnCommand(args, {
 			...(piPackageRoot ? { piPackageRoot } : {}),
 			...(piArgv1 ? { argv1: piArgv1 } : {}),
@@ -923,7 +925,7 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 				if (event.message.model) {
 					model = event.message.provider && !event.message.model.startsWith(`${event.message.provider}/`) ? `${event.message.provider}/${event.message.model}` : event.message.model;
 					if (expectedModelForVerification && !hasToolCall) {
-						const modelVerificationError = formatSubagentModelVerificationError(expectedModelForVerification, model!, modelVerificationRegistry);
+						const modelVerificationError = formatSubagentModelVerificationError(expectedModelForVerification, model!, modelVerificationRegistry, recoveryRoutes(modelCandidates));
 						if (modelVerificationError && !error) error = modelVerificationError;
 					}
 				}
@@ -2385,7 +2387,15 @@ async function runSingleStep(
 	ctx: SingleStepContext,
 ): Promise<StepResult & { completionGuardTriggered?: boolean }> {
 	if (!step.importAsyncRoot) ctx.orcaProgressTab?.section({ agent: step.agent, index: ctx.flatIndex, count: ctx.flatStepCount });
-	return runSingleStepInner(step, ctx);
+	// A step that starts on a free model holds a lease on the day's free requests until it ends.
+	const freeRun = beginFreeRun(step.modelCandidates);
+	let result: Awaited<ReturnType<typeof runSingleStepInner>> | undefined;
+	try {
+		result = await runSingleStepInner(step, ctx);
+		return result;
+	} finally {
+		freeRun?.finish({ model: result?.model, ok: result?.exitCode === 0 && !result.error, error: result?.error });
+	}
 }
 
 type RunnerStatusStep = NonNullable<AsyncStatus["steps"]>[number] & {

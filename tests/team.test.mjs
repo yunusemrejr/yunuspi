@@ -36,7 +36,7 @@ test('no block resolves to today: every role inherits the session model', () => 
   const config = team.loadTeamConfig(cwd);
   assert.deepEqual(config.team, {
     helper: 'inherit', legwork: 'inherit', advisor: 'off', roles: {},
-    maxThinking: { helper: 'xhigh', legwork: 'high' }, sideCalls: 'legwork',
+    maxThinking: { helper: 'xhigh', legwork: 'high' }, sideCalls: 'legwork', free: 'on',
   });
   assert.deepEqual(config.run, { softMinutes: 60, softUsd: 1 });
   for (const role of team.TEAM_ROLES) assert.equal(team.resolveRoleRoute(role, config.team, session), 'test/main-model');

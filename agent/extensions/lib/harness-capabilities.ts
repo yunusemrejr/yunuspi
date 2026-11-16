@@ -326,6 +326,21 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = Object.freeze(
 		doc: "agent/public-template/docs/SUBAGENT-CONTRACTS.md",
 	}),
 	capability({
+		id: "free-models",
+		group: "models",
+		summary: "Legwork children run on the best measured free OpenRouter model while the account's daily free requests last, and fall back through the next ones to the role's own model. Models are scored by a short probe and by their children's results; /team shows what is usable now and team.free turns it off.",
+		entrypoints: ["team.free", "/team", "legwork role"],
+		commands: ["team"],
+		options: [option("team.free", "Use free OpenRouter models for legwork children.", ["on", "off"])],
+		related: ["agent-model-management", "provider-routing"],
+		sourceFiles: [
+			"agent/extensions/free-models.ts",
+			"agent/extensions/lib/free-models.ts",
+			"agent/extensions/pi-subagents/src/runs/shared/session-model.ts",
+		],
+		doc: "docs/TEAM.md",
+	}),
+	capability({
 		id: "provider-routing",
 		group: "models",
 		summary: "Inspect and persist OpenRouter provider selection pins for the selected model, with soft order, hard only, metric sorting or raw routing JSON.",

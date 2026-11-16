@@ -5,6 +5,7 @@
  * there. Its effort controller (Jev) picks the thinking level at launch, from
  * the session's ceiling lowered by the caps and the role's own ceiling. */
 import { loadTeamConfig, resolveAgentRole, resolveRoleRoute, roleThinkingCeiling, TEAM_ROLES, type TeamRole, type TeamSettings } from "../../../../lib/team.ts";
+import { agentWritesFiles, pickFreeRoutes } from "../../../../lib/free-models.ts";
 import { mapChildren } from "./session-siblings.ts";
 import { splitKnownThinkingSuffix, type ModelInfo as AvailableModelInfo, type ThinkingLevel } from "../../shared/model-info.ts";
 
@@ -34,6 +35,8 @@ export function sessionChildModel(parentModel: ParentModel | undefined): string 
 
 export interface ChildRoute {
 	model: string;
+	/** Only when free models lead: the routes the child falls back through, `model` first and the role's own model last. */
+	routes?: string[];
 	/** The role, only when the child runs on another model than the session's: what a line about the child shows. */
 	shownRole?: TeamRole;
 	/** The role's thinking ceiling; none for a forked child and for the main role. */
@@ -41,7 +44,7 @@ export interface ChildRoute {
 }
 
 export function resolveChildRoute(input: {
-	agent: { name: string; extraFields?: Record<string, string> };
+	agent: { name: string; extraFields?: Record<string, string>; tools?: readonly string[] };
 	callRole?: TeamRole;
 	forked: boolean;
 	parentModel: ParentModel | undefined;
@@ -53,11 +56,16 @@ export function resolveChildRoute(input: {
 	const team = input.team ?? loadTeamConfig(input.cwd).team;
 	const role = resolveAgentRole(input.agent, team, input.callRole);
 	const maxThinking = roleThinkingCeiling(role, team);
-	const model = resolveRoleRoute(role, team, input.parentModel, input.availableModels);
+	const roleModel = resolveRoleRoute(role, team, input.parentModel, input.availableModels);
+	// Legwork runs on the best measured free OpenRouter model while the day's free requests last, and falls back through the next ones to the role's own model.
+	const free = role === "legwork" && team.free === "on" ? pickFreeRoutes({ writes: agentWritesFiles(input.agent.tools) }).map((pick) => pick.route) : [];
+	const routes = [...new Set([...free, roleModel])];
+	const model = routes[0]!;
 	// A configured role model needs no session model; only the comparison with it does.
 	const onSessionModel = input.parentModel !== undefined && model === sessionChildModel(input.parentModel);
 	return {
 		model,
+		...(free.length && routes.length > 1 ? { routes } : {}),
 		...(!onSessionModel ? { shownRole: role } : {}),
 		...(maxThinking ? { maxThinking } : {}),
 	};
@@ -93,11 +101,13 @@ export function splitThinkingSuffix(model: string): { baseModel: string; thinkin
 	return parsed.thinkingSuffix ? parsed : { baseModel: model, thinkingSuffix: "" };
 }
 
-export function formatSubagentModelVerificationError(expectedModel: string, observedModel: string, availableModels: AvailableModelInfo[] | undefined): string | undefined {
+/** `recoveryRoutes` are the routes a child may move to after a failure; a switch to one of them is not a mismatch. */
+export function formatSubagentModelVerificationError(expectedModel: string, observedModel: string, availableModels: AvailableModelInfo[] | undefined, recoveryRoutes: readonly string[] = []): string | undefined {
 	if (!availableModels || availableModels.length === 0) return undefined;
 	const expectedBase = splitThinkingSuffix(expectedModel).baseModel;
 	const observedBase = splitThinkingSuffix(observedModel).baseModel;
 	if (expectedBase === observedBase) return undefined;
+	if (recoveryRoutes.some((route) => splitThinkingSuffix(route).baseModel === observedBase)) return undefined;
 	const expectedEntry = availableModels.find((entry) => entry.fullId === expectedBase);
 	if (expectedEntry) {
 		if (expectedEntry.id === observedBase) return undefined;

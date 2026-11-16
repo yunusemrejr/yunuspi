@@ -558,6 +558,40 @@
       "doc": "docs/SUBAGENT-CONTRACTS.md"
     },
     {
+      "id": "free-models",
+      "group": "models",
+      "summary": "Legwork children run on the best measured free OpenRouter model while the account's daily free requests last, and fall back through the next ones to the role's own model. Models are scored by a short probe and by their children's results; /team shows what is usable now and team.free turns it off.",
+      "entrypoints": [
+        "team.free",
+        "/team",
+        "legwork role"
+      ],
+      "commands": [
+        "team"
+      ],
+      "options": [
+        {
+          "name": "team.free",
+          "values": [
+            "on",
+            "off"
+          ],
+          "summary": "Use free OpenRouter models for legwork children."
+        }
+      ],
+      "related": [
+        "agent-model-management",
+        "provider-routing"
+      ],
+      "sourceFiles": [
+        "agent/extensions/free-models.ts",
+        "agent/extensions/lib/free-models.ts",
+        "agent/extensions/pi-subagents/src/runs/shared/session-model.ts"
+      ],
+      "doc": "docs/TEAM.md",
+      "tools": []
+    },
+    {
       "id": "provider-routing",
       "group": "models",
       "summary": "Inspect and persist OpenRouter provider selection pins for the selected model, with soft order, hard only, metric sorting or raw routing JSON.",
@@ -3023,7 +3057,7 @@
       {
         "name": "team",
         "source": "agent/extensions/team-command.ts",
-        "line": 437
+        "line": 453
       },
       {
         "name": "used",
@@ -4002,7 +4036,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 657,
+      "sourceFiles": 659,
       "registrationSites": 60,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 77,
@@ -4063,6 +4097,10 @@
       },
       {
         "path": "agent/extensions/filesystem-safety.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/free-models.ts",
         "exists": true
       },
       {
@@ -4385,6 +4423,10 @@
       },
       {
         "path": "agent/extensions/lib/film.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/free-models.ts",
         "exists": true
       },
       {

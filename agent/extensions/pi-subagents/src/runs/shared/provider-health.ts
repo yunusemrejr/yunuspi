@@ -600,7 +600,9 @@ export function recordFailure(input: RecordFailureInput): RecordedFailure | unde
  const upstream = input.provider === "openrouter" ? openRouterUpstream(input.errorMessage) : undefined;
  const endpoint = input.provider === "openrouter" && original.kind !== "deterministic" && original.kind !== "provider-auth"
   ? upstream ?? (original.kind !== "quota-rate" ? input.endpoint : undefined) : undefined;
- const classification = endpoint ? { ...original, scope: "route" as const } : original;
+ // A free OpenRouter model has a limit of its own: it being limited says nothing about the paid models on the same provider.
+ const freeRoute = input.provider === "openrouter" && input.model?.endsWith(":free") === true && original.kind !== "provider-auth" && !original.billing;
+ const classification = endpoint || freeRoute ? { ...original, scope: "route" as const } : original;
 	return mutateHealth((state) => {
 		const entry = ensureEntry(state, input.provider, now);
 		entry.updatedAt = now;

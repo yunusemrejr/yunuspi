@@ -1,3 +1,15 @@
+## 0.56.0 — Free OpenRouter models take the legwork
+
+Legwork (finding, reading, checks, mechanical edits) is work a free model can often do, and an OpenRouter account has free requests every day that go unused. This release lets the legwork children use them, with a measured choice of which free model and a fall back to the paid model when a free one cannot answer. It is on by default and needs an OpenRouter key; `team.free: "off"` removes all of it.
+
+**A legwork child starts on the best free model.** The session keeps a list of the usable free models (tools, 64k context or more, not being retired, available in the session) and rates each: a five-request test run once in the background, then the results of the children that ran on it. The pick weighs IQ 60% and speed 40%; children that write files need IQ 70, read-only ones 50. Helper and main children and forked children are unchanged.
+
+**The day's free requests are counted, not guessed.** The remainder comes from OpenRouter's own counter and is read again every two minutes. Free models are used while at least 40 requests are left after holding back 30 for each free child already running, and no more than two such children run at once. Tests spend at most 60 requests a day.
+
+**A free model that fails hands over.** A rate limit, an upstream error or an empty answer on a free model rests it for 10 minutes (doubling, up to 2 hours) and moves the same child to the next free model, then to the model its role would have used, without starting the task again. A rate limit on a free model no longer rests the whole OpenRouter provider; it rests that model only.
+
+**`/team` shows the state.** One row says whether it is on, how many free requests are left, how many models are usable and which one is next, and switches it. See [Team](docs/TEAM.md).
+
 ## 0.55.1 — Shorter waits after a rate limit, and a subagent tool a goal can use
 
 This release comes from reading the goal session of 15 Nov 2026: two and a half hours on Ling 3.2 Flash, 59 answered requests, 13 rate-limit errors, stopped by hand before the goal closed. Each change answers something that went wrong there.

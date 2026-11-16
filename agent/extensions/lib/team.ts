@@ -15,6 +15,8 @@ export const TEAM_ROLES = ["main", "helper", "legwork"] as const;
 export type TeamRole = (typeof TEAM_ROLES)[number];
 export const SIDE_CALL_PLACES = ["legwork", "session"] as const;
 export type SideCallPlace = (typeof SIDE_CALL_PLACES)[number];
+export const FREE_SETTINGS = ["on", "off"] as const;
+export type FreeSetting = (typeof FREE_SETTINGS)[number];
 
 /** Role of each built-in agent; any other agent is `main` unless told otherwise. */
 export const BUILTIN_AGENT_ROLES: Readonly<Record<string, TeamRole>> = Object.freeze({
@@ -61,6 +63,8 @@ export interface TeamSettings {
 	roles: Record<string, TeamRole>;
 	maxThinking: { helper: ThinkingLevel; legwork: ThinkingLevel };
 	sideCalls: SideCallPlace;
+	/** "on": legwork children use free OpenRouter models while the day's free quota allows. */
+	free: FreeSetting;
 }
 
 export interface RunBudget {
@@ -83,6 +87,7 @@ export interface TeamPatch {
 		roles?: Record<string, TeamRole>;
 		maxThinking?: { helper?: ThinkingLevel; legwork?: ThinkingLevel };
 		sideCalls?: SideCallPlace;
+		free?: FreeSetting;
 	};
 	run: { softMinutes?: number; softUsd?: number };
 }
@@ -95,6 +100,7 @@ export const DEFAULT_TEAM_CONFIG: Readonly<TeamConfig> = Object.freeze({
 		roles: Object.freeze({}) as Record<string, TeamRole>,
 		maxThinking: Object.freeze({ helper: "xhigh", legwork: "high" }) as { helper: ThinkingLevel; legwork: ThinkingLevel },
 		sideCalls: "legwork",
+		free: "on",
 	}) as TeamSettings,
 	run: Object.freeze({ softMinutes: 60, softUsd: 1 }),
 });
@@ -136,8 +142,8 @@ export function parseTeamPatch(settings: Record<string, unknown>, file: string):
 		const team = plainObject(settings.team);
 		if (!team) throw invalid(file, "team", "an object");
 		for (const key of Object.keys(team)) {
-			if (!["helper", "legwork", "advisor", "roles", "maxThinking", "sideCalls"].includes(key)) {
-				throw invalid(file, `team.${key}`, "one of helper, legwork, advisor, roles, maxThinking, sideCalls");
+			if (!["helper", "legwork", "advisor", "roles", "maxThinking", "sideCalls", "free"].includes(key)) {
+				throw invalid(file, `team.${key}`, "one of helper, legwork, advisor, roles, maxThinking, sideCalls, free");
 			}
 		}
 		if ("helper" in team) patch.team.helper = parseModelSetting(team.helper, file, "team.helper", "inherit");
@@ -148,6 +154,12 @@ export function parseTeamPatch(settings: Record<string, unknown>, file: string):
 				throw invalid(file, "team.sideCalls", SIDE_CALL_PLACES.map((place) => `"${place}"`).join(" or "));
 			}
 			patch.team.sideCalls = team.sideCalls as SideCallPlace;
+		}
+		if ("free" in team) {
+			if (typeof team.free !== "string" || !(FREE_SETTINGS as readonly string[]).includes(team.free)) {
+				throw invalid(file, "team.free", FREE_SETTINGS.map((value) => `"${value}"`).join(" or "));
+			}
+			patch.team.free = team.free as FreeSetting;
 		}
 		if ("roles" in team) {
 			const roles = plainObject(team.roles);
@@ -188,6 +200,7 @@ export function mergeTeamPatches(...patches: TeamPatch[]): TeamConfig {
 		if (team.legwork !== undefined) merged.team.legwork = team.legwork;
 		if (team.advisor !== undefined) merged.team.advisor = team.advisor;
 		if (team.sideCalls !== undefined) merged.team.sideCalls = team.sideCalls;
+		if (team.free !== undefined) merged.team.free = team.free;
 		Object.assign(merged.team.roles, team.roles);
 		Object.assign(merged.team.maxThinking, team.maxThinking);
 		Object.assign(merged.run, run);

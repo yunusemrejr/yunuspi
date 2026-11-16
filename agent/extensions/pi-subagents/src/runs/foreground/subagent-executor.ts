@@ -38,6 +38,7 @@ import { normalizePublicSubagentExecution, validateWorkflowCapacityOverrides } f
 import { runSync } from "./execution.ts";
 import { handleWatchdogToolAction, WATCHDOG_TOOL_ACTIONS } from "../../watchdog/tool-actions.ts";
 import type { MainWatchdogRuntime } from "../../watchdog/runtime.ts";
+import { freeLedCandidates } from "../shared/pi-args.ts";
 import { normalizeParentModel, resolveChildRoute, sessionChildModel, validateCallRoles, withCallRole, type ChildRoute, type ParentModel } from "../shared/session-model.ts";
 import { agentForRole, type TeamRole } from "../../../../lib/team.ts";
 import { formatRetainedChildren, listRetainedChildren } from "../background/retained-children.ts";
@@ -3316,7 +3317,8 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 		}
 		const route = a.runner?.type === "external-cli" || a.runner?.type === "external-job" ? undefined : childRoute(a, params.role);
 		const modelOverride = route?.model;
-		const launchOptions = compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
+		const launchThinking = route ? thinkingOverrideForTask(params.agent!, 0, route.maxThinking) : undefined;
+		const launchOptions =compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
 			agent: params.agent!,
 			task: shouldForkAgent(contextPolicy, params.agent!) ? wrapForkTask(params.task ?? "") : (params.task ?? ""),
 			goal: params.task ?? "",
@@ -3342,9 +3344,9 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			outputBaseDir: resolveSingleRunOutputBaseDir(deps, artifactsDir, id),
 			modelOverride,
 			role: route?.shownRole,
-			modelRouteCandidates: params.modelRouteCandidates,
+			modelRouteCandidates: params.modelRouteCandidates ?? freeLedCandidates(route?.routes, launchThinking, launchThinking !== undefined),
 			fast: params.fast,
-			thinkingOverride: route ? thinkingOverrideForTask(params.agent!, 0, route.maxThinking) : undefined,
+			thinkingOverride: launchThinking,
 			thinkingCeiling: a.maxThinking,
 			maxSubagentDepth,
 			waitToolEnabled: deps.waitToolEnabled,
@@ -3727,6 +3729,7 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 	let task = typeof params.task === "string" ? params.task : "";
 	const route = agentConfig.runner?.type === "external-cli" || agentConfig.runner?.type === "external-job" ? undefined : childRouteResolver(data)(agentConfig, params.role);
 	const modelOverride = route?.model;
+	const launchThinking = route ? thinkingOverrideForTask(params.agent!, 0, route.maxThinking) : undefined;
 	let skillOverride: string[] | false | undefined = normalizeSkillInput(params.skill);
 	let readsOverride: string[] | false | undefined = params.reads;
 	const rawOutput = params.output !== undefined ? params.output : agentConfig.output;
@@ -3875,9 +3878,9 @@ async function runSinglePath(data: ExecutionContextData, deps: ExecutorDeps): Pr
 			index: 0,
 			modelOverride,
 			role: route?.shownRole,
-			modelRouteCandidates: params.modelRouteCandidates,
+			modelRouteCandidates: params.modelRouteCandidates ?? freeLedCandidates(route?.routes, launchThinking, launchThinking !== undefined),
 			fast: params.fast,
-			thinkingOverride: route ? thinkingOverrideForTask(params.agent!, 0, route.maxThinking) : undefined,
+			thinkingOverride: launchThinking,
 			thinkingCeiling: agentConfig.maxThinking,
 			extensionBindings: params.extensionBindings,
 			availableModels,

@@ -7,7 +7,7 @@ import { buildSkillInjection, normalizeSkillInput, resolveSkillsWithFallback } f
 import { buildAgentMemoryInjection } from "../agents/agent-memory.ts";
 import { resolveChildRoute, type ChildRoute, type ParentModel } from "../runs/shared/session-model.ts";
 import type { ModelRouteCandidate } from "../shared/model-route.ts";
-import { applyThinkingSuffix, resolvePiLaunchToolPlan, type PiLaunchToolPlan } from "../runs/shared/pi-args.ts";
+import { applyThinkingSuffix, freeLedCandidates, resolvePiLaunchToolPlan, type PiLaunchToolPlan } from "../runs/shared/pi-args.ts";
 import { injectOutputPathSystemPrompt, normalizeSingleOutputOverride, resolveSingleOutputPath } from "../runs/shared/single-output.ts";
 import { getArtifactPaths, getArtifactsDir } from "../shared/artifacts.ts";
 import { resolveEffectiveThinking } from "../shared/model-info.ts";
@@ -347,7 +347,7 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 		decodeThinkingCeiling(process.env[SUBAGENT_THINKING_CEILING_ENV]),
 	);
 	const model = externalRunner ? undefined : applyThinkingSuffix(sessionRoute, thinkingOverride, thinkingOverride !== undefined);
-	const modelRouteCandidates: ModelRouteCandidate[] = model ? [{ route: model }] : [];
+	const modelRouteCandidates: ModelRouteCandidate[] = model ? freeLedCandidates(route?.routes, thinkingOverride, thinkingOverride !== undefined) ?? [{ route: model }] : [];
 	const modelCandidates = modelRouteCandidates.map((candidate) => candidate.route);
 	if (!externalRunner) {
 		try {
