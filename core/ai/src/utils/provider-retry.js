@@ -1,4 +1,5 @@
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
+export const MAX_RETRY_TIMER_MS = 2_147_483_647;
 function isProviderError(error) {
     if (!(error instanceof Error) || !("status" in error) || !("headers" in error))
         return false;
@@ -20,37 +21,54 @@ function isRetryableProviderError(error) {
         (typeof error.status === "number" && error.status >= 500));
 }
 function validateServerRetryDelayMs(delayMs, maxRetryDelayMs, providerErrorMessage) {
-    const maxDelayMs = maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
-    if (maxDelayMs > 0 && delayMs > maxDelayMs) {
+    const configured = maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
+    const maxDelayMs = configured > 0 ? Math.min(configured, MAX_RETRY_TIMER_MS) : MAX_RETRY_TIMER_MS;
+    if (delayMs > maxDelayMs) {
         throw new Error(`Server requested ${Math.ceil(delayMs / 1000)}s retry delay (max: ${Math.ceil(maxDelayMs / 1000)}s). ${providerErrorMessage}`);
     }
     return delayMs;
 }
+function retryHeader(headers, name) {
+    if (typeof headers?.get === "function") return headers.get(name);
+    if (!headers || typeof headers !== "object") return undefined;
+    const key = Object.keys(headers).find(key => key.toLowerCase() === name);
+    return key === undefined ? undefined : headers[key];
+}
+function numericRetryDelay(value, scale) {
+    if (typeof value !== "string" || !/^\d+(?:\.\d+)?$/.test(value.trim())) return undefined;
+    return Math.min(Math.ceil(Number(value) * scale), Number.MAX_SAFE_INTEGER);
+}
+export function readRetryAfterMs(headers, now = Date.now()) {
+    const exact = numericRetryDelay(retryHeader(headers, "retry-after-ms"), 1);
+    if (exact !== undefined) return exact;
+    const hint = retryHeader(headers, "retry-after");
+    const seconds = numericRetryDelay(hint, 1000);
+    if (seconds !== undefined) return seconds;
+    if (typeof hint !== "string" || !/^[a-z]{3},\s/i.test(hint)) return undefined;
+    const date = Date.parse(hint);
+    return Number.isFinite(date) && date >= now ? date - now : undefined;
+}
+/** Keep only typed transport retry advice. SDK response bodies can contain
+ * arbitrary prose and cannot override these headers. */
+export function captureProviderRetryAdvice(message, error) {
+    const response = error?.$response;
+    const headers = error?.headers ?? response?.headers;
+    const status = [error?.status, error?.statusCode, error?.$metadata?.httpStatusCode, response?.statusCode]
+        .find(value => Number.isInteger(value) && value >= 100 && value <= 599);
+    const retryAfterMs = readRetryAfterMs(headers);
+    const allowed = retryHeader(headers, "x-should-retry");
+    if (status !== undefined || retryAfterMs !== undefined || allowed === "true" || allowed === "false") {
+        message.providerRetry = {
+            ...message.providerRetry,
+            ...(status === undefined ? {} : { status }),
+            ...(retryAfterMs === undefined ? {} : { retryAfterMs }),
+            ...(allowed === "true" || allowed === "false" ? { retryAllowed: allowed === "true" } : {}),
+        };
+    }
+}
 function getRetryDelayMs(error, retryIndex, maxRetryDelayMs) {
-    const retryAfterMs = error.headers?.get("retry-after-ms");
-    if (retryAfterMs) {
-        const value = Number.parseFloat(retryAfterMs);
-        // Non-finite and negative header values are malformed; fall through to
-        // retry-after / exponential backoff instead of sleeping on NaN or -5ms.
-        if (Number.isFinite(value) && value >= 0)
-            return validateServerRetryDelayMs(value, maxRetryDelayMs, error.message);
-    }
-    const retryAfter = error.headers?.get("retry-after");
-    if (retryAfter) {
-        const seconds = Number.parseFloat(retryAfter);
-        let delayMs;
-        if (Number.isFinite(seconds) && seconds >= 0) {
-            delayMs = seconds * 1000;
-        }
-        else {
-            // HTTP-date form. An unparseable or already-past date must not
-            // become a NaN/zero sleep; only a future date is authoritative.
-            const parsed = Date.parse(retryAfter);
-            delayMs = Number.isFinite(parsed) ? parsed - Date.now() : Number.NaN;
-        }
-        if (Number.isFinite(delayMs) && delayMs >= 0)
-            return validateServerRetryDelayMs(delayMs, maxRetryDelayMs, error.message);
-    }
+    const hint = readRetryAfterMs(error.headers);
+    if (hint !== undefined) return validateServerRetryDelayMs(hint, maxRetryDelayMs, error.message);
     const exponentialDelay = Math.min(0.5 * 2 ** retryIndex, 8) * 1000;
     return exponentialDelay * (1 - Math.random() * 0.25);
 }
@@ -85,7 +103,7 @@ function abortableSleep(ms, signal) {
  * disable the limit.
  */
 export async function retryProviderRequest(request, options = {}) {
-    const maxRetries = options.maxRetries ?? 0;
+    const maxRetries = options.retryOwner === "session" ? 0 : options.maxRetries ?? 0;
     let retriesRemaining = maxRetries;
     for (;;) {
         if (options.signal?.aborted)

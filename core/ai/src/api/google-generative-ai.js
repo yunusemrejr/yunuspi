@@ -6,6 +6,7 @@ import { providerHeadersToRecord } from "../utils/headers.js";
 import { getPiUserAgent } from "../utils/pi-user-agent.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { convertMessages, convertTools, isThinkingPart, mapStopReason, resolveGoogleFunctionCallingMode, resolveGoogleThinkingLevel, retainThoughtSignature, retryGoogleRequest, supportsGoogleStrictToolSampling, } from "./google-shared.js";
+import { captureProviderRetryAdvice } from "../utils/provider-retry.js";
 import { buildBaseOptions } from "./simple-options.js";
 // Counter for generating unique tool call IDs
 let toolCallCounter = 0;
@@ -223,6 +224,7 @@ export const stream = (model, context, options) => {
                 }
             }
             output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+            captureProviderRetryAdvice(output, error);
             output.errorMessage = formatProviderError(normalizeProviderError(error));
             stream.push({ type: "error", reason: output.stopReason, error: output });
             stream.end();

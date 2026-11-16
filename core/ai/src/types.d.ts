@@ -95,6 +95,8 @@ export interface ProviderRequestOptions<TModel = Model<Api>> {
      * For example, OpenAI and Anthropic SDK clients default to 2.
      */
     maxRetries?: number;
+    /** The session admits, accounts for, and retries each submitted request itself. */
+    retryOwner?: "session";
     /**
      * Maximum delay in milliseconds to wait for a retry when the server requests a long wait.
      * If the server's requested delay exceeds this value, the request fails immediately
@@ -264,6 +266,17 @@ export interface ToolCall {
     namespace?: string;
 }
 export interface Usage {
+    /** The local runtime proved that no inference request could dispatch. */
+    dispatchOutcome?: "not-dispatched";
+    /** Cost evidence for a result that combines multiple provider responses. */
+    costDetails?: {
+        reported: number;
+        estimated: number;
+        seen: boolean;
+        unknown: boolean;
+        subscription: boolean;
+        estimatedUsage?: boolean;
+    };
     input: number;
     output: number;
     cacheRead: number;
@@ -320,6 +333,8 @@ export interface AssistantMessage {
     stopReason: StopReason;
     deferred?: DeferredHandle;
     errorMessage?: string;
+    /** Sanitized retry advice supplied by the transport on a failed request. */
+    providerRetry?: ProviderRetryAdvice;
     rawStopReason?: string;
     /**
      * Provider indication of whether the model explicitly ended its turn.
@@ -327,6 +342,11 @@ export interface AssistantMessage {
      */
     endTurn?: boolean;
     timestamp: number;
+}
+export interface ProviderRetryAdvice {
+    status?: number;
+    retryAfterMs?: number;
+    retryAllowed?: boolean;
 }
 export interface ToolResultMessage<TDetails = any> {
     role: "toolResult";

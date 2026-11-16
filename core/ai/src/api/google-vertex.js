@@ -7,6 +7,7 @@ import { getPiUserAgent } from "../utils/pi-user-agent.js";
 import { getProviderEnvValue } from "../utils/provider-env.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { convertMessages, convertTools, isThinkingPart, mapStopReason, resolveGoogleFunctionCallingMode, resolveGoogleThinkingLevel, retainThoughtSignature, retryGoogleRequest, supportsGoogleStrictToolSampling, } from "./google-shared.js";
+import { captureProviderRetryAdvice } from "../utils/provider-retry.js";
 import { buildBaseOptions } from "./simple-options.js";
 const API_VERSION = "v1";
 const GCP_VERTEX_CREDENTIALS_MARKER = "gcp-vertex-credentials";
@@ -232,6 +233,7 @@ export const stream = (model, context, options) => {
                 }
             }
             output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+            captureProviderRetryAdvice(output, error);
             output.errorMessage = formatProviderError(normalizeProviderError(error));
             stream.push({ type: "error", reason: output.stopReason, error: output });
             stream.end();

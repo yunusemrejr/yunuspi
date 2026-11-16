@@ -7,7 +7,7 @@ import { headersToRecord } from "../utils/headers.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { getPiUserAgent } from "../utils/pi-user-agent.js";
 import { getProviderEnvValue } from "../utils/provider-env.js";
-import { retryProviderRequest } from "../utils/provider-retry.js";
+import { captureProviderRetryAdvice, retryProviderRequest } from "../utils/provider-retry.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { appendGrammarToolInputJsonDelta, createGrammarToolInputProperties, getGrammarToolInput, getJsonSchemaToolParameters, resolveGrammarConstrainedSampling, resolveJsonSchemaStrictSampling, } from "./constrained-sampling.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
@@ -212,6 +212,7 @@ export const stream = (model, context, options) => {
             };
             const { data: openaiStream, response } = await retryProviderRequest(() => client.chat.completions.create(params, requestOptions).withResponse(), {
                 maxRetries: options?.maxRetries,
+                retryOwner: options?.retryOwner,
                 maxRetryDelayMs: options?.maxRetryDelayMs,
                 signal: options?.signal,
             });
@@ -515,6 +516,7 @@ export const stream = (model, context, options) => {
                 delete block.streamIndex;
             }
             output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+            captureProviderRetryAdvice(output, error);
             output.errorMessage = formatProviderError(normalizeProviderError(error));
             // Some providers via OpenRouter give additional information in this field.
             // normalizeProviderError already stringifies the parsed body (error.error)

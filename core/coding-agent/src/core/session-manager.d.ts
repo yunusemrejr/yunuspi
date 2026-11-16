@@ -194,6 +194,7 @@ export declare class SessionManager {
     private flushed;
     private persistenceError;
     private fileEntries;
+    private entriesRevision;
     private byId;
     private labelsById;
     private labelTimestampsById;
@@ -204,6 +205,7 @@ export declare class SessionManager {
     private _setSessionFile;
     newSession(options?: NewSessionOptions): string | undefined;
     private _loadEntries;
+    private _replaceEntries;
     private _buildIndex;
     private _rewriteFile;
     private _rewriteFileUnlocked;
@@ -289,6 +291,8 @@ export declare class SessionManager {
      * change the leaf pointer. Entries cannot be modified or deleted.
      */
     getEntries(): SessionEntry[];
+    /** Changes after an accepted append or ledger replacement, not a leaf move. */
+    getEntriesRevision(): number;
     /**
      * Get the session as a tree structure. Returns a shallow defensive copy of all entries.
      * A well-formed session has exactly one root (first entry with parentId === null).

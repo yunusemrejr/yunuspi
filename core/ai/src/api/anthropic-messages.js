@@ -7,7 +7,7 @@ import { headersToRecord } from "../utils/headers.js";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.js";
 import { getPiUserAgent } from "../utils/pi-user-agent.js";
 import { getProviderEnvValue } from "../utils/provider-env.js";
-import { retryProviderRequest } from "../utils/provider-retry.js";
+import { captureProviderRetryAdvice, retryProviderRequest } from "../utils/provider-retry.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { getJsonSchemaToolParameters, resolveJsonSchemaStrictSampling } from "./constrained-sampling.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
@@ -387,6 +387,7 @@ export const stream = (model, context, options) => {
             };
             const response = await retryProviderRequest(() => client.beta.messages.create(params, requestOptions).asResponse(), {
                 maxRetries: options?.maxRetries,
+                retryOwner: options?.retryOwner,
                 maxRetryDelayMs: options?.maxRetryDelayMs,
                 signal: options?.signal,
             });
@@ -627,6 +628,7 @@ export const stream = (model, context, options) => {
                 delete block.partialJson;
             }
             output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+            captureProviderRetryAdvice(output, error);
             output.errorMessage = error instanceof Error ? error.message : JSON.stringify(error);
             stream.push({ type: "error", reason: output.stopReason, error: output });
             stream.end();

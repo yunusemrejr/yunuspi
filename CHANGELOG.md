@@ -1,3 +1,9 @@
+## 0.56.5 — Provider retry ownership and faster terminal redraws
+
+- Supported session transports submit once per admission. Main turns and summaries apply the session retry policy, including provider retry advice when the transport exposes it.
+- Inference proven to have stopped locally settles at zero. Failed and discarded summary attempts retain their charges when the operation settles, including split compactions and branch summaries.
+- The terminal footer reuses measurements between ledger, route, and telemetry changes. Costs and status update when new receipts or live events arrive.
+
 ## 0.56.4 — Background billing and safer edits
 
 - Managed background agents contribute their recorded usage to the parent session when they finish, even with notifications disabled. Resume can recover missing terminal receipts from the owning task.

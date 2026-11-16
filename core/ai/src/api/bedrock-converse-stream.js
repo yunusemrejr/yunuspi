@@ -5,6 +5,7 @@ import { HttpsProxyAgent } from "https-proxy-agent";
 import { calculateCost } from "../models.js";
 import { appendAssistantMessageDiagnostic } from "../utils/diagnostics.js";
 import { normalizeProviderError } from "../utils/error-body.js";
+import { captureProviderRetryAdvice } from "../utils/provider-retry.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { providerHeadersToRecord } from "../utils/headers.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
@@ -46,6 +47,7 @@ export const stream = (model, context, options = {}) => {
         const optionsProfile = options.profile || options.env?.AWS_PROFILE;
         const config = {
             profile: optionsProfile || getProviderEnvValue("AWS_PROFILE", options.env),
+            ...(options.retryOwner === "session" ? { maxAttempts: 1 } : {}),
         };
         const configuredRegion = getConfiguredBedrockRegion(options);
         const hasAmbientConfiguredProfile = Boolean(getProviderEnvValue("AWS_PROFILE"));
@@ -152,6 +154,7 @@ export const stream = (model, context, options = {}) => {
             if (nextCommandInput !== undefined) {
                 commandInput = nextCommandInput;
             }
+            options.signal?.throwIfAborted();
             const command = new ConverseStreamCommand(commandInput);
             const response = await client.send(command, { abortSignal: options.signal });
             responseRequestId = normalizeDiagnosticValue(response.$metadata.requestId);
@@ -225,6 +228,7 @@ export const stream = (model, context, options = {}) => {
                 finalizeStreamingBlock(block);
             }
             output.stopReason = options.signal?.aborted ? "aborted" : "error";
+            captureProviderRetryAdvice(output, error);
             output.errorMessage = formatBedrockError(error);
             if (output.stopReason === "error") {
                 appendBedrockFailureDiagnostic(output, error, responseRequestId);

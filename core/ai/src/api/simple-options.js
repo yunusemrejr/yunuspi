@@ -45,6 +45,7 @@ export function buildBaseOptions(model, context, options, apiKey) {
         timeoutMs: options?.timeoutMs,
         websocketConnectTimeoutMs: options?.websocketConnectTimeoutMs,
         maxRetries: options?.maxRetries,
+        retryOwner: options?.retryOwner,
         maxRetryDelayMs: options?.maxRetryDelayMs,
         metadata: options?.metadata,
         env: options?.env,

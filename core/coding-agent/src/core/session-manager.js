@@ -599,6 +599,7 @@ export class SessionManager {
     flushed = false;
     persistenceError;
     fileEntries = [];
+    entriesRevision = 0;
     byId = new Map();
     labelsById = new Map();
     labelTimestampsById = new Map();
@@ -669,7 +670,7 @@ export class SessionManager {
             cwd: this.cwd,
             parentSession: options?.parentSession,
         };
-        this.fileEntries = [header];
+        this._replaceEntries([header]);
         this.byId.clear();
         this.labelsById.clear();
         this.labelTimestampsById.clear();
@@ -685,7 +686,7 @@ export class SessionManager {
         this.persistenceError = undefined;
         const header = entries.find((e) => e.type === "session");
         if (header) {
-            this.fileEntries = entries;
+            this._replaceEntries(entries);
             this.sessionId = header.id;
             if (migrateToCurrentVersion(this.fileEntries)) {
                 if (writeLocked) this._rewriteFileUnlocked();
@@ -694,9 +695,13 @@ export class SessionManager {
         }
         else {
             this.newSession(options);
-            this.fileEntries = this.fileEntries.concat(entries);
+            this._replaceEntries(this.fileEntries.concat(entries));
         }
         this._buildIndex();
+    }
+    _replaceEntries(entries) {
+        this.fileEntries = entries;
+        this.entriesRevision++;
     }
     _buildIndex() {
         this.byId.clear();
@@ -829,6 +834,7 @@ export class SessionManager {
             this.leafId = previousLeaf;
             throw error;
         }
+        this.entriesRevision++;
     }
     /** Append a message as child of current leaf, then advance leaf. Returns entry id.
      * Does not allow writing CompactionSummaryMessage and BranchSummaryMessage directly.
@@ -919,9 +925,8 @@ export class SessionManager {
     getSessionName() {
         // Walk entries in reverse to find the latest session_info entry.
         // Empty names explicitly clear the session title.
-        const entries = this.getEntries();
-        for (let i = entries.length - 1; i >= 0; i--) {
-            const entry = entries[i];
+        for (let i = this.fileEntries.length - 1; i >= 0; i--) {
+            const entry = this.fileEntries[i];
             if (entry.type === "session_info") {
                 return entry.name?.trim() || undefined;
             }
@@ -1049,6 +1054,10 @@ export class SessionManager {
      */
     getEntries() {
         return this.fileEntries.filter((e) => e.type !== "session");
+    }
+    /** Changes after an accepted append or ledger replacement, not a leaf move. */
+    getEntriesRevision() {
+        return this.entriesRevision;
     }
     /**
      * Get the session as a tree structure. Returns a shallow defensive copy of all entries.
@@ -1214,7 +1223,7 @@ export class SessionManager {
                 labelEntries.push(labelEntry);
                 parentId = labelEntry.id;
             }
-            this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries];
+            this._replaceEntries([header, ...pathWithoutLabels, ...labelEntries]);
             this.sessionId = newSessionId;
             this.sessionFile = newSessionFile;
             this._buildIndex();
@@ -1248,7 +1257,7 @@ export class SessionManager {
             labelEntries.push(labelEntry);
             parentId = labelEntry.id;
         }
-        this.fileEntries = [header, ...pathWithoutLabels, ...labelEntries];
+        this._replaceEntries([header, ...pathWithoutLabels, ...labelEntries]);
         this.sessionId = newSessionId;
         this._buildIndex();
         return undefined;

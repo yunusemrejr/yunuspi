@@ -10,6 +10,8 @@ export function readCostEvidence(usage, provider) {
     return {reported:details.reported, estimated:details.estimated, unknown:details.unknown, subscription:details.subscription, seen:details.seen, estimatedUsage:details.estimatedUsage === true || details.estimated > 0};
   }
   const cost = usage?.cost;
+  if (usage?.dispatchOutcome === 'not-dispatched')
+    return {reported:0, estimated:0, unknown:false, subscription:false, seen:true, estimatedUsage:false};
   if (provider === 'openai-codex' || isFlatPlanProvider(provider ?? cost?.provider) || cost?.billing === 'subscription')
     return {reported:0, estimated:0, unknown:false, subscription:true, seen:false, estimatedUsage:false};
   const n = typeof cost === 'number' ? cost : cost?.total;

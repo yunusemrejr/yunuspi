@@ -8,6 +8,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
 import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.js";
 import { getPiUserAgent } from "../utils/pi-user-agent.js";
+import { captureProviderRetryAdvice, MAX_RETRY_TIMER_MS, readRetryAfterMs } from "../utils/provider-retry.js";
 import { uuidv7 } from "../utils/uuid.js";
 import { createGrammarToolInputProperties } from "./constrained-sampling.js";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.js";
@@ -60,33 +61,12 @@ function isRetryableError(status, errorText) {
     }
     return /rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused/i.test(errorText);
 }
-function getRetryAfterDelayMs(headers) {
-    const retryAfterMs = headers.get("retry-after-ms");
-    if (retryAfterMs !== null) {
-        const millis = Number(retryAfterMs);
-        if (Number.isFinite(millis)) {
-            return Math.max(0, millis);
-        }
-    }
-    const retryAfter = headers.get("retry-after");
-    if (!retryAfter) {
-        return undefined;
-    }
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds)) {
-        return Math.max(0, seconds * 1000);
-    }
-    const date = Date.parse(retryAfter);
-    if (!Number.isNaN(date)) {
-        return Math.max(0, date - Date.now());
-    }
-    return undefined;
-}
 class RetryDelayExceededError extends Error {
 }
 function validateRetryDelayMs(delayMs, options) {
-    const maxRetryDelayMs = options?.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
-    if (maxRetryDelayMs > 0 && delayMs > maxRetryDelayMs) {
+    const configured = options?.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS;
+    const maxRetryDelayMs = configured > 0 ? Math.min(configured, MAX_RETRY_TIMER_MS) : MAX_RETRY_TIMER_MS;
+    if (delayMs > maxRetryDelayMs) {
         throw new RetryDelayExceededError(`Server requested ${Math.ceil(delayMs / 1000)}s retry delay (max: ${Math.ceil(maxRetryDelayMs / 1000)}s)`);
     }
     return delayMs;
@@ -180,6 +160,7 @@ export const stream = (model, context, options) => {
             const httpTimeoutMs = normalizeTimeoutMs(options?.timeoutMs);
             const websocketConnectTimeoutMs = normalizeTimeoutMs(options?.websocketConnectTimeoutMs);
             const transport = options?.transport || "auto";
+            const sessionOwnsRetries = options?.retryOwner === "session";
             let startEmitted = false;
             const websocketDisabledForSession = transport !== "sse" && isWebSocketSseFallbackActive(cacheSessionId);
             if (websocketDisabledForSession) {
@@ -191,6 +172,7 @@ export const stream = (model, context, options) => {
                 let retriedMissingWebSocketContinuation = false;
                 while (true) {
                     websocketStarted = false;
+                    let websocketSubmitted = false;
                     try {
                         await processWebSocketStream(resolveCodexWebSocketUrl(model.baseUrl), body, websocketHeaders, output, stream, model, () => {
                             websocketStarted = true;
@@ -198,7 +180,8 @@ export const stream = (model, context, options) => {
                                 startEmitted = true;
                                 stream.push({ type: "start", partial: output });
                             }
-                        }, httpTimeoutMs, websocketConnectTimeoutMs, cacheSessionId, accountId, grammarToolInputProperties, options);
+                        }, httpTimeoutMs, websocketConnectTimeoutMs, cacheSessionId, accountId, grammarToolInputProperties, options,
+                        () => { websocketSubmitted = true; });
                         if (options?.signal?.aborted) {
                             throw new Error("Request was aborted");
                         }
@@ -215,11 +198,18 @@ export const stream = (model, context, options) => {
                         const aborted = options?.signal?.aborted;
                         const connectionLimitBeforeStart = !websocketStarted && isWebSocketConnectionLimitReachedError(error);
                         const previousResponseNotFound = isPreviousResponseNotFoundError(error);
-                        if (!aborted && previousResponseNotFound && !retriedMissingWebSocketContinuation) {
+                        const canResend = !sessionOwnsRetries || !websocketSubmitted;
+                        if (!aborted && !canResend && (previousResponseNotFound || connectionLimitBeforeStart)) {
+                            // The connection was cleared by the failed request.
+                            // The next admitted request can rebuild its context.
+                            output.providerRetry = { retryAllowed: true };
+                            throw error;
+                        }
+                        if (!aborted && canResend && previousResponseNotFound && !retriedMissingWebSocketContinuation) {
                             retriedMissingWebSocketContinuation = true;
                             continue;
                         }
-                        if (!aborted && connectionLimitBeforeStart && !retriedWebSocketConnectionLimit) {
+                        if (!aborted && canResend && connectionLimitBeforeStart && !retriedWebSocketConnectionLimit) {
                             retriedWebSocketConnectionLimit = true;
                             continue;
                         }
@@ -228,7 +218,7 @@ export const stream = (model, context, options) => {
                         }
                         appendAssistantMessageDiagnostic(output, createAssistantMessageDiagnostic("provider_transport_failure", error, {
                             configuredTransport: transport,
-                            fallbackTransport: websocketStarted ? undefined : "sse",
+                            fallbackTransport: !websocketStarted && canResend ? "sse" : undefined,
                             eventsEmitted: websocketStarted,
                             phase: websocketStarted ? "after_message_stream_start" : "before_message_stream_start",
                             requestBytes: new TextEncoder().encode(bodyJson).byteLength,
@@ -238,6 +228,7 @@ export const stream = (model, context, options) => {
                             throw error;
                         }
                         recordWebSocketSseFallback(cacheSessionId);
+                        if (!canResend) throw error;
                         break;
                     }
                 }
@@ -253,7 +244,7 @@ export const stream = (model, context, options) => {
             // Fetch with retry logic for rate limits and transient errors
             let response;
             let lastError;
-            const maxRetries = options?.maxRetries ?? DEFAULT_MAX_RETRIES;
+            const maxRetries = sessionOwnsRetries ? 0 : options?.maxRetries ?? DEFAULT_MAX_RETRIES;
             for (let attempt = 0; attempt <= maxRetries; attempt++) {
                 if (options?.signal?.aborted) {
                     throw new Error("Request was aborted");
@@ -283,8 +274,10 @@ export const stream = (model, context, options) => {
                         break;
                     }
                     const errorText = await response.text();
-                    if (attempt < maxRetries && isRetryableError(response.status, errorText)) {
-                        const retryAfterDelayMs = getRetryAfterDelayMs(response.headers);
+                    const retryAllowed = response.headers.get("x-should-retry");
+                    if (attempt < maxRetries && retryAllowed !== "false" && !isTerminalRateLimitError(errorText)
+                        && (retryAllowed === "true" || isRetryableError(response.status, errorText))) {
+                        const retryAfterDelayMs = readRetryAfterMs(response.headers);
                         const delayMs = retryAfterDelayMs === undefined
                             ? BASE_DELAY_MS * 2 ** attempt
                             : validateRetryDelayMs(retryAfterDelayMs, options);
@@ -297,7 +290,9 @@ export const stream = (model, context, options) => {
                         statusText: response.statusText,
                     });
                     const info = await parseErrorResponse(fakeResponse);
-                    throw new Error(info.friendlyMessage || info.message);
+                    throw Object.assign(new Error(info.friendlyMessage || info.message), {
+                        status: response.status, headers: response.headers,
+                    });
                 }
                 catch (error) {
                     if (error instanceof Error) {
@@ -308,6 +303,7 @@ export const stream = (model, context, options) => {
                     lastError = error instanceof Error ? error : new Error(String(error));
                     // Network errors are retryable
                     if (attempt < maxRetries &&
+                        lastError.status === undefined &&
                         !(lastError instanceof RetryDelayExceededError) &&
                         !lastError.message.includes("usage limit")) {
                         const delayMs = BASE_DELAY_MS * 2 ** attempt;
@@ -342,6 +338,7 @@ export const stream = (model, context, options) => {
                 delete block.customInput;
             }
             output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+            captureProviderRetryAdvice(output, error);
             output.errorMessage = formatProviderError(normalizeProviderError(error));
             stream.push({ type: "error", reason: output.stopReason, error: output });
             stream.end();
@@ -1150,7 +1147,7 @@ async function* startWebSocketOutputOnFirstEvent(events, onStart) {
         yield event;
     }
 }
-async function processWebSocketStream(url, body, headers, output, stream, model, onStart, idleTimeoutMs, websocketConnectTimeoutMs, cacheSessionId, accountId, grammarToolInputProperties, options) {
+async function processWebSocketStream(url, body, headers, output, stream, model, onStart, idleTimeoutMs, websocketConnectTimeoutMs, cacheSessionId, accountId, grammarToolInputProperties, options, onSubmit) {
     const { socket, entry, reused, release } = await acquireWebSocket(url, headers, cacheSessionId, accountId, options?.signal, websocketConnectTimeoutMs, options?.env);
     let keepConnection = true;
     const useCachedContext = options?.transport === "websocket-cached" || options?.transport === "auto";
@@ -1182,7 +1179,11 @@ async function processWebSocketStream(url, body, headers, output, stream, model,
         }
     }
     try {
-        socket.send(JSON.stringify({ type: "response.create", ...requestBody }));
+        options?.signal?.throwIfAborted();
+        const frame = JSON.stringify({ type: "response.create", ...requestBody });
+        // A socket error after sending begins cannot prove nonexecution.
+        onSubmit();
+        socket.send(frame);
         await processResponsesStream(startWebSocketOutputOnFirstEvent(mapCodexEvents(parseWebSocket(socket, options?.signal, idleTimeoutMs), output), onStart), output, stream, model, {
             serviceTier: options?.serviceTier,
             grammarToolInputProperties,

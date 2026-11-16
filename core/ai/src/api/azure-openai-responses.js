@@ -5,7 +5,7 @@ import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { headersToRecord } from "../utils/headers.js";
 import { getPiUserAgent } from "../utils/pi-user-agent.js";
 import { getProviderEnvValue } from "../utils/provider-env.js";
-import { retryProviderRequest } from "../utils/provider-retry.js";
+import { captureProviderRetryAdvice, retryProviderRequest } from "../utils/provider-retry.js";
 import { createGrammarToolInputProperties } from "./constrained-sampling.js";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.js";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
@@ -84,6 +84,7 @@ export const stream = (model, context, options) => {
             };
             const { data: openaiStream, response } = await retryProviderRequest(() => client.responses.create(params, requestOptions).withResponse(), {
                 maxRetries: options?.maxRetries,
+                retryOwner: options?.retryOwner,
                 maxRetryDelayMs: options?.maxRetryDelayMs,
                 signal: options?.signal,
             });
@@ -110,6 +111,7 @@ export const stream = (model, context, options) => {
                 delete block.customInput;
             }
             output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+            captureProviderRetryAdvice(output, error);
             output.errorMessage = formatAzureOpenAIError(error);
             stream.push({ type: "error", reason: output.stopReason, error: output });
             stream.end();

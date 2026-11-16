@@ -1,3 +1,5 @@
+import { MAX_RETRY_TIMER_MS } from "./provider-retry.js";
+
 function buildProviderErrorPattern(patterns) {
     return new RegExp(patterns.join("|"), "i");
 }
@@ -109,6 +111,20 @@ const RETRYABLE_PROVIDER_ERROR_PATTERN = buildProviderErrorPattern([
 // They fail fast so the agent can modify the request or route elsewhere;
 // transient provider errors keep the normal retry budget.
 const DETERMINISTIC_REJECTION_PATTERN = /data_inspection_failed|inappropriate content|content inspection|content filter|content moderation|invalid[ _-](?:request|parameters?|arguments?)|unsupported[ _-]parameter|unrecognized request argument/i;
+const PROVIDER_COOLDOWN_PATTERN = /\b429\b|\b503\b|rate.?limit|too many requests|service.?unavailable|temporar(?:ily)? unavailable|upstream_unavailable|json error injected into sse stream|stream_read_error|finish_reason: error/i;
+
+export function usesProviderCooldown(message) {
+    const status = message.providerRetry?.status;
+    return status === 429 || status === 503 || PROVIDER_COOLDOWN_PATTERN.test(message.errorMessage ?? "");
+}
+
+/** Honor a provider's minimum wait within the configured budget. */
+export function assistantRetryDelay(message, backoffMs, maxRetryDelayMs = 60_000) {
+    const requested = message.providerRetry?.retryAfterMs;
+    if (!Number.isFinite(requested) || requested < 0) return backoffMs;
+    if (requested > MAX_RETRY_TIMER_MS || maxRetryDelayMs > 0 && requested > maxRetryDelayMs) return undefined;
+    return Math.max(backoffMs, Math.ceil(requested));
+}
 class RetrySleepAbortError extends Error {
     constructor() {
         super("Aborted");
@@ -185,7 +201,7 @@ export async function retryAssistantCall(produce, policy, signal, callbacks) {
         // FIXED 25s cooldown and no maxRetries cap while this call has spent
         // <2min in the consecutive loop; beyond that, give up with the final
         // error so callers stop hammering the same shared pool.
-        const rateLimited = /\b429\b|\b503\b|rate.?limit|too many requests|service.?unavailable|temporar(?:ily)? unavailable|upstream_unavailable|json error injected into sse stream|stream_read_error|finish_reason: error/i.test(response.errorMessage || "");
+        const rateLimited = usesProviderCooldown(response);
         // The ordinary retry cap must be evaluated AFTER classification;
         // otherwise the documented two-minute cooldown budget is unreachable.
         if (attempt >= maxAttempts && !rateLimited) {
@@ -203,11 +219,16 @@ export async function retryAssistantCall(produce, policy, signal, callbacks) {
         } else {
             rateLimitLoopStart = 0;
         }
+        const delayMs = assistantRetryDelay(response, rateLimited
+            ? 25000
+            : policy.baseDelayMs * 2 ** attempt, policy.maxRetryDelayMs);
+        if (delayMs === undefined) {
+            if (lastRetry)
+                await callbacks?.onRetryFinished?.(false, lastRetry.attempt, response.errorMessage);
+            return response;
+        }
         attempt++;
         lastRetry = { attempt, errorMessage: response.errorMessage || "Unknown error" };
-        const delayMs = rateLimited
-            ? 25000
-            : policy.baseDelayMs * 2 ** (attempt - 1);
         await callbacks?.onRetryScheduled?.(attempt, maxAttempts, delayMs, lastRetry.errorMessage);
         // Normalize aborts during retry backoff to the same AssistantMessage shape as
         // provider stream aborts, so callers do not need to care when cancellation happened.
@@ -261,12 +282,15 @@ export function isRetryableAssistantError(message) {
         message.errorMessage ??= "Provider returned no actionable content (empty/thinking-only response)";
         return true;
     }
-    if (message.stopReason !== "error" || !message.errorMessage)
+    if (message.stopReason !== "error" || message.providerRetry?.retryAllowed === false)
         return false;
-    const errorMessage = message.errorMessage;
+    const errorMessage = message.errorMessage ?? "";
     if (NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN.test(errorMessage))
         return false;
     if (DETERMINISTIC_REJECTION_PATTERN.test(errorMessage))
         return false; /* pi-harness local patch v2 */
-    return RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage);
+    const status = message.providerRetry?.status;
+    return message.providerRetry?.retryAllowed === true || status === 408 || status === 409 ||
+        status === 429 || (Number.isInteger(status) && status >= 500 && status <= 599) ||
+        RETRYABLE_PROVIDER_ERROR_PATTERN.test(errorMessage);
 }

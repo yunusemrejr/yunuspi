@@ -1,8 +1,12 @@
-interface ProviderRetryOptions {
+import type { AssistantMessage, ProviderRequestOptions } from "../types.ts";
+export declare const MAX_RETRY_TIMER_MS = 2147483647;
+interface ProviderRetryOptions extends Pick<ProviderRequestOptions, "retryOwner"> {
     maxRetries?: number;
     maxRetryDelayMs?: number;
     signal?: AbortSignal;
 }
+export declare function readRetryAfterMs(headers?: Headers | Record<string, unknown>, now?: number): number | undefined;
+export declare function captureProviderRetryAdvice(message: Pick<AssistantMessage, "providerRetry">, error: unknown): void;
 /**
  * Reproduce the retry behavior used by the OpenAI and Anthropic SDKs while making
  * their backoff sleep interruptible. Their built-in retry timers ignore the

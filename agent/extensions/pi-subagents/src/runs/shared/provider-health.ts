@@ -593,6 +593,8 @@ export interface RecordFailureInput {
 	model?: string;
 	/** Raw provider/turn error text; classified internally. */
 	errorMessage?: string;
+	/** Transport response metadata, when exposed by the adapter. */
+	providerRetry?: { status?: number; retryAfterMs?: number };
 	/** Where the failure was observed (observability), e.g. "message_end". */
 	source?: string;
 	/** Exact serving endpoint, only when the outgoing request was pinned. */
@@ -618,7 +620,11 @@ export interface RecordedFailure {
  */
 export function recordFailure(input: RecordFailureInput): RecordedFailure | undefined {
 	const now = input.now ?? Date.now();
-	const original = classifyFailure(input.errorMessage);
+	const status = input.providerRetry?.status;
+	const classified = classifyFailure(input.errorMessage) ?? (Number.isInteger(status) ? classifyFailure(String(status)) : undefined);
+	const hint = input.providerRetry?.retryAfterMs;
+	const original = classified && typeof hint === "number" && Number.isFinite(hint) && hint >= 0
+		? { ...classified, retryAfterMs: hint } : classified;
  if (!original) return undefined;
  const upstream = input.provider === "openrouter" ? openRouterUpstream(input.errorMessage) : undefined;
  const endpoint = input.provider === "openrouter" && original.kind !== "deterministic" && original.kind !== "provider-auth"
@@ -668,12 +674,14 @@ export function recordFailure(input: RecordFailureInput): RecordedFailure | unde
 		if (classification.scope === "provider") {
             for (const model of Object.values(entry.models)) model.economyUsage = undefined;
 			entry.failure = record;
-			entry.cooldownUntil = cooldownUntil;
-			entry.cooldownSource = `${record.source}:${classification.kind}`;
+			if (cooldownUntil >= entry.cooldownUntil) {
+				entry.cooldownUntil = cooldownUntil;
+				entry.cooldownSource = `${record.source}:${classification.kind}`;
+			}
 		} else if (routeState) {
             routeState.economyUsage = undefined;
 			routeState.failure = record;
-			routeState.cooldownUntil = cooldownUntil;
+			routeState.cooldownUntil = Math.max(cooldownUntil, routeState.cooldownUntil);
 			routeState.updatedAt = now;
 		}
 		if (classification.retryAfterMs !== null) {
@@ -684,7 +692,7 @@ export function recordFailure(input: RecordFailureInput): RecordedFailure | unde
 		return {
 			kind: classification.kind,
 			scope: classification.scope,
-			cooldownUntil,
+			cooldownUntil: classification.scope === "provider" ? entry.cooldownUntil : routeState?.cooldownUntil ?? cooldownUntil,
 			consecutive,
 		};
 	});

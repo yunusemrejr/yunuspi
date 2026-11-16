@@ -121,6 +121,25 @@ export function piWithStreamIdle(model, options, start) {
     const controller = new AbortController();
     const callerSignal = options?.signal;
     let timer, pendingStop, iterator, finished = false, lastMessage;
+    let started = false, payloadEntered = false, payloadReleased = false;
+    const recordLocalFailure = (message) => {
+        // Once any payload passed preflight, a later denial or cancellation
+        // cannot tell us whether that earlier attempt incurred a charge.
+        const { usage } = message;
+        if ((started && (!payloadEntered || payloadReleased || lastMessage)) || !usage || message.responseId ||
+            usage.totalTokens || usage.input || usage.output || usage.cacheRead || usage.cacheWrite || usage.cost?.total || usage.cost?.source)
+            return message;
+        return { ...message, usage: { ...usage, dispatchOutcome: "not-dispatched" } };
+    };
+    const onPayload = async (...args) => {
+        payloadEntered = true;
+        controller.signal.throwIfAborted();
+        const result = await options.onPayload(...args);
+        controller.signal.throwIfAborted();
+        if (finished) throw new DOMException("Request already settled", "AbortError");
+        payloadReleased = true;
+        return result;
+    };
     const errorMessage = (error, reason) => {
         let message;
         try { if (lastMessage) message = structuredClone(lastMessage); } catch {}
@@ -149,7 +168,7 @@ export function piWithStreamIdle(model, options, start) {
         finished = true;
         cleanup();
         const reason = callerSignal?.aborted ? "aborted" : "error";
-        const message = errorMessage(error, reason);
+        const message = recordLocalFailure(errorMessage(error, reason));
         outer.push({ type: "error", reason, error: message });
         outer.end(message);
         // Settlement precedes transport cancellation; never wait for driver cleanup.
@@ -202,7 +221,10 @@ export function piWithStreamIdle(model, options, start) {
     void (async () => {
         try {
             const source = await wait(Promise.resolve().then(() => {
-                if (!finished) return start({ ...options, signal: controller.signal });
+                if (!finished) {
+                    started = true;
+                    return start({ ...options, signal: controller.signal, ...(options?.onPayload ? { onPayload } : {}) });
+                }
             }).then((source) => {
                 if (finished && source) dispose(source[Symbol.asyncIterator]());
                 return source;
@@ -214,25 +236,27 @@ export function piWithStreamIdle(model, options, start) {
                 if (finished) return;
                 if (next.done) {
                     // A result() that never settles is covered by the same budget.
-                    const result = await wait(typeof source.result === "function" ? source.result() : undefined);
+                    let result = await wait(typeof source.result === "function" ? source.result() : undefined);
                     if (finished) return;
                     if (!result || result.stopReason === "pending") throw new Error("Provider stream ended without a final result");
                     const type = result.stopReason === "error" || result.stopReason === "aborted" ? "error" : "done";
+                    if (type === "error") result = recordLocalFailure(result);
                     finished = true;
                     cleanup();
                     outer.push(type === "error" ? { type, reason: result.stopReason, error: result } : { type, reason: result.stopReason, message: result });
                     outer.end(result);
                     return;
                 }
-                const event = next.value;
-                lastMessage = event.partial ?? event.message ?? event.error ?? lastMessage;
+                let event = next.value;
                 if (event.type === "done" || event.type === "error") {
+                    if (event.type === "error") event = { ...event, error: recordLocalFailure(event.error) };
                     finished = true;
                     cleanup();
                     outer.push(event);
                     outer.end(event.type === "done" ? event.message : event.error);
                     return;
                 }
+                lastMessage = event.partial ?? event.message ?? event.error ?? lastMessage;
                 if (event.type !== "start") { sawContent = true; reset(); }
                 outer.push(event);
             }

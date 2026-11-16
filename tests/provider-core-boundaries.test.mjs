@@ -81,6 +81,36 @@ test('assistant retry reports a failing attempt callback exactly once', async ()
   assert.equal(getEventListeners(controller.signal, 'abort').length, 0);
 });
 
+test('assistant retry honors transport advice within the configured wait budget', async () => {
+  const cases = [
+    [{ status: 503, retryAfterMs: 31_250 }, undefined, 31_250],
+    [{ status: 503, retryAfterMs: 31_250 }, 30_000, undefined],
+    [{ status: 503, retryAfterMs: 80_000 }, 0, 80_000],
+    [{ status: 503, retryAllowed: false }, undefined, undefined],
+    [{ status: 409 }, undefined, 1],
+    [{ retryAllowed: true }, undefined, 1],
+    [{ status: 503, retryAfterMs: 3_000_000_000 }, 0, undefined],
+  ];
+  for (const [providerRetry, maxRetryDelayMs, expected] of cases) {
+    const controller = new AbortController();
+    let scheduled;
+    let calls = 0;
+    const result = await retryAssistantCall(async () => {
+      calls++;
+      return { ...failed(), errorMessage: 'Server response', providerRetry };
+    }, { ...policy, maxRetryDelayMs }, controller.signal, {
+      onRetryScheduled(_attempt, _maxAttempts, ms) { scheduled = ms; controller.abort(); },
+    });
+    assert.equal(calls, 1);
+    assert.equal(scheduled, expected);
+    assert.equal(result.stopReason, expected === undefined ? 'error' : 'aborted');
+  }
+  const message = { ...failed(), errorMessage: 'insufficient_quota', providerRetry: { status: 429, retryAllowed: true } };
+  assert.equal(await retryAssistantCall(async () => message, policy, undefined, {
+    onRetryScheduled() { assert.fail('billing exhaustion must terminate'); },
+  }), message);
+});
+
 test('AI output budgets use valid usage components when provider totals are malformed', () => {
   for (const totalTokens of [NaN, Infinity, -1, 0, '30001', undefined]) {
     const usage = { input: 30000, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens };

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { FooterComponent } from '../core/coding-agent/dist/modes/interactive/components/footer.js';
 import { initTheme } from '../core/coding-agent/dist/modes/interactive/theme/theme.js';
 import { stripTerminalSequences, visibleWidth } from '@yunuspi/tui';
-import { AgentSession } from '@yunuspi/coding-agent';
+import { AgentSession, SessionManager } from '@yunuspi/coding-agent';
 import { registerToolDiscovery } from '../agent/extensions/lib/tool-discovery.ts';
 import { collectSessionCost } from '../agent/extensions/lib/session-cost.ts';
 import { collectSessionMetrics } from '../agent/extensions/lib/session-metrics.ts';
@@ -127,6 +127,58 @@ test('compact cache KPI keeps unknown distinct from a measured miss and scopes r
 });
 
 function plainFooter(lines){return lines.map(stripTerminalSequences).join('\n');}
+
+test('footer reuses unchanged ledger and branch projections and keeps live telemetry current', t => {
+ const manager=SessionManager.inMemory('/workspace/fixture');
+ const response=(model,input,cacheRead,total)=>({role:'assistant',provider:'fixture',model,content:[],timestamp:1,usage:{input,output:1,cacheRead,cacheWrite:0,cacheReadReported:true,cost:{total,source:'provider-reported'}}});
+ const first=manager.appendMessage(response('primary',200,800,.02));
+ const entries=t.mock.method(manager,'getEntries');
+ const branch=t.mock.method(manager,'getBranch');
+ let liveReads=0,liveRevision=0,liveErrors=0;
+ const live=()=>{liveReads++;return {version:2,segment:'live',hooks:{'fixture:tool_call':{calls:liveErrors,errors:liveErrors}},events:{}};};
+ live.revision=()=>liveRevision;
+ const liveKey=Symbol.for('yunus-pi.metrics-view.v1'),oldLive=globalThis[liveKey];
+ t.after(()=>{if(oldLive===undefined)delete globalThis[liveKey];else globalThis[liveKey]=oldLive;});
+ globalThis[liveKey]=live;
+ const state={model:{id:'primary',provider:'fixture',contextWindow:128000},messages:[]};
+ let contextReads=0;
+ const session={state,getContextUsage:()=>{contextReads++;return {percent:state.messages.length,contextWindow:state.model.contextWindow};},modelRuntime:{isUsingSubscription:()=>false},sessionManager:manager};
+ const data={getGitBranch:()=>undefined,getAvailableProviderCount:()=>1,getExtensionStatuses:()=>new Map()};
+ const footer=new FooterComponent(session,data),render=()=>plainFooter(footer.render(120));
+ assert.match(render(),/Cache 80\.0%.*\$0\.020000 total/);
+ const counts=()=>[entries.mock.callCount(),branch.mock.callCount(),contextReads,liveReads];
+ const warm=counts();
+ assert.deepEqual(warm,[1,1,1,1]);
+ for(let i=0;i<8;i++) assert.match(render(),/Cache 80\.0%/);
+ assert.deepEqual(counts(),warm,'unchanged redraws never rewalk derived history or clone live counters');
+ footer.setExpanded(true);
+ assert.match(render(),/R800/);
+ footer.setExpanded(false);
+ liveErrors=2;liveRevision++;
+ assert.match(render(),/Failures 2/);
+ assert.equal(entries.mock.callCount(),warm[0],'live hooks do not fetch another copy of the unchanged ledger');
+ state.messages.push({role:'user',content:'next',timestamp:2});
+ assert.match(render(),/Context 1\.0%/);
+ state.model={...state.model,id:'secondary'};
+ assert.match(render(),/Cache \?/);
+ state.model={...state.model,id:'primary'};
+ manager.appendMessage(response('primary',100,0,.01));
+ assert.match(render(),/Cache 72\.7%.*\$0\.030000 total/);
+ manager.branch(first);
+ assert.match(render(),/Cache 80\.0%.*\$0\.030000 total/,'branch cache changes while total spend retains discarded branches');
+ const beforeFailure=counts();
+ const failing=t.mock.method(manager,'_persist',()=>{throw Error('fixture storage failure');});
+ assert.throws(()=>manager.appendMessage(response('primary',0,100,.10)),/fixture storage failure/);
+ failing.mock.restore();
+ assert.match(render(),/Cache 80\.0%.*\$0\.030000 total/);
+ assert.deepEqual(counts(),beforeFailure,'a rolled-back append neither invalidates nor changes the projection');
+ manager.createBranchedSession(first);
+ assert.match(render(),/Cache 80\.0%.*\$0\.020000 total/,'truncation refreshes the cumulative ledger');
+ manager.newSession();
+ assert.match(render(),/Cache \?.*\$\? total/,'reset clears derived state');
+ manager.appendSessionInfo('Renamed fixture');
+ assert.match(render(),/ · Renamed fixture/);
+});
 
 test('owned next-turn snapshot includes a discovered tool without another user prompt',async()=>{
  const session=Object.create(AgentSession.prototype), hooks=new Map(), definitions=new Map();

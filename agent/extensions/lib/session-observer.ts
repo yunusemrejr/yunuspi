@@ -8,6 +8,7 @@ import { promptRequestFocus } from './prompt-interpretation.ts';
 import { BOOK_RULES, BOOK_SECTION_BYTES, screenMarginNote, type BookSection } from './observer-book.ts';
 import { OBSERVER_TOOLS, OBSERVER_TOOL_ROUNDS, runObserverTool, type ObserverToolHost } from './observer-journal.ts';
 import { adaptiveExecutionEnabled, type ExecutionProfile } from './adaptive-execution.ts';
+import { mergeCostEvidence, readCostEvidence } from './cost-evidence.ts';
 
 export const OBSERVER_MIN_GAP_MS = 30_000;
 export const OBSERVER_MAX_GAP_MS = 120_000;
@@ -337,9 +338,11 @@ const OBSERVER_TOOL_NAMES = new Set(OBSERVER_TOOLS.map(tool => tool.name));
 /** Routes whose provider rejected tool definitions: reviewed packet-only. */
 const toollessRoutes: Set<string> = ((globalThis as any)[Symbol.for("yunus-pi.observer-toolless-routes.v1")] ??= new Set());
 const TOOL_REJECTION = /\b(?:tools?|function(?:s|_call| calling)?|tool_choice)\b[^.]*\b(?:not supported|unsupported|invalid|not allowed|unknown|unrecognized)\b|\b(?:does not|doesn't) support (?:tools|function)/i;
-const addUsage = (total: any, next: any) => {
+const addUsage = (total: any, next: any, provider: string) => {
   if (!next || typeof next !== 'object') return total;
   if (!total) return JSON.parse(JSON.stringify(next));
+  total.costDetails = mergeCostEvidence(readCostEvidence(total, provider), readCostEvidence(next, provider));
+  delete total.dispatchOutcome;
   for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'cacheWrite1h', 'reasoning', 'totalTokens']) if (typeof next[key] === 'number') total[key] = (total[key] ?? 0) + next[key];
   if (next.cost && typeof next.cost === 'object') {
     total.cost ??= {};
@@ -400,10 +403,11 @@ export async function observerDispatch(route: ObserverRoute, packet: ObserverPac
     // A provider that rejects tool definitions gets one packet-only retry in
     // this review, and later reviews of that route skip tools.
     if (host && rounds === 0 && response?.stopReason === 'error' && !signal.aborted && TOOL_REJECTION.test(String(response.errorMessage ?? ''))) {
+      usage = addUsage(usage, response?.usage, route.model.provider);
       toollessRoutes.add(route.route); host = undefined;
       response = await registry.completeSimple(model, { messages }, options);
     }
-    usage = addUsage(usage, response?.usage);
+    usage = addUsage(usage, response?.usage, route.model.provider);
     const calls = (response?.content ?? []).filter((part: any) => part?.type === 'toolCall');
     if (!host || !calls.length || response.stopReason !== 'toolUse' || final || signal.aborted) {
       // A final round that still asks for tools gets one plain answer request.
@@ -412,7 +416,7 @@ export async function observerDispatch(route: ObserverRoute, packet: ObserverPac
         messages.push({ role: 'user', content: [{ type: 'text', text: 'Return the final JSON object now. No more tool calls.' }], timestamp: Date.now() });
         rounds++;
         const closing = await registry.completeSimple(model, { messages, tools }, options);
-        return { ...closing, usage: addUsage(usage, closing?.usage), investigated, fetched: [...fetched] };
+        return { ...closing, usage: addUsage(usage, closing?.usage, route.model.provider), investigated, fetched: [...fetched] };
       }
       return { ...response, usage, investigated, fetched: [...fetched] };
     }
@@ -437,6 +441,8 @@ export { peerReviewerNotes, publishReviewerNote, reviewerLabel, reviewerSessionK
 /** Persist measured billing fields only; never a response body or provider metadata. */
 export function observerUsage(raw: any, provider?: string) {
   const usage: any = {};
+  if (raw?.dispatchOutcome === 'not-dispatched') usage.dispatchOutcome = raw.dispatchOutcome;
+  if (raw?.costDetails) usage.costDetails = readCostEvidence(raw, provider);
   for (const key of ['input', 'output', 'cacheRead', 'cacheWrite', 'cacheWrite1h', 'reasoning', 'totalTokens'])
     if (typeof raw?.[key] === 'number' && Number.isFinite(raw[key]) && raw[key] >= 0) usage[key] = raw[key];
   if (raw?.cost && typeof raw.cost === 'object') {
@@ -665,7 +671,7 @@ export function createSessionObserver(ports: ObserverPorts) {
     // owned and accounted, and cannot become an unhandled rejection.
     const transport = Promise.resolve().then(() => (ports.dispatch ?? observerDispatch)(route, snapshot.packet, controller.signal, snapshot.registry, snapshot.toolHost)).then(response => {
       terminal = true;
-      account(timedOut ? 'timeout' : cancelled ? 'cancelled' : response?.stopReason === 'error' ? 'failed' : 'completed', response?.usage);
+      account(timedOut ? 'timeout' : cancelled || response?.stopReason === 'aborted' ? 'cancelled' : response?.stopReason === 'error' ? 'failed' : 'completed', response?.usage);
       return response;
     }, () => { terminal = true; account(timedOut ? 'timeout' : cancelled ? 'cancelled' : 'failed'); return undefined; }).finally(() => { if (flight === thisFlight) flight = undefined; });
     try {

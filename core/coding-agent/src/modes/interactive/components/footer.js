@@ -5,6 +5,7 @@ import { sanitizeDisplayText, truncateToWidth, visibleWidth, wrapTextWithAnsi } 
 import { areExperimentalFeaturesEnabled } from "../../../core/experimental.js";
 import { theme } from "../theme/theme.js";
 import { keyText } from "./keybinding-hints.js";
+const metricsView = Symbol.for("yunus-pi.metrics-view.v1");
 /**
  * Sanitize text for display in a single-line status.
  * Removes newlines, tabs, carriage returns, and other control characters.
@@ -55,6 +56,24 @@ function cacheHit(entries, model) {
     }
     return total > 0 ? `${(100 * read / total).toFixed(1)}%` : "?";
 }
+
+/** Expanded totals retain pre-compaction history and side requests. */
+function expandedUsage(entries) {
+    const totals = {input: 0, output: 0, cacheRead: 0, cacheWrite: 0};
+    const fields = Object.keys(totals);
+    for (const entry of entries) {
+        const usage = entry.type === "message" && ["assistant", "toolResult"].includes(entry.message.role)
+            ? entry.message.usage : ["branch_summary", "compaction"].includes(entry.type) ? entry.usage : undefined;
+        for (const field of fields) {
+            const value = usage?.[field];
+            if (Number.isFinite(value) && value >= 0) totals[field] += value;
+        }
+    }
+    for (const row of collectAuxiliaryModelUsage(entries).rows) {
+        for (const field of fields) totals[field] += row.usage[field] ?? 0;
+    }
+    return totals;
+}
 /**
  * Format token counts for compact footer display.
  */
@@ -87,12 +106,14 @@ export class FooterComponent {
     expanded = false;
     session;
     footerData;
+    measurements;
     constructor(session, footerData) {
         this.session = session;
         this.footerData = footerData;
     }
     setSession(session) {
         this.session = session;
+        this.measurements = undefined;
     }
     setAutoCompactEnabled(enabled) {
         this.autoCompactEnabled = enabled;
@@ -112,46 +133,65 @@ export class FooterComponent {
      * Git watcher cleanup now handled by provider.
      */
     dispose() {
-        // Git watcher cleanup handled by provider
+        this.measurements = undefined;
+    }
+    readMeasurements(state) {
+        const manager = this.session.sessionManager;
+        const revision = manager.getEntriesRevision?.();
+        const canCache = Number.isSafeInteger(revision);
+        let snapshot = this.measurements;
+        if (!canCache || snapshot?.manager !== manager || snapshot.revision !== revision) {
+            snapshot = { manager, revision, entries: manager.getEntries(), name: manager.getSessionName() };
+            this.measurements = canCache ? snapshot : undefined;
+        }
+        const usingSubscription = state.model
+            ? isFlatPlanProvider(state.model.provider) || this.session.modelRuntime.isUsingSubscription(state.model.provider)
+            : false;
+        if (snapshot.costLabel === undefined || snapshot.billing !== usingSubscription) {
+            snapshot.billing = usingSubscription;
+            snapshot.costLabel = collectSessionCost(snapshot.entries, usingSubscription).formatted;
+        }
+        if (this.expanded && !snapshot.usageTotals) snapshot.usageTotals = expandedUsage(snapshot.entries);
+        const live = globalThis[metricsView];
+        const sessionId = manager.getSessionId?.();
+        const versionedLive = typeof live?.revision === "function";
+        const mark = versionedLive ? live.revision(sessionId) : undefined;
+        // Older telemetry views return mutable snapshots with no version.
+        if (!snapshot.metrics || snapshot.live !== live || snapshot.liveRevision !== mark || (live && !versionedLive)) {
+            const { toolCalls, toolResults, agentsActive, workflowsActive, errors, modelErrors, agentFailures, workflowFailures, hookErrors, footer } =
+                collectSessionMetrics(snapshot.entries, live?.(sessionId));
+            snapshot.metrics = { toolCalls, toolResults, agentsActive, workflowsActive, errors, modelErrors, agentFailures, workflowFailures, hookErrors, footer };
+            snapshot.live = live;
+            snapshot.liveRevision = mark;
+        }
+        const leaf = manager.getLeafId?.();
+        const { provider, id, contextWindow } = state.model ?? {};
+        if (!snapshot.branch || snapshot.branch.leaf !== leaf || snapshot.branch.provider !== provider || snapshot.branch.id !== id) {
+            snapshot.branch = { leaf, provider, id, cache: cacheHit(manager.getBranch(), state.model) };
+        }
+        const messages = state.messages;
+        if (!messages || !snapshot.context || snapshot.context.leaf !== leaf || snapshot.context.provider !== provider
+            || snapshot.context.id !== id || snapshot.context.window !== contextWindow
+            || snapshot.context.messages !== messages || snapshot.context.length !== messages.length) {
+            snapshot.context = { leaf, provider, id, window: contextWindow, messages, length: messages?.length, usage: this.session.getContextUsage() };
+        }
+        return snapshot;
     }
     render(width) {
         width = Math.max(1, Math.floor(width));
         const state = this.session.state;
-        const entries = this.session.sessionManager.getEntries();
-        // Calculate cumulative usage from ALL session entries (not just post-compaction messages)
-        const usageTotals = {input: 0, output: 0, cacheRead: 0, cacheWrite: 0};
-        if (this.expanded) {
-            for (const entry of entries) {
-                const usage = entry.type === "message" && ["assistant", "toolResult"].includes(entry.message.role)
-                    ? entry.message.usage : ["branch_summary", "compaction"].includes(entry.type) ? entry.usage : undefined;
-                // Old or interrupted receipts can lack usage or cost fields.
-                // Only recorded counters enter the optional token detail.
-                for (const field of Object.keys(usageTotals)) {
-                    const value = usage?.[field];
-                    if (Number.isFinite(value) && value >= 0) usageTotals[field] += value;
-                }
-            }
-            for (const row of collectAuxiliaryModelUsage(entries).rows) {
-                for (const field of Object.keys(usageTotals)) usageTotals[field] += row.usage[field] ?? 0;
-            }
-        }
-        // Calculate context usage from session (handles compaction correctly).
-        // After compaction, tokens are unknown until the next LLM response.
-        const contextUsage = this.session.getContextUsage();
+        const snapshot = this.readMeasurements(state);
+        const { metrics, usageTotals, costLabel } = snapshot;
+        const contextUsage = snapshot.context.usage;
         const contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
         const contextPercentValue = contextUsage?.percent ?? 0;
         const contextPercent = Number.isFinite(contextUsage?.percent) ? contextPercentValue.toFixed(1) : "?";
-        const metrics = collectSessionMetrics(entries, globalThis[Symbol.for('yunus-pi.metrics-view.v1')]?.(this.session.sessionManager.getSessionId?.()));
-        const usingSubscription = state.model
-            ? isFlatPlanProvider(state.model.provider) || this.session.modelRuntime.isUsingSubscription(state.model.provider)
-            : false;
-        const cost = collectSessionCost(entries, usingSubscription);
         const dim = text => theme.fg("dim", text);
         const lines = [];
         let location = sanitizeStatusText(formatCwdForFooter(this.session.sessionManager.getCwd(), process.env.HOME || process.env.USERPROFILE));
         const branch = sanitizeStatusText(this.footerData.getGitBranch());
         if (branch) location += ` (${branch})`;
-        const sessionName = sanitizeStatusText(this.session.sessionManager.getSessionName());
+        const sessionName = sanitizeStatusText(snapshot.name);
         if (sessionName) location += ` · ${sessionName}`;
         lines.push(dim(truncateToWidth(location, width, "…")));
 
@@ -169,7 +209,7 @@ export class FooterComponent {
 
         const contextLabel = `Context ${contextPercent}${contextPercent === "?" ? "" : "%"}${width >= 60 || this.expanded ? `/${formatTokens(contextWindow)}` : ""}`;
         const contextTone = contextPercentValue > 90 ? "error" : contextPercentValue > 70 ? "warning" : "dim";
-        const stats = [theme.fg(contextTone, contextLabel), dim(`Cache ${cacheHit(this.session.sessionManager.getBranch(), state.model)}`), dim(`${cost.formatted} total`)];
+        const stats = [theme.fg(contextTone, contextLabel), dim(`Cache ${snapshot.branch.cache}`), dim(`${costLabel} total`)];
         if (areExperimentalFeaturesEnabled()) stats.push(theme.fg("warning", "xp"));
         lines.push(...metricLines(stats, width));
 

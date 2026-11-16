@@ -393,6 +393,7 @@ export function retryGoogleRequest(request, options) {
         }
     }, {
         maxRetries: options?.maxRetries,
+        retryOwner: options?.retryOwner,
         maxRetryDelayMs: options?.maxRetryDelayMs,
         signal: options?.signal,
     });

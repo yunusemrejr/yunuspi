@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname } from "node:path";
-import { contentText, isFlatPlanProvider } from "@yunuspi/ai";
+import { assistantRetryDelay, contentText, isFlatPlanProvider, usesProviderCooldown } from "@yunuspi/ai";
 import { clampThinkingLevel, cleanupSessionResources, getSupportedThinkingLevels, isContextOverflow, isRecoverableLength, isRetryableAssistantError, modelsAreEqual, resetApiProviders, streamSimple, } from "@yunuspi/ai/compat";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.js";
 import { stripFrontmatter } from "../utils/frontmatter.js";
@@ -532,7 +532,7 @@ export class AgentSession {
             const message = event.messages[i];
             if (message.role !== "assistant") continue;
             if (!this._isRetryableError(message)) return false;
-            if (!/\b429\b|\b503\b|rate.?limit|too many requests|service.?unavailable|temporar(?:ily)? unavailable|upstream_unavailable|json error injected into sse stream|stream_read_error|finish_reason: error/i.test(message.errorMessage || ""))
+            if (!usesProviderCooldown(message))
                 return this._retryAttempt < settings.maxRetries;
             const started = this._piRateLimitLoopStart;
             const elapsed = Date.now() - started;
@@ -1726,12 +1726,39 @@ export class AgentSession {
     // Compaction
     // =========================================================================
     /** Generate Pi's built-in compaction summary for manual and automatic compaction. */
-    async _runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, signal, env, reason) {
-        return compact(preparation, requestModel, apiKey, headers, customInstructions, signal, this.thinkingLevel, this._completeSessionSummary.bind(this, "compaction"), env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }), undefined);
+    async _runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, signal, env, reason, attempts) {
+        return compact(preparation, requestModel, apiKey, headers, customInstructions, signal, this.thinkingLevel, this._completeSessionSummary.bind(this, "compaction", attempts), env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }), undefined);
     }
-    async _completeSessionSummary(purpose, model, context, options) {
-        return this._extensionRunner.completeAuxiliaryProviderRequest(purpose, model, options, async (requestOptions) =>
+    async _completeSessionSummary(purpose, attempts, model, context, options) {
+        const attempt = { model, response: undefined };
+        attempts.push(attempt);
+        attempt.response = await this._extensionRunner.completeAuxiliaryProviderRequest(purpose, model, options, async (requestOptions) =>
             (await this.agent.streamFunction(model, context, requestOptions)).result());
+        return attempt.response;
+    }
+    _recordSummaryAttemptCosts(purpose, attempts, committed = false) {
+        for (const { model, response } of attempts.splice(0)) {
+            const reason = response?.stopReason;
+            // Retry classification can turn an empty 'stop' into an error.
+            // A committed summary already accounts for each final response it used.
+            if (committed && response && reason !== "error" && reason !== "aborted") continue;
+            const status = reason === "aborted" ? "cancelled" : reason === "stop" ? "completed" : "failed";
+            try {
+                this._appendCustomEntry("auxiliary-model-usage-v1", {
+                    id: randomUUID(), owner: purpose, status,
+                    provider: response?.provider || model.provider,
+                    model: response?.model || model.id,
+                    ...(response?.usage ? { usage: response.usage } : {}),
+                });
+            }
+            catch (error) {
+                // Keep a failed supplemental receipt from changing the summary outcome.
+                try {
+                    this._extensionRunner.emitError({ extensionPath: "<runtime>", event: "summary_accounting", error: String(error) });
+                }
+                catch { /* A diagnostic cannot change summary settlement. */ }
+            }
+        }
     }
     _clearManualCompactionState() {
         this._compactionAbortController = undefined;
@@ -1755,6 +1782,7 @@ export class AgentSession {
     async compact(customInstructions) {
         await this.abort();
         this._compactionAbortController = new AbortController();
+        const attempts = [];
         this._emit({ type: "compaction_start", reason: "manual" });
         let fromExtension = false;
         try {
@@ -1807,7 +1835,7 @@ export class AgentSession {
             }
             else {
                 // Shared default summary generator, also used by automatic compaction.
-                const result = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, this._compactionAbortController.signal, env, "manual");
+                const result = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, this._compactionAbortController.signal, env, "manual", attempts);
                 summary = result.summary;
                 firstKeptEntryId = result.firstKeptEntryId;
                 tokensBefore = result.tokensBefore;
@@ -1817,13 +1845,14 @@ export class AgentSession {
             if (this._compactionAbortController.signal.aborted) {
                 throw new Error("Compaction cancelled");
             }
-            /* PI_COMPACTION_COMMIT_GUARD */if(typeof summary!=="string"||!summary.trim()||!Number.isFinite(tokensBefore)||tokensBefore<0||typeof firstKeptEntryId!=="string"||!this.sessionManager.getBranch().some(entry=>entry.id===firstKeptEntryId))throw new Error("Invalid compaction result; keeping existing history");this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-            const newEntries = this.sessionManager.getEntries();
+            /* PI_COMPACTION_COMMIT_GUARD */if(typeof summary!=="string"||!summary.trim()||!Number.isFinite(tokensBefore)||tokensBefore<0||typeof firstKeptEntryId!=="string"||!this.sessionManager.getBranch().some(entry=>entry.id===firstKeptEntryId))throw new Error("Invalid compaction result; keeping existing history");
+            const compactionId = this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+            this._recordSummaryAttemptCosts("compaction", attempts, true);
             const sessionContext = this.sessionManager.buildSessionContext();
             this.agent.state.messages = sessionContext.messages;
             const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
             // Get the saved compaction entry for the extension event
-            const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary);
+            const savedCompactionEntry = this.sessionManager.getEntry(compactionId);
             if (this._extensionRunner && savedCompactionEntry) {
                 await this._extensionRunner.emit({
                     type: "session_compact",
@@ -1853,6 +1882,7 @@ export class AgentSession {
             return compactionResult;
         }
         catch (error) {
+            this._recordSummaryAttemptCosts("compaction", attempts);
             const message = error instanceof Error ? error.message : String(error);
             const aborted = message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
             const errorMessage = aborted ? undefined : `Compaction failed: ${message}`;
@@ -2015,6 +2045,7 @@ export class AgentSession {
      */
     async _runAutoCompaction(reason, willRetry) {/* PI_AUTO_WINDOW_RUN */if(!this.model||!shouldCompact(estimateContextTokens(this.agent.state.messages).tokens,this.model.contextWindow,this.settingsManager.getCompactionSettings()))return false;
         const settings = this.settingsManager.getCompactionSettings();
+        const attempts = [];
         let started = false;
         let fromExtension = false;
         try {
@@ -2077,7 +2108,7 @@ export class AgentSession {
             }
             else {
                 // Shared default summary generator, also used by manual compaction.
-                const compactResult = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, undefined, this._autoCompactionAbortController.signal, env, reason);
+                const compactResult = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, undefined, this._autoCompactionAbortController.signal, env, reason, attempts);
                 summary = compactResult.summary;
                 firstKeptEntryId = compactResult.firstKeptEntryId;
                 tokensBefore = compactResult.tokensBefore;
@@ -2085,6 +2116,7 @@ export class AgentSession {
                 details = compactResult.details;
             }
             if (this._autoCompactionAbortController.signal.aborted) {
+                this._recordSummaryAttemptCosts("compaction", attempts);
                 this._emit({
                     type: "compaction_end",
                     reason,
@@ -2100,13 +2132,14 @@ export class AgentSession {
                 });
                 return false;
             }
-            /* PI_COMPACTION_COMMIT_GUARD */if(typeof summary!=="string"||!summary.trim()||!Number.isFinite(tokensBefore)||tokensBefore<0||typeof firstKeptEntryId!=="string"||!this.sessionManager.getBranch().some(entry=>entry.id===firstKeptEntryId))throw new Error("Invalid compaction result; keeping existing history");this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-            const newEntries = this.sessionManager.getEntries();
+            /* PI_COMPACTION_COMMIT_GUARD */if(typeof summary!=="string"||!summary.trim()||!Number.isFinite(tokensBefore)||tokensBefore<0||typeof firstKeptEntryId!=="string"||!this.sessionManager.getBranch().some(entry=>entry.id===firstKeptEntryId))throw new Error("Invalid compaction result; keeping existing history");
+            const compactionId = this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
+            this._recordSummaryAttemptCosts("compaction", attempts, true);
             const sessionContext = this.sessionManager.buildSessionContext();
             this.agent.state.messages = sessionContext.messages;
             const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
             // Get the saved compaction entry for the extension event
-            const savedCompactionEntry = newEntries.find((e) => e.type === "compaction" && e.summary === summary);
+            const savedCompactionEntry = this.sessionManager.getEntry(compactionId);
             if (this._extensionRunner && savedCompactionEntry) {
                 await this._extensionRunner.emit({
                     type: "session_compact",
@@ -2142,6 +2175,7 @@ export class AgentSession {
             return this.agent.hasQueuedMessages();
         }
         catch (error) {
+            if (attempts.length) this._recordSummaryAttemptCosts("compaction", attempts);
             const errorMessage = error instanceof Error ? error.message : "compaction failed";
             if (started) {
                 const formattedErrorMessage = reason === "overflow"
@@ -2313,13 +2347,7 @@ export class AgentSession {
                 });
                 return delivery;
             },
-            appendEntry: (customType, data) => {
-                const entryId = this.sessionManager.appendCustomEntry(customType, data);
-                const entry = this.sessionManager.getEntry(entryId);
-                if (entry) {
-                    this._emit({ type: "entry_appended", entry });
-                }
-            },
+            appendEntry: (customType, data) => this._appendCustomEntry(customType, data),
             setSessionName: (name) => {
                 this.setSessionName(name);
             },
@@ -2545,6 +2573,9 @@ export class AgentSession {
         // Context overflow is handled by compaction, not retry.
         if (isContextOverflow(message, this.model?.contextWindow ?? 0))
             return false;
+        if (message.providerRetry?.retryAfterMs !== undefined &&
+            assistantRetryDelay(message, 0, this.settingsManager.getRetrySettings().maxRetryDelayMs) === undefined)
+            return false;
         return isRetryableAssistantError(message);
     }
     /**
@@ -2610,7 +2641,7 @@ export class AgentSession {
         // keep retrying while the consecutive loop is <2min; beyond that the run
         // pauses — the final error is annotated and prompt() resets the clock on
         // the next user message.
-        const rateLimited = /\b429\b|\b503\b|rate.?limit|too many requests|service.?unavailable|temporar(?:ily)? unavailable|upstream_unavailable|json error injected into sse stream|stream_read_error|finish_reason: error/i.test(message.errorMessage || "");
+        const rateLimited = usesProviderCooldown(message);
         if (!rateLimited) {
             this._piRateLimitLoopStart = undefined;
         } else if (!this._piRateLimitLoopStart) {
@@ -2626,15 +2657,14 @@ export class AgentSession {
             this._piRateLimitLoopStart = undefined;
             return false;
         }
-        this._retryAttempt++;
-        if (this._retryAttempt > settings.maxRetries && !rateLimited) {
-            // Preserve the completed attempt count so post-run handling can emit the final failure.
-            this._retryAttempt--;
+        if (this._retryAttempt >= settings.maxRetries && !rateLimited) {
             return false;
         }
-        const delayMs = rateLimited
-            ? (REQUEST_RATE_PROVIDERS.has(message.provider) ? Math.min(25000, 8000 * this._retryAttempt) : 25000)
-            : settings.baseDelayMs * 2 ** (this._retryAttempt - 1);
+        const delayMs = assistantRetryDelay(message, rateLimited
+            ? (REQUEST_RATE_PROVIDERS.has(message.provider) ? Math.min(25000, 8000 * (this._retryAttempt + 1)) : 25000)
+            : settings.baseDelayMs * 2 ** this._retryAttempt, settings.maxRetryDelayMs);
+        if (delayMs === undefined) return false;
+        this._retryAttempt++;
         this._retryAbortController = new AbortController();
         try { /* PI_RETRY_CONTROLLER_READY */
         this._emit({
@@ -2845,6 +2875,8 @@ export class AgentSession {
         };
         // Set up abort controller for summarization
         this._branchSummaryAbortController = new AbortController();
+        const attempts = [];
+        let summaryCommitted = false;
         try {
             let extensionSummary;
             let fromExtension = false;
@@ -2890,7 +2922,7 @@ export class AgentSession {
                     customInstructions,
                     replaceInstructions,
                     reserveTokens: branchSummarySettings.reserveTokens,
-                    streamFn: this._completeSessionSummary.bind(this, "branch-summary"),
+                    streamFn: this._completeSessionSummary.bind(this, "branch-summary", attempts),
                     retry: this.settingsManager.getRetrySettings(),
                     callbacks: this._summarizationRetryCallbacks({ source: "branchSummary" }),
                 });
@@ -2935,6 +2967,7 @@ export class AgentSession {
             if (summaryText) {
                 // Create summary at target position (can be null for root)
                 const summaryId = this.sessionManager.branchWithSummary(newLeafId, summaryText, summaryDetails, fromExtension, summaryUsage);
+                summaryCommitted = true;
                 summaryEntry = this.sessionManager.getEntry(summaryId);
                 // Attach label to the summary entry
                 if (label) {
@@ -2968,9 +3001,15 @@ export class AgentSession {
             return { editorText, cancelled: false, summaryEntry };
         }
         finally {
+            if (attempts.length) this._recordSummaryAttemptCosts("branch-summary", attempts, summaryCommitted);
             this._branchSummaryAbortController = undefined;
             this._resolveIdleWaitIfIdle();
         }
+    }
+    _appendCustomEntry(customType, data) {
+        const entryId = this.sessionManager.appendCustomEntry(customType, data);
+        const entry = this.sessionManager.getEntry(entryId);
+        if (entry) this._emit({ type: "entry_appended", entry });
     }
     /**
      * Get all user messages from session for fork selector.

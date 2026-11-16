@@ -116,11 +116,25 @@ function telemetryFixture(append = () => {}) {
   return { ...state, hooks, start: id => hooks.get('session_start')({}, { sessionManager: { getSessionId: () => id } }) };
 }
 
-test('old telemetry sinks stop counting and shutdown only releases its own globals', () => {
+test('old telemetry views and sinks stop counting and shutdown only releases its own globals', () => {
   const one = telemetryFixture();
   one.start('one');
   const oldSink = globalThis[telemetry.METRICS_SINK];
+  const oldView = globalThis[telemetry.METRICS_VIEW];
+  const mark = oldView.revision('one');
+  assert.equal(oldView.revision('other'), undefined);
+  oldSink('ignored');
+  assert.equal(oldView.revision('one'), mark);
+  oldSink('recoveries');
+  assert.equal(oldView('one').events.recoveries, 1);
+  assert.notEqual(oldView.revision('one'), mark);
+  one.hooks.get('agent_end')();
+  const flushed = oldView.revision('one');
+  one.hooks.get('agent_end')();
+  assert.equal(oldView.revision('one'), flushed);
   one.hooks.get('session_switch')({}, { sessionManager: { getSessionId: () => 'two' } });
+  assert.equal(oldView.revision('one'), undefined);
+  assert.equal(oldView('two'), undefined);
   const ledger = globalThis[telemetry.HOOK_LEDGER_VIEW];
   const records = ledger().records;
   oldSink('hook', { owner: 'fixture', hook: 'input', eventId: 'old' });

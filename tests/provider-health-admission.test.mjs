@@ -23,6 +23,19 @@ const health = await import(pathToFileURL(path.join(agentRoot, 'extensions/pi-su
 const reset = () => fs.rmSync(process.env.PI_PROVIDER_STATE_FILE, { force: true });
 const lockDir = `${process.env.PI_PROVIDER_STATE_FILE}.lock`;
 
+test('structured transport throttles keep the longest active shared deadline', () => {
+  reset();
+  const now = Date.now();
+  health.recordFailure({ provider: 'p', model: 'a', errorMessage: 'Capacity exhausted',
+    providerRetry: { status: 429, retryAfterMs: 60_000 }, now });
+  health.recordFailure({ provider: 'p', model: 'b', errorMessage: '429; retry in 90 seconds',
+    providerRetry: { status: 429, retryAfterMs: 1000 }, now: now + 10 });
+  const decision = health.evaluateRoute({ provider: 'p', model: 'b', now: now + 100 });
+  assert.equal(decision.kind, 'quota-rate');
+  assert.equal(decision.cooldownUntil, now + 60_000);
+  assert.equal(health.readHealth().providers.p.observed.retryAfterMs, 1000);
+});
+
 test('an in-flight success that started before a failure cannot clear it', () => {
   reset();
   const startedAt = Date.now() - 50;

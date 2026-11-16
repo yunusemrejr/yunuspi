@@ -240,6 +240,7 @@ export declare class SettingsManager {
         enabled: boolean;
         maxRetries: number;
         baseDelayMs: number;
+        maxRetryDelayMs: number;
     };
     getHttpIdleTimeoutMs(): number;
     setHttpIdleTimeoutMs(timeoutMs: number): void;

@@ -9,6 +9,7 @@ import { ModelRuntime } from "../core/coding-agent/src/core/model-runtime.js";
 import { DefaultResourceLoader } from "../core/coding-agent/src/core/resource-loader.js";
 import { createAgentSession } from "../core/coding-agent/src/core/sdk.js";
 import { SessionManager } from "../core/coding-agent/src/core/session-manager.js";
+import { collectSessionCost } from "../core/coding-agent/src/core/session-accounting.js";
 import { SettingsManager } from "../core/coding-agent/src/core/settings-manager.js";
 import registerGate from "../agent/extensions/provider-gate.ts";
 import * as health from "../agent/extensions/pi-subagents/src/runs/shared/provider-health.ts";
@@ -20,6 +21,8 @@ const model = {
 };
 const usage = { input: 10, output: 2, cacheRead: 0, cacheWrite: 0, totalTokens: 12,
   cost: { input: 0.00001, output: 0.000002, cacheRead: 0, cacheWrite: 0, total: 0.000012 } };
+const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 const context = text => ({ messages: [{ role: "user", content: [{ type: "text", text }], timestamp: Date.now() }] });
 
 async function fixture(t, dispatch = async () => undefined, sharedRuntime) {
@@ -38,13 +41,17 @@ async function fixture(t, dispatch = async () => undefined, sharedRuntime) {
       try {
         const outgoing = await options?.onPayload?.({ model: selected.id, messages: input.messages }, selected);
         options?.signal?.throwIfAborted();
-        const errorMessage = await dispatch(input, outgoing);
-        if (errorMessage) throw new Error(errorMessage);
+        const outcome = await dispatch(input, outgoing, options);
+        if (typeof outcome === "string" && outcome) throw new Error(outcome);
+        Object.assign(response, outcome);
         response.content = [{ type: "text", text: "Synthetic provider result" }];
-        result.push({ type: "done", reason: "stop", message: response });
+        result.push(response.stopReason === "error"
+          ? { type: "error", reason: "error", error: response }
+          : { type: "done", reason: response.stopReason, message: response });
       } catch (error) {
         response.stopReason = options?.signal?.aborted ? "aborted" : "error";
         response.errorMessage = error.message;
+        response.usage = emptyUsage;
         result.push({ type: "error", reason: response.stopReason, error: response });
       }
     })();
@@ -154,12 +161,58 @@ test("an older auxiliary success cannot clear a newer failure and a cancelled ho
   for (let i = 0; i < 100 && health.readHealth().pending.length === 0; i++) await delay(10);
   assert.equal(health.readHealth().pending.length, 1);
   controller.abort();
-  assert.equal((await waiting).stopReason, "aborted");
+  const cancelled = await waiting;
+  assert.equal(cancelled.stopReason, "aborted");
+  assert.equal(cancelled.usage.dispatchOutcome, "not-dispatched");
+  const receipts = ["pending", "cancelled", "cancelled"].map((status, i) => ({
+    type: "custom", customType: "auxiliary-model-usage-v1",
+    data: { id: "held-request", owner: "fixture", provider: model.provider, model: model.id, status,
+      ...(i === 2 ? { usage: cancelled.usage } : {}) },
+  }));
+  assert.equal(collectSessionCost(receipts.slice(0, 2)).unknown, true);
+  assert.equal(collectSessionCost(receipts).formatted, "$0.000");
   for (let i = 0; i < 100 && health.readHealth().pending.length > 0; i++) await delay(10);
   assert.equal(health.readHealth().pending.length, 0);
   assert.equal(dispatches, 2);
   assert.equal(f.outcomes.length, 2);
   assert.equal(health.readHealth().providers.openrouter.failure.consecutive, 1);
+});
+
+test("local admission denial settles at zero while remote failures and later retry denials stay partial", { timeout: 10_000 }, async t => {
+  let dispatches = 0;
+  const denial = "429 rate limit: provider-gate fixture error";
+  const f = await fixture(t, async (input, _outgoing, options) => {
+    dispatches++;
+    if (input.messages.at(-1)?.content?.[0]?.text === "retry after dispatch") {
+      await options.onPayload({ model: model.id, retry: true }, model);
+    }
+    return denial;
+  });
+  health.recordFailure({ provider: model.provider, model: model.id, source: "fixture", errorMessage: "429 rate limit; Retry-After: 4" });
+  process.env.PI_PROVIDER_GATE_MAX_WAIT_MS = "1";
+  await f.session.prompt("locally refused");
+  const local = f.session.sessionManager.getBranch().findLast(entry => entry.message?.role === "assistant").message;
+  assert.equal(local.stopReason, "error");
+  assert.equal(local.usage.dispatchOutcome, "not-dispatched");
+  assert.equal(collectSessionCost(f.session.sessionManager.getBranch()).formatted, "$0.000");
+  assert.equal(dispatches, 0);
+  const preCancelled = await f.registry.completeSimple(model, context("never started"), { signal: AbortSignal.abort() });
+  assert.equal(preCancelled.stopReason, "aborted");
+  assert.equal(preCancelled.usage.dispatchOutcome, "not-dispatched");
+  assert.equal(dispatches, 0);
+
+  process.env.PI_PROVIDER_GATE = "off";
+  t.after(() => delete process.env.PI_PROVIDER_GATE);
+  const remote = await f.registry.completeSimple(model, context("remote response"));
+  const retry = await f.registry.completeSimple(model, context("retry after dispatch"), {
+    onPayload(payload) { if (payload.retry) throw new Error(denial); },
+  });
+  assert.equal(dispatches, 2);
+  for (const response of [remote, retry]) {
+    assert.equal(response.stopReason, "error");
+    assert.equal(response.usage.dispatchOutcome, undefined);
+    assert.equal(collectSessionCost([{ type: "message", message: response }]).unknown, true);
+  }
 });
 
 test("Anthropic keeps its served model in the response and records health on the admitted alias", { timeout: 10_000 }, async t => {
@@ -207,11 +260,13 @@ test("Anthropic keeps its served model in the response and records health on the
 
 test("manual compaction and branch summarization use auxiliary admission without main hooks", { timeout: 10_000 }, async t => {
   let failNextSummary = false;
+  const failedCharge = 0.02;
   let retrySawFailure = false;
   const f = await fixture(t, async () => {
     if (failNextSummary) {
       failNextSummary = false;
-      return "502 Bad Gateway; Retry-After: 0";
+      return { stopReason: "error", errorMessage: "502 Bad Gateway; Retry-After: 0",
+        usage: { ...usage, cost: { ...usage.cost, source: "provider-reported", total: failedCharge } } };
     }
     retrySawFailure ||= health.readHealth().providers.openrouter?.models.fixture?.failure?.source === "auxiliary";
   });
@@ -223,11 +278,45 @@ test("manual compaction and branch summarization use auxiliary admission without
   await f.session.compact();
   assert.ok(retrySawFailure, "provider outcome is recorded before the next summary attempt dispatches");
   assert.ok(f.session.sessionManager.getBranch().some(entry => entry.type === "compaction"));
+  const entries = () => f.session.sessionManager.getEntries();
+  const costs = () => collectSessionCost(JSON.parse(JSON.stringify(entries())));
+  assert.equal(costs().auxiliary.reported, failedCharge);
+  assert.ok(Math.abs(costs().auxiliary.estimated - usage.cost.total * 2) < 1e-12, "the split successes are counted once");
+  assert.equal(costs().unknown, false);
+  assert.equal(entries().filter(entry => entry.customType === "auxiliary-model-usage-v1").length, 1);
+  const oldLeafId = f.session.sessionManager.getLeafId();
   const result = await f.session.navigateTree(firstUser, { summarize: true });
   assert.equal(result.cancelled, false);
+  assert.equal(result.summaryEntry.fromId, oldLeafId);
+  assert.equal(costs().auxiliary.reported, failedCharge);
+  assert.ok(Math.abs(costs().auxiliary.estimated - usage.cost.total * 3) < 1e-12);
   assert.deepEqual(f.attempts, ["compaction", "compaction", "compaction", "branch-summary"]);
   assert.deepEqual(f.outcomes.map(outcome => outcome.stopReason), ["error", "stop", "stop", "stop"]);
   assert.equal(f.mainCalls(), 2);
   assert.equal(f.transcriptMessages(), 2);
   assert.equal(health.readHealth().providers.openrouter.requests.length, 6);
+});
+
+test("failed split compaction preserves usage from both calls and keeps the previous context", async t => {
+  let armed = false;
+  let summaryAttempts = 0;
+  const f = await fixture(t, async () => {
+    if (armed && ++summaryAttempts === 2) return { stopReason: "length" };
+  });
+  await f.session.prompt("Keep the first constraint.");
+  await f.session.prompt("The second constraint changed.");
+  const events = [];
+  f.session.subscribe(event => { if (event.type === "entry_appended" || event.type === "compaction_end") events.push(event); });
+  const contextBefore = f.session.sessionManager.buildSessionContext().messages;
+  armed = true;
+  await assert.rejects(f.session.compact(), /summary|summarization/i);
+  assert.equal(summaryAttempts, 2);
+  const entries = f.session.sessionManager.getEntries();
+  assert.equal(entries.some(entry => entry.type === "compaction"), false);
+  assert.deepEqual(f.session.sessionManager.buildSessionContext().messages, contextBefore);
+  assert.deepEqual(events.map(event => event.type), ["entry_appended", "entry_appended", "compaction_end"]);
+  assert.deepEqual(events.slice(0, 2).map(event => event.entry.data.status), ["completed", "failed"]);
+  const cost = collectSessionCost(entries);
+  assert.ok(Math.abs(cost.auxiliary.estimated - usage.cost.total * 2) < 1e-12);
+  assert.equal(cost.unknown, false);
 });

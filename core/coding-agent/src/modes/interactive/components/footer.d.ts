@@ -15,6 +15,8 @@ export declare class FooterComponent implements Component {
     private expanded;
     private session;
     private footerData;
+    private measurements;
+    private readMeasurements;
     constructor(session: AgentSession, footerData: ReadonlyFooterDataProvider);
     setSession(session: AgentSession): void;
     setAutoCompactEnabled(enabled: boolean): void;

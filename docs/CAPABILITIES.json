@@ -2862,7 +2862,7 @@
       {
         "name": "hook-audit",
         "source": "agent/extensions/lib/session-telemetry.ts",
-        "line": 78
+        "line": 81
       },
       {
         "name": "kill",
@@ -2932,7 +2932,7 @@
       {
         "name": "metrics",
         "source": "agent/extensions/lib/session-telemetry.ts",
-        "line": 59
+        "line": 62
       },
       {
         "name": "models",
@@ -2967,7 +2967,7 @@
       {
         "name": "provider-health",
         "source": "agent/extensions/provider-gate.ts",
-        "line": 508
+        "line": 509
       },
       {
         "name": "reminder",

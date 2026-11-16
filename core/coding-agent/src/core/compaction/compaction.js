@@ -7,6 +7,7 @@
 import { contentText, retryAssistantCall, uuidv7 } from "@yunuspi/ai";
 import { completeSimple } from "@yunuspi/ai/compat";
 import { convertToLlm } from "../messages.js";
+import { mergeCostEvidence, readCostEvidence } from "../session-accounting.js";
 import { buildSessionContext, sessionEntryToContextMessages, } from "../session-manager.js";
 import { computeFileLists, createFileOps, extractFileOpsFromMessage, formatFileOperations, SUMMARIZATION_SYSTEM_PROMPT, serializeConversation, } from "./utils.js";
 /**
@@ -49,7 +50,7 @@ function getMessageFromEntryForCompaction(entry) {
     }
     return sessionEntryToContextMessages(entry)[0];
 }
-function combineUsage(first, second) {
+function combineUsage(first, second, model) {
     return {
         input: first.input + second.input,
         output: first.output + second.output,
@@ -62,7 +63,10 @@ function combineUsage(first, second) {
             ? { reasoning: (first.reasoning ?? 0) + (second.reasoning ?? 0) }
             : {}),
         totalTokens: first.totalTokens + second.totalTokens,
+        costDetails: mergeCostEvidence(readCostEvidence(first, model.provider), readCostEvidence(second, model.provider)),
         cost: {
+            provider: model.provider,
+            model: model.id,
             input: first.cost.input + second.cost.input,
             output: first.cost.output + second.cost.output,
             cacheRead: first.cost.cacheRead + second.cost.cacheRead,
@@ -687,7 +691,7 @@ export async function compact(preparation, model, apiKey, headers, customInstruc
         const turnPrefixResult = await generateTurnPrefixSummary(turnPrefixMessages, model, settings.reserveTokens, apiKey, headers, env, signal, thinkingLevel, streamFn, retry, callbacks, sessionId);
         // Merge into single summary
         summary = `${historyText}\n\n---\n\n**Turn Context (split turn):**\n\n${turnPrefixResult.text}`;
-        summaryUsage = historyUsage ? combineUsage(historyUsage, turnPrefixResult.usage) : turnPrefixResult.usage;
+        summaryUsage = historyUsage ? combineUsage(historyUsage, turnPrefixResult.usage, model) : turnPrefixResult.usage;
     }
     else {
         // Just generate history summary

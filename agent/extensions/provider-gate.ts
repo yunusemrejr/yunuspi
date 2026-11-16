@@ -359,18 +359,15 @@ async function admitRoute(
 	}
 }
 
-function isAdmissionDenial(message: AssistantMessage): boolean {
-	return message.stopReason === "error" && message.errorMessage?.includes("429 rate limit: provider-gate ") === true;
-}
-
 function recordCompletion(
 	message: AssistantMessage,
 	attempt: Pick<PendingAttempt, "started" | "admittedAt" | "endpoint" | "estTokens" | "ambiguous" | "candidateProvider"> | undefined,
 	selected: RequestModel | undefined,
 	source: "message_end" | "auxiliary",
+	model = message.model,
 ): void {
+	if (message.usage?.dispatchOutcome === "not-dispatched") return;
 	const { provider, errorMessage, usage, timestamp } = message;
-	const model = source === "auxiliary" ? selected?.id ?? message.model : message.model;
 	const current = selected?.provider === provider && selected.id === model ? selected : undefined;
 	const cost = current?.cost;
 	const rates = cost && current ? economyRateIdentity(cost, current.baseUrl, current.api) : undefined;
@@ -378,8 +375,8 @@ function recordCompletion(
 		? attempt : undefined;
 	const endpoint = attributed?.endpoint;
 	if (message.stopReason === "error") {
-		if (isAdmissionDenial(message) || attempt && !attempt.ambiguous && attempt.started === undefined) return;
-		const recorded = recordFailure({ provider, model, errorMessage, source, endpoint, estTokens: attributed?.estTokens, rates });
+		if (attempt && !attempt.ambiguous && attempt.started === undefined) return;
+		const recorded = recordFailure({ provider, model, errorMessage, providerRetry: message.providerRetry, source, endpoint, estTokens: attributed?.estTokens, rates });
 		if (!recorded) invalidateEconomyUsage(provider, model);
 		return;
 	}
@@ -490,16 +487,20 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 			// Health applies to the admitted route. Keep the returned model
 			// intact for display and billing.
 			if (message.provider === route.provider) {
-				recordCompletion(message, attempt, model, "auxiliary");
+				recordCompletion(message, attempt, model, "auxiliary", route.model);
 			}
 		};
 	});
 
 	pi.on("message_end", (event, ctx) => {
 		const message = event?.message;
-		if (message?.role !== "assistant" || !message.provider || isAdmissionDenial(message)) return;
-		const attempt = takePendingAttempt(pending, message.provider, message.model, sessionLabel(ctx));
-		recordCompletion(message, attempt, ctx.model, "message_end");
+		if (message?.role !== "assistant" || !message.provider) return;
+		const session = sessionLabel(ctx);
+		const selected = ctx.model;
+		const attempt = takePendingAttempt(pending, message.provider, message.model, session);
+		const alias = !attempt && selected?.provider === message.provider && selected.id !== message.model
+			? takePendingAttempt(pending, message.provider, selected.id, session) : undefined;
+		recordCompletion(message, attempt ?? alias, selected, "message_end", alias && !alias.ambiguous ? alias.model : undefined);
 	});
 
 	// Observability surface: /provider-health prints the shared state —

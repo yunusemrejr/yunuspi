@@ -256,6 +256,7 @@ export async function createAgentSession(options = {}) {
                 ...options,
                 timeoutMs,
                 websocketConnectTimeoutMs,
+                retryOwner: options?.retryOwner ?? (headerRunner?.hasHandlers("before_provider_request") ? "session" : undefined),
                 maxRetries: options?.maxRetries ?? providerRetrySettings.maxRetries,
                 maxRetryDelayMs: options?.maxRetryDelayMs ?? providerRetrySettings.maxRetryDelayMs,
                 onPayload: async (payload, actualModel, requestSignal) => {

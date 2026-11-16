@@ -971,6 +971,7 @@ export class ExtensionRunner {
         let dispatchSequence = 0;
         const response = await complete({
             ...options,
+            retryOwner: "session",
             onPayload: async (payload, actualModel, signal) => {
                 const sequence = ++dispatchSequence;
                 latestObservers = [];

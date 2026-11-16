@@ -79,5 +79,5 @@ export declare function mapStopReasonString(reason: string): StopReason;
  * both, so normalize the error by adding the missing `headers` before
  * rethrowing.
  */
-export declare function retryGoogleRequest<T>(request: () => Promise<T>, options?: Pick<StreamOptions, "maxRetries" | "maxRetryDelayMs" | "signal">): Promise<T>;
+export declare function retryGoogleRequest<T>(request: () => Promise<T>, options?: Pick<StreamOptions, "maxRetries" | "maxRetryDelayMs" | "retryOwner" | "signal">): Promise<T>;
 export {};

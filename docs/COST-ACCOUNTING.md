@@ -30,6 +30,10 @@ Nested run identities are retained in accounting receipts. Repeated status, work
 
 Managed `bg_run` agent commands contribute their captured YunusPi usage when they finish, including hosted and nested work. Their durable task receipt is attached to the owning session and can be recovered on reopen. Status and wait results never add another charge. Shell work outside the managed process and runs with incomplete captures remain partial.
 
+Native compaction and branch summaries count their committed usage and save separate receipts for failed or discarded attempts when the operation settles. Split compactions retain reported and estimated cost separately. A request stopped at the local payload gate contributes a confirmed zero if the runtime can prove no dispatch was possible. Once dispatch is possible, missing provider usage keeps the total partial.
+
+Supported transports with session admission submit one inference attempt at a time. Main turns and native summaries retry through the session policy, which honors the provider's minimum wait within `retry.provider.maxRetryDelayMs` when the transport exposes it. Scoped extension calls retain their own fallback policy. Standalone SDK calls keep their transport retry configuration.
+
 ## Limits and activation
 
 Restart Pi and resume the session to load updated core adapters/footer code. Existing history benefits from improved aggregation, but missing historical rates, lost child evidence and unrecorded charges cannot be reconstructed. This change does not rewrite old session files or make paid inference probes.

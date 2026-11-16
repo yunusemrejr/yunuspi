@@ -255,6 +255,7 @@ test('native provider output shapes remain bounded and receipts exclude unrelate
   }
   await assert.rejects(observerDispatch(route,packet(),new AbortController().signal,{completeSimple:async(actual,_context,opts)=>opts.onPayload({model:actual.id},actual)}),/permitted route/);
   assert.deepEqual(observerUsage({input:12,output:5,reasoning:3,rawPrompt:'private',cost:{total:.01,source:'provider-reported',complete:true,rawResponse:'private'}}),{input:12,output:5,reasoning:3,cost:{total:.01,source:'provider-reported',complete:true}});
+  assert.deepEqual(observerUsage({input:0,dispatchOutcome:'not-dispatched',rawPrompt:'private'}),{input:0,dispatchOutcome:'not-dispatched'});
 });
 
 function harness(dispatch) {

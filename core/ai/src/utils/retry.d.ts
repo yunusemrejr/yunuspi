@@ -11,7 +11,11 @@ export interface RetryPolicy {
     maxRetries: number;
     /** Base delay in ms. Per-attempt delay is `baseDelayMs * 2^(attempt-1)` before jitter. */
     baseDelayMs: number;
+    /** Maximum accepted provider-requested delay. Zero removes the configured limit. */
+    maxRetryDelayMs?: number;
 }
+export declare function usesProviderCooldown(message: AssistantMessage): boolean;
+export declare function assistantRetryDelay(message: AssistantMessage, backoffMs: number, maxRetryDelayMs?: number): number | undefined;
 /** Optional callbacks emitted by {@link retryAssistantCall} around each retry. */
 export interface RetryCallbacks {
     /** Emitted before the backoff sleep of each retry attempt (1-indexed). */

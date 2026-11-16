@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { AssistantMessageEventStream } from '@yunuspi/ai';
+import { stream as streamOpenAICompletions, streamSimple as streamSimpleOpenAICompletions } from '../core/ai/src/api/openai-completions.js';
 import { ModelRuntime } from '../core/coding-agent/src/core/model-runtime.js';
 import { DefaultResourceLoader } from '../core/coding-agent/src/core/resource-loader.js';
 import { createAgentSession } from '../core/coding-agent/src/core/sdk.js';
@@ -158,6 +160,17 @@ try {
     'matching session completion keeps timing attribution',
   );
 
+  const alias = model('anthropic', 'requested-alias');
+  const aliasCtx = context(alias, [alias], 'alias.jsonl');
+  await before({ payload: { model: alias.id }, model: alias }, aliasCtx);
+  const served = { role: 'assistant', provider: alias.provider, model: 'concrete-version', stopReason: 'error',
+    errorMessage: 'Temporary transport failure', providerRetry: { status: 502, retryAfterMs: 3_000 } };
+  await messageEnd({ message: served }, aliasCtx);
+  const aliasHealth = health.readHealth().providers.anthropic;
+  assert.equal(aliasHealth.models[alias.id].failure.kind, 'route-failure');
+  assert.equal(aliasHealth.models[served.model], undefined);
+  assert.equal(served.model, 'concrete-version');
+
   for (let i = 0; i < 129; i++) {
     const bound = model('bound-provider', `bound-${i}`);
     await before({ payload: { model: bound.id } }, context(bound, [bound], 'bound.jsonl'));
@@ -265,4 +278,65 @@ test('a provider request timeout cancels its pending admission in the real SDK',
   assert.equal(state.providers[selected.provider].models[selected.id]?.failure, undefined,
     'a request cancelled in admission supplies no upstream failure evidence');
   assert.equal(state.pending.length, 0);
+});
+
+test('real SDK retries reenter session admission and persist each response', { timeout: 10_000 }, async t => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-retry-owner-'));
+  const events = [];
+  let failure;
+  const server = createServer(async (request, response) => {
+    for await (const _chunk of request) { /* Drain this synthetic request. */ }
+    events.push('network');
+    if (failure) {
+      const headers = failure;
+      failure = undefined;
+      response.writeHead(500, { 'content-type': 'application/json', ...headers });
+      response.end(JSON.stringify({ error: { message: 'Temporary service error' } }));
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'text/event-stream' });
+    response.end(`data: ${JSON.stringify({ id: 'synthetic-retry-owner', object: 'chat.completion.chunk', model: 'fixture',
+      choices: [{ index: 0, delta: { content: 'Synthetic result' }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 2, completion_tokens: 1, total_tokens: 3 } })}\n\ndata: [DONE]\n\n`);
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => { server.closeAllConnections(); server.close(); fs.rmSync(cwd, { recursive: true, force: true }); });
+  const selected = { ...model('openai', 'fixture'), baseUrl: `http://127.0.0.1:${server.address().port}/v1`,
+    name: 'Fixture', api: 'openai-completions', input: ['text'], reasoning: false, contextWindow: 65_536, maxTokens: 4096 };
+  const runtime = await ModelRuntime.create({ authPath: path.join(cwd, 'auth.json'), modelsPath: null, refreshOnCreate: false });
+  runtime.registerNativeProvider({ id: selected.provider, name: selected.name, getModels: () => [selected],
+    auth: { apiKey: { name: 'Fixture', resolve: async () => ({ source: 'fixture', auth: { apiKey: 'synthetic-fixture' } }) } },
+    stream: streamOpenAICompletions, streamSimple: streamSimpleOpenAICompletions,
+  });
+  await runtime.refresh({ allowNetwork: false });
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false },
+    retry: { enabled: true, maxRetries: 1, baseDelayMs: 1, provider: { maxRetries: 3, maxRetryDelayMs: 100 } } });
+  const loader = new DefaultResourceLoader({ cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true,
+    noContextFiles: true, extensionFactories: [pi => { pi.on('before_provider_request', () => { events.push('admission'); }); }],
+  });
+  await loader.reload();
+  const sessionManager = SessionManager.inMemory(cwd);
+  const { session } = await createAgentSession({ cwd, agentDir: cwd, resourceLoader: loader, settingsManager,
+    modelRuntime: runtime, model: selected, sessionManager, noTools: 'all' });
+  t.after(() => session.dispose());
+  const delays = [];
+  const unsubscribe = session.subscribe(event => { if (event.type === 'auto_retry_start') delays.push(event.delayMs); });
+  t.after(unsubscribe);
+
+  failure = { 'retry-after-ms': '12' };
+  await session.prompt('Run a synthetic retry.');
+  assert.deepEqual(events, ['admission', 'network', 'admission', 'network']);
+  assert.deepEqual(delays, [12]);
+  const messages = () => sessionManager.getEntries().filter(row => row.type === 'message' && row.message.role === 'assistant').map(row => row.message);
+  assert.deepEqual(messages().map(message => message.stopReason), ['error', 'stop']);
+  assert.equal(messages()[0].providerRetry.retryAfterMs, 12);
+
+  for (const headers of [{ 'x-should-retry': 'false' }, { 'retry-after-ms': '101' }]) {
+    events.length = 0;
+    failure = headers;
+    await session.prompt('Respect the synthetic response policy.');
+    assert.deepEqual(events, ['admission', 'network']);
+    assert.deepEqual(delays, [12]);
+    assert.equal(messages().at(-1).stopReason, 'error');
+  }
 });

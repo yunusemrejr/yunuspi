@@ -20,7 +20,7 @@ export function registerSessionTelemetry(pi:any) {
  const start=(_event:any,ctx:any)=>{
   const epoch=++owner;
   hookLedger=sessionObservability()[LEDGER]??=createHookLedger();
-  current={id:ctx.sessionManager.getSessionId(),data:{version:2,segment:randomUUID(),startedAt:Date.now(),hooks:{},events:{}}};dirty=false;
+  current={id:ctx.sessionManager.getSessionId(),revision:0,data:{version:2,segment:randomUUID(),startedAt:Date.now(),hooks:{},events:{}}};dirty=false;
   sink=(kind:string,data:any={})=>{
    if(epoch!==owner||!current)return;
    if(kind==='hook'&&typeof data.hook==='string'&&typeof data.owner==='string'){
@@ -41,10 +41,13 @@ export function registerSessionTelemetry(pi:any) {
     if(Number.isFinite(data.at)&&data.at>=current.data.startedAt)h.cacheAgeMs=Math.max(h.cacheAgeMs??0,data.at-current.data.startedAt);
    }else if(['fanouts','recoveries','aborted'].includes(kind))current.data.events[kind]=(current.data.events[kind]||0)+1;
    else return;
+   current.revision++;
    dirty=true;
   };
   sessionObservability()[METRICS_SINK]=sink;
-  sessionObservability()[METRICS_VIEW]=view=(id:string)=>id===current?.id?snapshot():undefined;
+  view=(id:string)=>epoch===owner&&id===current?.id?snapshot():undefined;
+  view.revision=(id:string)=>epoch===owner&&current&&id===current.id?current.revision:undefined;
+  sessionObservability()[METRICS_VIEW]=view;
   sessionObservability()[HOOK_LEDGER_VIEW]=ledgerView=()=>hookLedger.snapshot();
  };
  pi.on('session_start',start);pi.on('session_switch',start);
