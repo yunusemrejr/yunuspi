@@ -57,6 +57,30 @@ test('Span charges join session costs while legacy missing-price zero remains un
  assert.equal(collect([span({})]).unknown,true);
 });
 
+test('legacy ElevenLabs results recover exact units and current receipts supersede them once',()=>{
+ const tool=(toolName,toolCallId,details)=>({type:'message',message:{role:'toolResult',toolName,toolCallId,details}});
+ const speech=tool('narration_tts','speech-call',{provider:'elevenlabs',model:'eleven_v3',receipts:[
+   {requestId:'fresh-speech',characterCost:'12',reused:false},
+   {requestId:'cached-speech',characterCost:'99',reused:true},
+ ]});
+ const sound=tool('audio_generate','sound-call',{provider:'elevenlabs',model:'eleven_text_to_sound_v2',kind:'sfx',decodeVerified:true,requestId:null,characterCost:'20.5'});
+ const malformed=tool('audio_generate','bad-call',{...sound.message.details,characterCost:'-1'});
+ const local=tool('audio_generate','local-call',{...sound.message.details,provider:'local'});
+ const cost=collect([speech,sound,speech,sound,malformed,local]);
+ assert.equal(cost.unknown,true);
+ assert.equal(cost.auxiliary.reported,0);
+ assert.deepEqual(cost.rows.map(row=>row.billingUnits).sort((a,b)=>a-b),[12,20.5]);
+ const terminal=(id,owner,model,data)=>auxiliary(id,'completed',usage(.01),{provider:'elevenlabs',owner,model,...data});
+ const currentSpeech=terminal('modern-1','narration_tts','eleven_v3',{requestId:'fresh-speech',characterCost:12});
+ const currentSound=terminal('modern-2','audio_generate','eleven_text_to_sound_v2',{toolCallId:'sound-call',characterCost:20.5});
+ const current=collect([speech,sound,currentSpeech,currentSound]);
+ assert.equal(current.total,.02);
+ assert.equal(current.unknown,false);
+ assert.equal(current.rows.reduce((sum,row)=>sum+row.billingUnits,0),32.5);
+ const zero=collect([tool('audio_generate','free',{...sound.message.details,characterCost:'0'})]);
+ assert.equal(zero.formatted,'$0.000');
+});
+
 test('provider receipts supersede incomplete or estimated snapshots for the same physical response',()=>{
  const reported=message(.1,'openrouter','example',{responseId:'shared-id'});
  const estimated=message(.25,'openrouter','example',{responseId:'shared-id',usage:usage(.25,'provider-estimate')});

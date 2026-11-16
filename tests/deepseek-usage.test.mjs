@@ -19,14 +19,15 @@ const atHoliday = Date.parse("2026-10-01T07:00:00Z") / 1000;
 const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-12, `${actual} vs ${expected}`);
 
 function price(model, time, serverToolUse) {
+  const at = Date.parse(time);
   const usage = { input: 600, output: 100, cacheRead: 400, cacheWrite: 0 };
-  calculateCost(model, usage);
-  applyDeepSeekPricing(model, usage, { server_tool_use: serverToolUse }, Date.parse(time));
+  calculateCost(model, usage, at);
+  applyDeepSeekPricing(model, usage, { server_tool_use: serverToolUse }, at);
   return usage.cost;
 }
 
 test("direct DeepSeek rates follow verified UTC intervals and China holiday dates", () => {
-  assert.deepEqual(pro.cost, { input: 1.32, output: 3.96, cacheRead: 0.044, cacheWrite: 0 });
+  assert.deepEqual(pro.cost, { input: 1.32, output: 3.96, cacheRead: 0.044, cacheWrite: 0, validUntil: Date.parse("2026-12-12T00:00:00Z") });
   for (const [time, period] of [
     ["2026-11-16T00:59:59Z", "off-peak"], ["2026-11-16T01:00:00Z", "peak"],
     ["2026-11-16T04:00:00Z", "off-peak"], ["2026-11-16T06:00:00Z", "peak"],
@@ -34,7 +35,9 @@ test("direct DeepSeek rates follow verified UTC intervals and China holiday date
     ["2026-10-01T07:00:00Z", "off-peak"], ["2027-02-05T07:00:00Z", "off-peak"],
     ["2028-03-06T07:00:00Z", "unknown"],
   ]) {
-    const rated = time.startsWith("2026-10-01") ? flash : pro;
+    // Exercise the calendar on a fixture whose rate has been independently extended.
+    const row = time.startsWith("2026-10-01") ? flash : pro;
+    const rated = { ...row, cost: { ...row.cost, validUntil: Date.parse("2029-01-01T00:00:00Z") } };
     const evidence = price(rated, time);
     assert.equal(evidence.priceBasis, `deepseek-${period}-2026-11-16`);
     assert.equal(evidence.rates.input, rated.cost.input * (period === "peak" ? 1 : 0.5));
@@ -56,6 +59,22 @@ test("only documented server meters contribute to the direct DeepSeek fee", () =
   const proxy = price({ ...flash, baseUrl: "https://fixture.invalid" }, time, web);
   assert.equal(proxy.serverToolCost, undefined);
   assert.equal(proxy.rates.input, 0.3);
+});
+
+test("an expired request price leaves independently metered server tools visible", () => {
+  const at = Date.parse("2026-12-12T00:00:00Z");
+  const usage = { input: 600, output: 100, cacheRead: 400, cacheWrite: 0 };
+  calculateCost(flash, usage, at);
+  applyDeepSeekPricing(flash, usage, { server_tool_use: web }, at);
+  near(usage.cost.total, 0.003);
+  assert.equal(usage.cost.complete, false);
+  assert.equal(usage.cost.priceBasis, "catalog-price-expired");
+  assert.deepEqual(usage.cost.rates, {});
+  const { validUntil, ...explicit } = flash.cost;
+  const configured = { ...flash, cost: { ...flash.cost, afterExpiry: explicit } };
+  const cost = price(configured, "2026-12-12T00:00:00Z", web);
+  near(cost.total, 0.0033024);
+  assert.equal(cost.complete, true);
 });
 
 function fixtureResponse(frames) {

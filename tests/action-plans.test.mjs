@@ -223,3 +223,82 @@ test('todo is a sequential barrier so its completion gate sees sibling verificat
  assert.equal(tools.todo.executionMode,'sequential');
 });
 
+test('todo completion verifies the resulting live plan before commit, even without prior receipts', async t => {
+ const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-completion-'));
+ t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+ const mode = process.env.PI_CHECKPOINTS;
+ delete process.env.PI_CHECKPOINTS;
+ t.after(() => { if (mode !== undefined) process.env.PI_CHECKPOINTS = mode; });
+ const [{loadExtensions}, {ExtensionRunner}, {SessionManager}, {wrapToolDefinition}, {validateToolArguments}, {registerContinuationSource}] = await Promise.all([
+  import('../core/coding-agent/dist/core/extensions/loader.js'),
+  import('../core/coding-agent/dist/core/extensions/runner.js'),
+  import('../core/coding-agent/dist/core/session-manager.js'),
+  import('../core/coding-agent/dist/core/tools/tool-definition-wrapper.js'),
+  import('@yunuspi/ai'),
+  import(pathToFileURL(path.join(agent, 'extensions/lib/continuation-notice.ts')).href),
+ ]);
+ const {extensions, errors, runtime} = await loadExtensions([
+  path.join(agent, 'extensions/checkpoints.ts'), path.join(agent, 'extensions/rpiv-todo/index.ts'),
+ ], cwd);
+ assert.deepEqual(errors, []);
+ const manager = SessionManager.inMemory(cwd);
+ const getBranch = t.mock.method(manager, 'getBranch');
+ const runner = new ExtensionRunner(extensions, runtime, cwd, manager, {});
+ t.after(() => runner.invalidate());
+ let checks = 0;
+ t.after(registerContinuationSource({
+  name: 'fixture checks', session: manager, pending: () => [], verificationReceipts: () => {
+   checks++;
+   return [{source:'fixture',id:'checks',state:'pending',line:'Fixture verification is pending.'}];
+  },
+ }));
+ let writable = true;
+ runtime.appendEntry = (type, data) => {
+  if (!writable && type === 'completion-gate-v1') throw new Error('fixture storage failure');
+  return manager.appendCustomEntry(type, data);
+ };
+ const todo = wrapToolDefinition(runner.getToolDefinition('todo'), () => runner.createContext());
+ const call = async raw => {
+  const id = randomBytes(8).toString('hex');
+  const args = validateToolArguments(todo, {type:'toolCall',id,name:'todo',arguments:todo.prepareArguments(raw)});
+  const gate = await runner.emitToolCall({type:'tool_call',toolName:'todo',toolCallId:id,input:args});
+  if (gate?.block) throw new Error(gate.reason);
+  return todo.execute(id, args);
+ };
+ const complete = {action:'update',id:1,status:'completed',evidence:'Fixture check.'};
+ await call({action:'create',subject:'Fixture outcome',acceptance:'Show evidence'});
+ const missing = await call({action:'update',id:1,status:'completed'});
+ assert.equal(missing.isError, true);
+ assert.match(missing.content[0].text, /verification evidence/);
+ const reopened = await call({action:'batch',operations:[complete,{action:'update',id:1,status:'pending'}]});
+ assert.equal(reopened.details.tasks[0].status, 'pending');
+ assert.equal(checks, 0, 'invalid and nonclosing updates never consult the verification gate');
+ assert.equal(getBranch.mock.callCount(), 0, 'todo checking does not depend on transcript replay');
+
+ const batch = {action:'update',operations:[
+  complete, {action:'create',id:-2,subject:'Fixture sibling'}, {action:'update',id:-2,status:'completed'},
+ ]};
+ writable = false;
+ await assert.rejects(call(batch), /Completing the last open task refused/);
+ writable = true;
+ await assert.rejects(call(batch), /Completing the last open task refused/);
+ writable = false;
+ await assert.rejects(call(batch), /Verification waiver could not be recorded/);
+ const pending = await call({action:'list'});
+ assert.deepEqual(pending.details.tasks.map(({id,status}) => [id,status]), [[1,'pending']], 'a veto rolls back the full batch and its alias');
+ writable = true;
+ const settled = await call(batch);
+ assert.deepEqual(settled.details.tasks.map(({id,status}) => [id,status]), [[1,'completed'],[2,'completed']]);
+ assert.equal(checks, 4);
+ assert.equal(getBranch.mock.callCount(), 0);
+ assert.deepEqual(manager.getEntries().filter(entry => entry.customType === 'completion-gate-v1').map(entry => entry.data.decision), ['refused','waived']);
+
+ await call({action:'batch',operations:[{action:'create',subject:'One more'},{action:'create',subject:'Another'}]});
+ const overlaps = await Promise.allSettled([3,4].map(id => call({action:'update',id,status:'completed'})));
+ assert.equal(overlaps.filter(result => result.status === 'fulfilled').length, 1);
+ assert.match(overlaps.find(result => result.status === 'rejected').reason.message, /Completing the last open task refused/);
+ const live = await call({action:'list'});
+ assert.equal(live.details.tasks.filter(task => task.status === 'pending').length, 1);
+ assert.equal(checks, 5, 'only the second live mutation could finish the full plan');
+});
+

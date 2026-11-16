@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {DEEPSEEK_MODELS} from '../core/ai/src/providers/deepseek.models.js';
 const template=path.resolve(import.meta.dirname,'..');
 const agent=[path.join(template,'agent'),path.resolve(template,'..')].find(p=>fs.existsSync(path.join(p,'extensions/lib/model-facts.ts')));
 const {MODEL_FACTS_VERSION,MODEL_FACTS,currentModelFacts,knownModelFacts,directDeepseekCost,antLingCost,antLingRetired}=await import(pathToFileURL(path.join(agent,'extensions/lib/model-facts.ts')));
@@ -16,8 +17,9 @@ test('dated model facts have explicit provenance and expire without becoming fre
   assert.equal(currentModelFacts(provider,Date.parse(row.verifiedAt)-1),undefined);
  }
  assert.equal(currentModelFacts('__proto__'),undefined);
+ for(const model of Object.values(DEEPSEEK_MODELS)) assert.equal(model.cost.validUntil,Date.parse(MODEL_FACTS.deepseek.expiresAt));
  assert.equal(directDeepseekCost('deepseek-flash',Date.parse(MODEL_FACTS.deepseek.expiresAt)),undefined);
- assert.deepEqual(directDeepseekCost('deepseek-flash',Date.parse(MODEL_FACTS.deepseek.expiresAt)-1),{input:0.3,output:1.2,cacheRead:0.006,cacheWrite:0});
+ assert.deepEqual(directDeepseekCost('deepseek-flash',Date.parse(MODEL_FACTS.deepseek.expiresAt)-1),{input:0.3,output:1.2,cacheRead:0.006,cacheWrite:0,validUntil:Date.parse(MODEL_FACTS.deepseek.expiresAt)});
 });
 test('a snapshot past its window is stale, not gone: limits and wire formats keep applying, prices stop',()=>{
  for(const [provider,row] of Object.entries(MODEL_FACTS)){
@@ -36,12 +38,12 @@ test('versioned direct price schedule preserves its original boundary',()=>{
  assert.equal(directDeepseekCost('deepseek-v4-pro',cutover).input,0.3);
  const back=Date.parse('2026-11-10T00:00:00Z');
  assert.equal(directDeepseekCost('deepseek-v4-pro',back-1).input,0.3);
- assert.deepEqual(directDeepseekCost('deepseek-v4-pro',back),{input:1.32,output:3.96,cacheRead:0.044,cacheWrite:0});
+ assert.deepEqual(directDeepseekCost('deepseek-v4-pro',back),{input:1.32,output:3.96,cacheRead:0.044,cacheWrite:0,validUntil:Date.parse(MODEL_FACTS.deepseek.expiresAt)});
  assert.equal(directDeepseekCost('unknown',cutover),undefined);
 });
 test('Ant Ling prices stop at their review dates and withdrawn models stop at the vendor\'s moment',()=>{
  const day=iso=>Date.parse(iso);
- assert.deepEqual(antLingCost('Ling-3.2-flash',day('2026-11-17T23:59:59Z')),{input:0,output:0,cacheRead:0,cacheWrite:0,knownFree:true});
+ assert.deepEqual(antLingCost('Ling-3.2-flash',day('2026-11-17T23:59:59Z')),{input:0,output:0,cacheRead:0,cacheWrite:0,knownFree:true,validUntil:day('2026-11-18T00:00:00Z')});
  assert.equal(antLingCost('Ling-3.2-flash',day('2026-11-18T00:00:00Z')),undefined,'the price after the free fortnight is not published');
  assert.equal(antLingCost('Ling-3.1-flash',day('2026-11-27T23:59:59Z')).input,0.07494);
  assert.equal(antLingCost('Ling-3.1-flash',day('2026-11-28T00:00:00Z')),undefined);

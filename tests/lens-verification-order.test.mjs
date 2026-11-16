@@ -10,6 +10,7 @@ import {parseExpressionAt} from 'acorn';
 import {configureDeferredMutationDrain,flushLensBeforeVerification} from '../agent/extensions/pi-lens/context-lsp.mjs';
 import {createProjectTestLifecycle,createWorkspaceRevision,projectCheckCommand,checkInvocation} from '../agent/extensions/lib/project-tests.ts';
 import {createQualityReviewLifecycle} from '../agent/extensions/lib/quality-review.ts';
+import {isDeployCommand} from '../agent/extensions/lib/session-hooks.ts';
 import {GuardianSupervisor,tagGuardianRequestMessage} from '../core/coding-agent/dist/core/guardian/guardian-supervisor.js';
 import {createReadToolDefinition} from '../core/coding-agent/dist/core/tools/read.js';
 import {createEditToolDefinition} from '../core/coding-agent/dist/core/tools/edit.js';
@@ -108,7 +109,7 @@ test('real deferred autofix/format settles before native check capture and stays
   const input={source:'interactive',text:'Fix the parser and verify the behavior'};api.input(input);quality.input(input);
   fs.writeFileSync(f.file,'export const value=1;\n');
   await api.result({toolName:'edit',toolCallId:'edit',input:{path:'range.js'},isError:false},f.ctx);
-  const hook=vm.runInNewContext(`(${nativeHook})`,{flushLensBeforeVerification,projectCheckCommand,checkInvocation,gateCompletion:()=>undefined,starts:new Map(),mutationVersion:0,batchOf:()=> 'scope',projectTests:api});
+  const hook=vm.runInNewContext(`(${nativeHook})`,{flushLensBeforeVerification,projectCheckCommand,checkInvocation,isDeployCommand,gateCompletion:()=>undefined,starts:new Map(),mutationVersion:0,batchOf:()=> 'scope',projectTests:api});
   f.queue();
   await hook(event('project_tests'),f.ctx);
   assert.deepEqual(f.order,['autofix','mutation','format','mutation']);
@@ -212,7 +213,7 @@ test('native configured check plans flush custom runners before recording their 
   t.after(()=>api.shutdown());await api.restore(f.ctx);api.input({source:'interactive',text:'Verify the declared project check'});
   await tools.project_tests.execute('assess',{action:'assess',disposition:'required',reason:'The configured project runner exercises the changed behavior.',commands:['make test']},undefined,undefined,f.ctx);
   f.queue();
-  const hook=vm.runInNewContext(`(${nativeHook})`,{flushLensBeforeVerification,projectCheckCommand,checkInvocation,gateCompletion:()=>undefined,starts:new Map(),mutationVersion:0,batchOf:()=> 'scope',projectTests:api});
+  const hook=vm.runInNewContext(`(${nativeHook})`,{flushLensBeforeVerification,projectCheckCommand,checkInvocation,isDeployCommand,gateCompletion:()=>undefined,starts:new Map(),mutationVersion:0,batchOf:()=> 'scope',projectTests:api});
   await hook(event('bash','make test'),f.ctx);
   assert.equal(f.order.filter(value=>value==='format').length,1);
   assert.equal(f.runtime.pendingDeferredMutationCount,0);

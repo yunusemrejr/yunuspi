@@ -1177,7 +1177,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - [`agent/extensions/pi-subagents/src/runs/background/wait-tool.ts`](../agent/extensions/pi-subagents/src/runs/background/wait-tool.ts) — registration receives the source-owned primaryTool definition; known tools: `bg_wait` (lines 31)
 - [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) — registerTool() receives a computed or indirect definition; the runtime name is not inferred (lines 601)
 - [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) — registration uses configurable toolNames; checked-in defaults are enumerated; known tools: `fetch_content`, `get_search_content`, `source_check`, `web_search` (lines 1575, 2161, 2317, 2707)
-- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 125)
+- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registration uses the source-owned TOOL_NAME constant; known tools: `todo` (lines 126)
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — registration loops over the static TOOLS catalog; catalog names are enumerated; known tools: `sqlite_probe`, `workspace_search` (lines 30)
 - [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) — registration passes names through a local factory; literal factory call sites are enumerated; known tools: `audio_generate`, `narration_tts`, `video_browser`, `video_project`, `video_qa`, `video_render` (lines 25)
 
@@ -1186,7 +1186,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /bg — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 623)
 - /bg-clear — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 657)
 - /budget — [`agent/extensions/cost-governor.ts`](../agent/extensions/cost-governor.ts) (line 895)
-- /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1863)
+- /catalog-status — [`agent/extensions/live-models.ts`](../agent/extensions/live-models.ts) (line 1877)
 - /claude-cache — [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) (line 2161)
 - /commands — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1827)
 - /cost — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1377)
@@ -1219,7 +1219,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /project-memory — [`agent/extensions/pi-vector-memory.ts`](../agent/extensions/pi-vector-memory.ts) (line 623)
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 257)
 - /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 653)
-- /provider-health — [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts) (line 516)
+- /provider-health — [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts) (line 522)
 - /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1120)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 825)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3390)
@@ -1245,7 +1245,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 - [`agent/extensions/goal.ts`](../agent/extensions/goal.ts) — registerCommand() receives a computed name (lines 503)
 - [`agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts`](../agent/extensions/pi-background-tasks/src/core/anthropic-attribution.ts) — registerCommand() receives a computed name (lines 364)
-- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registerCommand() receives a computed name (lines 180)
+- [`agent/extensions/rpiv-todo/todo.ts`](../agent/extensions/rpiv-todo/todo.ts) — registerCommand() receives a computed name (lines 187)
 
 ## MCP and wrapper service owners
 

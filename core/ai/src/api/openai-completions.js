@@ -221,10 +221,11 @@ export const stream = (model, context, options) => {
                 maxRetries: 0,
             };
             const directDeepSeek = isDirectDeepSeek(model);
+            const tracksPriceTime = directDeepSeek || model.cost?.validUntil !== undefined;
             let dispatchedAt;
             const { data: openaiStream, response } = await retryProviderRequest(async () => {
+                if (tracksPriceTime) dispatchedAt = Date.now();
                 if (directDeepSeek) {
-                    dispatchedAt = Date.now();
                     const response = await client.chat.completions.create(params, requestOptions).asResponse();
                     // The SDK turns inline SSE errors into exceptions before exposing raw usage.
                     return { data: iterateDeepSeekChunks(response, options?.signal), response };
@@ -394,7 +395,7 @@ export const stream = (model, context, options) => {
                 // OpenAI documents ChatCompletionChunk.id as the unique chat completion identifier,
                 // and each chunk in a streamed completion carries the same id.
                 output.responseId ||= chunk.id;
-                if (directDeepSeek) createdAt ??= providerCreatedMs(chunk.created);
+                if (tracksPriceTime) createdAt ??= providerCreatedMs(chunk.created);
                 if (typeof chunk.model === "string" && chunk.model.length > 0 && chunk.model !== model.id) {
                     output.responseModel ||= chunk.model;
                 }
@@ -1251,7 +1252,7 @@ usage.cacheReadReported = [rawUsage.prompt_tokens_details?.cached_tokens, rawUsa
     // Completion tokens already include it: expose the breakdown, never add it.
     const reasoningCount = rawUsage.completion_tokens_details?.reasoning_tokens ?? rawUsage.reasoning_tokens;
     usage.reasoning = Number.isSafeInteger(reasoningCount) && reasoningCount >= 0 ? Math.min(reasoningCount, usage.output) : 0;
-calculateCost(model,usage);
+calculateCost(model,usage,createdAt);
 usage.cost.source = 'estimate';
     if (model.provider === 'openrouter' && Number.isFinite(rawUsage.cost) && rawUsage.cost >= 0) {
       let official = false;

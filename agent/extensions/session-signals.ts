@@ -1391,7 +1391,7 @@ export default function (pi: any) {
         "", "By scope and model",
         ...cost.rows.map(
           (r: any) =>
-            `${r.scope} · ${r.route}: ${money(r.reported + r.estimated)}${r.estimatedUsage ? " estimated" : ""}${r.unknown ? " + unpriced usage" : ""}${r.subscription ? " · subscription" : ""}`,
+            `${r.scope} · ${r.route}: ${money(r.reported + r.estimated)}${r.estimatedUsage ? " estimated" : ""}${r.unknown ? " + unpriced usage" : ""}${r.subscription ? " · subscription" : ""}${Number.isFinite(r.billingUnits) ? ` · ${r.billingUnits.toLocaleString("en-US", { maximumFractionDigits: 12 })} billing units` : ""}`,
         ),
         "", "Coverage",
         "Main responses, child runs, retries, compactions and usage-bearing tools are included when recorded. Repeated child snapshots count once.",

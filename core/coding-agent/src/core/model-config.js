@@ -174,6 +174,8 @@ const ModelOverrideSchema = Type.Object({
         output: Type.Optional(Type.Number()),
         cacheRead: Type.Optional(Type.Number()),
         cacheWrite: Type.Optional(Type.Number()),
+        cacheWrite1h: Type.Optional(Type.Number()),
+        knownFree: Type.Optional(Type.Boolean()),
         tiers: Type.Optional(Type.Array(ModelCostTierSchema)),
     })),
     contextWindow: Type.Optional(Type.Number()),

@@ -740,6 +740,12 @@ export interface ModelCostTier extends ModelCostRates {
 export interface ModelCost extends ModelCostRates {
     /** Rates absent from discovery metadata; zero placeholders are not free-price evidence. */
     missing?: Array<keyof ModelCostRates>;
+    /** Whether an all-zero price is explicitly supported by billing evidence. */
+    knownFree?: boolean;
+    /** Exclusive UTC cutoff, in epoch milliseconds, for this catalog price. */
+    validUntil?: number;
+    /** Explicit user rates that remain usable after the underlying catalog price expires. */
+    afterExpiry?: Partial<ModelCostRates> & { cacheWrite1h?: number; knownFree?: boolean; tiers?: ModelCostTier[] };
     /** Request-wide pricing tiers. The highest matching input threshold applies to the full request. */
     tiers?: ModelCostTier[];
 }

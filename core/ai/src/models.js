@@ -546,12 +546,15 @@ export function createProvider(input) {
 export function hasApi(model, api) {
     return model.api === api;
 }
-export function calculateCost(model, usage) {
+export function calculateCost(model, usage, requestAt = Date.now()) {
     // USD per million, captured on the response so model switches and catalog
     // refreshes never retroactively reprice a session. Reasoning is in output.
     const valid = n => typeof n === 'number' && Number.isFinite(n) && n >= 0;
     const buckets = ['input', 'output', 'cacheRead', 'cacheWrite'];
-    const base = model.cost ?? {};
+    const catalog = model.cost ?? {};
+    const expired = catalog.validUntil !== undefined &&
+        (!valid(catalog.validUntil) || !valid(requestAt) || requestAt >= catalog.validUntil);
+    const base = expired ? catalog.afterExpiry ?? {} : catalog;
     let complete = buckets.every(k => valid(usage[k]));
     const inputTokens = buckets.filter(k => k !== 'output').reduce((sum, k) => sum + (valid(usage[k]) ? usage[k] : 0), 0);
     let rates = { ...base }, threshold = -1;
@@ -567,7 +570,7 @@ export function calculateCost(model, usage) {
     if (usage.cacheWrite1h !== undefined && (!valid(usage.cacheWrite1h) || usage.cacheWrite1h > writes)) complete = false;
     const cost = usage.cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
     for (const key of buckets) {
-        const tokens = valid(usage[key]) ? usage[key] : 0;
+        const tokens = key === 'cacheWrite' ? writes - longWrite : valid(usage[key]) ? usage[key] : 0;
         if (tokens > 0 && base.missing?.includes(key)) complete = false;
         if (!valid(rates[key])) { if (tokens > 0) complete = false; continue; }
         cost[key] = tokens * rates[key] / 1e6;
@@ -577,15 +580,16 @@ export function calculateCost(model, usage) {
         // Existing native contract: 1h writes cost 2x input. An explicit 1h
         // rate supports gateways whose write schedule differs from Anthropic.
         longRate = rates.cacheWrite1h ?? (valid(rates.input) ? rates.input * 2 : undefined);
-        if (valid(longRate) && valid(rates.cacheWrite)) cost.cacheWrite = ((writes - longWrite) * rates.cacheWrite + longWrite * longRate) / 1e6;
+        if (valid(longRate)) cost.cacheWrite += longWrite * longRate / 1e6;
         else complete = false;
     }
     cost.total = buckets.reduce((sum, k) => sum + cost[k], 0);
     // Zero-filled catalog placeholders cannot establish a free route.
-    if (buckets.every(k => !rates[k]) && base.knownFree !== true) complete = false;
+    if (buckets.every(k => !rates[k]) && !longRate && base.knownFree !== true) complete = false;
     if (!Number.isFinite(cost.total)) { cost.total = 0; complete = false; }
     cost.source = 'estimate';
     cost.complete = complete;
+    if (expired) cost.priceBasis = 'catalog-price-expired';
     cost.provider = model.provider;
     cost.model = model.id;
     cost.rates = Object.fromEntries(buckets.filter(k => valid(rates[k])).map(k => [k, rates[k]]));

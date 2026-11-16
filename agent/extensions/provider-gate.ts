@@ -22,8 +22,7 @@
  *      `PI_AUTONOMOUS_REQUEST_DENIED` (the patched request seam re-throws
  *      exactly this code, so the request never reaches the provider) with a
  *      rate-limit-class message, so the existing cooldown-class retry
- *      machinery owns the longer wait (fixed 25s between re-requests,
- *      ~2min budget, pause until the user's next message) — and every
+ *      machinery owns the longer wait within its retry budget — and every
  *      re-request passes through this gate again.
  *
  * The admitted request owns its terminal observer. It classifies each failure
@@ -44,7 +43,7 @@
  * It skips loopback/mock endpoints.
  */
 
-import type { AssistantMessage } from "@yunuspi/ai";
+import { setSharedProviderCooldown, type AssistantMessage } from "@yunuspi/ai";
 import { cacheProfileFor } from "./lib/lean-policy.ts";
 import type {
 	BeforeAuxiliaryProviderRequestEvent,
@@ -54,6 +53,7 @@ import type {
 } from "@yunuspi/coding-agent";
 import {
 	GateDeniedError,
+	REQUEST_RATE_PROVIDERS,
 	estimateTokens,
 	gateRequest,
 	evaluateRoute,
@@ -350,6 +350,9 @@ async function admitRoute(
 	} catch (error) {
 		if (error instanceof GateDeniedError) {
 			const d = error.details;
+			if (d.kind === "quota-rate" && REQUEST_RATE_PROVIDERS.has(route.provider)) {
+				setSharedProviderCooldown(error, d.cooldownUntil);
+			}
 			setStatus(ctx, `provider-gate: ${route.provider}/${route.model} cooling ${Math.ceil(d.waitMs / 1000)}s` +
 				` (${d.kind ?? "unknown"} via ${d.source ?? "unknown"}); state: provider-health.json`);
 		}
@@ -375,6 +378,9 @@ function recordCompletion(
 	if (message.stopReason === "error") {
 		if (attempt && !attempt.ambiguous && attempt.started === undefined) return;
 		const recorded = recordFailure({ provider, model, errorMessage, providerRetry: message.providerRetry, source, endpoint, estTokens: attributed?.estTokens, rates });
+		if (attributed && recorded?.kind === "quota-rate" && REQUEST_RATE_PROVIDERS.has(provider)) {
+			setSharedProviderCooldown(message, recorded.retryCooldownUntil);
+		}
 		if (!recorded) invalidateEconomyUsage(provider, model);
 		return;
 	}

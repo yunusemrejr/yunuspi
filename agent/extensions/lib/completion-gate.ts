@@ -11,32 +11,36 @@
  * never deadlocked, and the waiver stays visible in the session. Sources stay
  * owned by their subsystems.
  */
+import type { ExtensionContext } from "@yunuspi/coding-agent";
+
+export const TODO_COMPLETION_CHECK = "todo-completion-check";
+
+/** The todo tool collects a synchronous refusal before it commits its plan. */
+export interface TodoCompletionCheck {
+	ctx: ExtensionContext;
+	refuse(reason: string): void;
+}
 
 export interface PlanTask {
 	id: number;
 	status?: string;
 }
 
-type Mutation = { action?: string; id?: number; status?: string };
+type Mutation = { action?: string; status?: string };
 
 const OPEN = (task: PlanTask) => task.status !== "completed" && task.status !== "deleted";
 
-/** True when this todo call leaves no open task while completing at least one. */
-export function completesPlan(tasks: readonly PlanTask[], params: Mutation & { operations?: Mutation[] }): boolean {
-	const ops: Mutation[] = params?.action === "batch" ? (Array.isArray(params.operations) ? params.operations : []) : [params ?? {}];
-	const closing = new Set<number>();
-	let completes = false;
-	for (const op of ops) {
-		if (op?.action === "create" && op.status !== "completed" && op.status !== "deleted") return false;
-		if (op?.action === "update" && typeof op.id === "number" && (op.status === "completed" || op.status === "deleted")) {
-			closing.add(op.id);
-			if (op.status === "completed") completes = true;
-		}
-		if (op?.action === "delete" && typeof op.id === "number") closing.add(op.id);
-		if (op?.action === "create" && op.status === "completed") completes = true;
-	}
-	if (!completes) return false;
-	return tasks.filter(OPEN).every((task) => closing.has(task.id));
+/** Cheap prefilter. The reducer decides what the prepared operations actually do. */
+export function mayCompleteTask(params: Mutation & { operations?: Mutation[] }): boolean {
+	const completing = (op: Mutation) => (op?.action === "create" || op?.action === "update") && op.status === "completed";
+	return completing(params) || (Array.isArray(params.operations) && params.operations.some(completing));
+}
+
+/** A successful mutation completes the plan when it finishes new work and leaves no tasks open. */
+export function completesPlan(before: readonly PlanTask[], after: readonly PlanTask[]): boolean {
+	if (before === after || after.some(OPEN)) return false;
+	const completed = new Set(before.filter(task => task.status === "completed").map(task => task.id));
+	return after.some(task => task.status === "completed" && !completed.has(task.id));
 }
 
 export interface GateDecision {

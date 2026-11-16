@@ -1,3 +1,10 @@
+## 0.56.8 — Verification, provider cooldowns, and saved billing evidence
+
+- Todo checks verification before committing the final plan. Batch aliases use the same validation, and edits that leave work open skip the transcript lookup.
+- Ant Ling turns and native summaries use the shared route cooldown for request-rate retries. Server retry advice and the remaining retry budget still bound recovery.
+- Dated price estimates expire against the request timestamp, including for an already-selected model. Offline Ant Ling catalogs no longer restore expired promotional rates.
+- Saved ElevenLabs narration and sound effects contribute recorded billing units to `/cost`. Missing dollar amounts stay visible as unpriced usage, and modern receipts use the tool-call ID to avoid counting replayed results twice.
+
 ## 0.56.7 — Restore live model discovery during extension load
 
 - The model discovery extension resolves the shared DeepSeek pricing helper through the installed API entry point.

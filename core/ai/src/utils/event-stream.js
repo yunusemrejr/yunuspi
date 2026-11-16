@@ -1,3 +1,5 @@
+import { getSharedProviderCooldown, setSharedProviderCooldown } from "./provider-retry.js";
+
 // Generic event stream class for async iteration
 export class EventStream {
     queue = [];
@@ -122,6 +124,7 @@ export function piWithStreamIdle(model, options, start) {
     const callerSignal = options?.signal;
     let timer, pendingStop, iterator, finished = false, lastMessage;
     let started = false, payloadEntered = false, payloadReleased = false;
+    let deniedUntil;
     const recordLocalFailure = (message) => {
         // Once any payload passed preflight, a later denial or cancellation
         // cannot tell us whether that earlier attempt incurred a charge.
@@ -129,16 +132,24 @@ export function piWithStreamIdle(model, options, start) {
         if ((started && (!payloadEntered || payloadReleased || lastMessage)) || !usage || message.responseId ||
             usage.totalTokens || usage.input || usage.output || usage.cacheRead || usage.cacheWrite || usage.cost?.total || usage.cost?.source)
             return message;
-        return { ...message, usage: { ...usage, dispatchOutcome: "not-dispatched" } };
+        const local = { ...message, usage: { ...usage, dispatchOutcome: "not-dispatched" } };
+        if (message.stopReason === "error") setSharedProviderCooldown(local, deniedUntil);
+        return local;
     };
     const onPayload = async (...args) => {
         payloadEntered = true;
         controller.signal.throwIfAborted();
-        const result = await options.onPayload(...args);
-        controller.signal.throwIfAborted();
-        if (finished) throw new DOMException("Request already settled", "AbortError");
-        payloadReleased = true;
-        return result;
+        deniedUntil = undefined;
+        try {
+            const result = await options.onPayload(...args);
+            controller.signal.throwIfAborted();
+            if (finished) throw new DOMException("Request already settled", "AbortError");
+            payloadReleased = true;
+            return result;
+        } catch (error) {
+            if (error?.code === "PI_AUTONOMOUS_REQUEST_DENIED") deniedUntil = getSharedProviderCooldown(error);
+            throw error;
+        }
     };
     const errorMessage = (error, reason) => {
         let message;

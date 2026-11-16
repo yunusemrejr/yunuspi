@@ -24,7 +24,7 @@ export default function videoStudio(pi: any) {
   function register(name: string, description: string, parameters: any, handler: (params: any, cwd: string, signal?: AbortSignal, progress?: (text: string) => void, onUsage?: ElevenUsageSink) => Promise<any>, deadlineMs: number) {
     pi.registerTool({
       name, label: name.replaceAll("_", " "), description, parameters,
-      async execute(_id: string, params: any, signal: AbortSignal | undefined, update: ((partial: any) => void) | undefined, ctx: any) {
+      async execute(toolCallId: string, params: any, signal: AbortSignal | undefined, update: ((partial: any) => void) | undefined, ctx: any) {
         const ownerManager = ctx?.sessionManager, ownerSession = ownerManager?.getSessionId?.();
         const deadline = AbortSignal.timeout(deadlineMs);
         const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
@@ -34,7 +34,7 @@ export default function videoStudio(pi: any) {
         if (name==='video_qa') await reviews.assertVisualReviews(params,ctx,bounded);
         const onUsage: ElevenUsageSink = receipt => {
           if (ownerSession && ctx?.sessionManager === ownerManager && ownerManager.getSessionId?.() === ownerSession) {
-            pi.appendEntry?.('auxiliary-model-usage-v1', { ...receipt, owner: name });
+            pi.appendEntry?.('auxiliary-model-usage-v1', { ...receipt, owner: name, toolCallId });
           }
         };
         const result = await handler(params, ctx?.cwd || process.cwd(), bounded, progress, onUsage);

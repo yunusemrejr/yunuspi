@@ -55,6 +55,50 @@ export function hasRecordedTokenUsage(usage, noExecution = false) {
   return counts.length > 0 && (counts.some(n => n > 0) || noExecution || readCostEvidence(usage).seen);
 }
 
+const elevenLabsMediaOwner = owner => owner === 'audio_generate' || owner === 'narration_tts';
+const elevenLabsRequestId = id => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(id) ? id : undefined;
+function elevenLabsBillingUnits(value) {
+  const amount = typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : value;
+  return typeof amount === 'number' && Number.isFinite(amount) && amount >= 0 ? amount : undefined;
+}
+
+/** Older media tools kept provider billing units in successful tool details.
+ * Exact request or tool-call identities supersede that copy when available. */
+function recoverElevenLabsUsage(messages, rows, validIdentity) {
+  const requests = new Set(), calls = new Set(), unlinkedRoutes = new Set(), recovered = new Set();
+  for (const row of rows.values()) {
+    if (!row.elevenLabsMedia) continue;
+    if (row.requestId) requests.add(row.requestId);
+    if (row.toolCallId) calls.add(JSON.stringify([row.owner, row.toolCallId]));
+    if (!row.requestId && !row.toolCallId) unlinkedRoutes.add(JSON.stringify([row.owner, row.route]));
+  }
+  for (const message of messages) {
+    const { details, toolName: owner, toolCallId } = message;
+    if (message.isError || message.usage || details?.provider !== 'elevenlabs' || !validIdentity(toolCallId, 160) ||
+        !validIdentity(details.model, 128)) continue;
+    const route = `elevenlabs/${details.model}`;
+    // Receipts from versions without either identifier may cover an older
+    // result on the same route. Avoid projecting a second uncertain bill.
+    if (unlinkedRoutes.has(JSON.stringify([owner, route]))) continue;
+    const candidates = owner === 'narration_tts'
+      ? Array.isArray(details.receipts) ? details.receipts.filter(row => row?.reused === false && elevenLabsRequestId(row.requestId)) : []
+      : details.decodeVerified === true && ['sfx','music'].includes(details.kind) ? [details] : [];
+    for (const candidate of candidates) {
+      const requestId = elevenLabsRequestId(candidate.requestId);
+      const call = JSON.stringify([owner, toolCallId]);
+      if (requestId ? requests.has(requestId) : calls.has(call)) continue;
+      const billingUnits = elevenLabsBillingUnits(candidate.characterCost);
+      if (billingUnits === undefined) continue;
+      const id = requestId ? `legacy-elevenlabs:request:${requestId}` : `legacy-elevenlabs:tool:${toolCallId}`;
+      if (recovered.has(id)) continue;
+      recovered.add(id);
+      const evidence = readCostEvidence(billingUnits === 0 ? {cost:{total:0,source:'provider-reported'}} : undefined);
+      rows.set(JSON.stringify([owner,id]), {id, owner, route, status:'completed', usage:{costDetails:evidence},
+        usageRecorded:false, tokens:0, billingUnits, evidence});
+    }
+  }
+}
+
 /** Direct SDK calls are auxiliary requests, not assistant turns or child agents.
  * Receipts contain only identity and provider accounting. A pending receipt is
  * not a zero charge; a late final receipt replaces the same request once. */
@@ -65,9 +109,10 @@ export function collectAuxiliaryModelUsage(entries) {
   const identity = (value, limit) => typeof value === 'string' && value.length > 0 && value.length <= limit && /^[a-zA-Z0-9_.:-]+$/.test(value);
   const routePart = (value, limit) => typeof value === 'string' && value.length > 0 && value.length <= limit && !/[\s\x00-\x1f\x7f]/.test(value);
   const valid = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
-  const summaries = [];
+  const summaries = [], olderMedia = [];
   let truncated = false;
   for (const entry of Array.isArray(entries) ? entries : []) {
+    if (entry?.type === 'message' && entry.message?.role === 'toolResult' && elevenLabsMediaOwner(entry.message.toolName)) olderMedia.push(entry.message);
     if ((entry?.type === 'compaction' || entry?.type === 'branch_summary') && !entry.fromHook && Array.isArray(entry.usage?.summaryReceiptIds)) summaries.push(entry);
     if (entry?.type !== 'custom' || entry.customType !== 'auxiliary-model-usage-v1') continue;
     const data = entry.data;
@@ -85,6 +130,12 @@ export function collectAuxiliaryModelUsage(entries) {
     const tokens = fields.filter(k => k !== 'reasoning').reduce((sum,k) => sum + (usage[k] ?? 0),0);
     const next = {id:data.id, owner:data.owner, route, status:data.status, usage, usageRecorded, tokens, evidence,
       accountingOnly:entry.accountingOnly === true || old?.accountingOnly === true, hasUsage:!!data.usage || old?.hasUsage === true};
+    if (data.provider === 'elevenlabs' && elevenLabsMediaOwner(data.owner)) {
+      next.elevenLabsMedia = true;
+      next.requestId = elevenLabsRequestId(data.requestId) ?? old?.requestId;
+      next.toolCallId = identity(data.toolCallId,160) ? data.toolCallId : old?.toolCallId;
+      next.billingUnits = elevenLabsBillingUnits(data.characterCost) ?? old?.billingUnits;
+    }
     if (old) {
       // Provider billing may correct an earlier estimate down to zero. Missing
       // or replayed estimate receipts cannot erase already measured usage.
@@ -97,6 +148,7 @@ export function collectAuxiliaryModelUsage(entries) {
     }
     rows.set(key,next);
   }
+  if (olderMedia.length) recoverElevenLabsUsage(olderMedia, rows, identity);
   const coveredSummaries = new Set(), coveredReceipts = new Set(), legacyReceipts = new Set();
   for (const entry of summaries) {
     const ids = entry.usage.summaryReceiptIds;
@@ -126,10 +178,11 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
   const rows = new Map(), nodes = new Map(), aliases = new Map();
   const pending = new Set(), settled = new Set(), seenEntries = new Set(), responses = new Map();
   let main = empty(), children = empty(), auxiliary = empty(), truncated = false;
-  const addRow = (scope, route, evidence) => {
+  const addRow = (scope, route, evidence, billingUnits) => {
     const key = `${scope}:${route}`;
     const previous = rows.get(key) ?? {scope, route, ...empty()};
-    rows.set(key, {...previous, ...mergeCostEvidence(previous,evidence)});
+    rows.set(key, {...previous, ...mergeCostEvidence(previous,evidence),
+      ...(Number.isFinite(billingUnits) ? {billingUnits:(previous.billingUnits ?? 0) + billingUnits} : {})});
   };
   const addDirect = (scope, route, evidence) => {
     if (scope === 'main') main = mergeCostEvidence(main,evidence);
@@ -271,7 +324,7 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
   truncated ||= auxiliaryRequests.truncated;
   for (const row of auxiliaryRequests.rows) {
     auxiliary = mergeCostEvidence(auxiliary, row.evidence);
-    addRow('auxiliary', row.route, row.evidence);
+    addRow('auxiliary', row.route, row.evidence, row.billingUnits);
   }
   // Resolve inclusive tree snapshots into own charges. A shared descendant can
   // appear in both a workflow and a step; it is charged once for the session.

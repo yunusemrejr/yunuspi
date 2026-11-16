@@ -193,7 +193,7 @@ export declare function createProvider<TApi extends Api = Api>(input: CreateProv
  */
 export { isFlatPlanProvider } from "./utils/flat-plan.js";
 export declare function hasApi<TApi extends Api>(model: Model<Api>, api: TApi): model is Model<TApi>;
-export declare function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage): Usage["cost"];
+export declare function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage, requestAt?: number): Usage["cost"];
 export declare function getSupportedThinkingLevels<TApi extends Api>(model: Model<TApi>): ModelThinkingLevel[];
 export declare function clampThinkingLevel<TApi extends Api>(model: Model<TApi>, level: ModelThinkingLevel): ModelThinkingLevel;
 /**

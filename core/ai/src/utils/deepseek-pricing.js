@@ -51,7 +51,8 @@ export function applyDeepSeekPricing(model, usage, reportedUsage, at, partial = 
     if (!isDirectDeepSeek(model)) return;
     const rate = deepSeekPublishedPeakRate(model.id, at);
     const cost = usage.cost;
-    if (rate && !model.cost?.tiers?.length && BASE_BUCKETS.every(key => model.cost?.[key] === rate[key])) {
+    if (rate && cost.priceBasis !== "catalog-price-expired" && !model.cost?.tiers?.length &&
+        BASE_BUCKETS.every(key => cost.rates?.[key] === rate[key])) {
         const period = weekdayPricing(at);
         const factor = period === "peak" ? 1 : 0.5;
         for (const key of BASE_BUCKETS) {

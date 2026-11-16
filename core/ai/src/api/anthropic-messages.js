@@ -283,9 +283,10 @@ export const stream = (model, context, options) => {
                 maxRetries: 0,
             };
             const directDeepSeek = isDirectDeepSeek(model);
+            const tracksPriceTime = directDeepSeek || model.cost?.validUntil !== undefined;
             let dispatchedAt, createdAt;
             const response = await retryProviderRequest(() => {
-                if (directDeepSeek) dispatchedAt = Date.now();
+                if (tracksPriceTime) dispatchedAt = Date.now();
                 return client.beta.messages.create(params, requestOptions).asResponse();
             }, {
                 maxRetries: options?.maxRetries,
@@ -299,7 +300,7 @@ export const stream = (model, context, options) => {
             for await (const event of iterateAnthropicEvents(response, options?.signal, directDeepSeek)) {
                 if (event.type === "message_start") {
                     output.responseId = event.message.id;
-                    if (directDeepSeek) createdAt = providerCreatedMs(event.message.created_at);
+                    if (tracksPriceTime) createdAt = providerCreatedMs(event.message.created_at);
                     const transformations = event.message.input_transformations;
                     if (Array.isArray(transformations))
                         inputTransformations = transformations;
@@ -320,7 +321,7 @@ export const stream = (model, context, options) => {
                     // Anthropic doesn't provide total_tokens, compute from components
                     output.usage.totalTokens =
                         output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
-                    calculateCost(usageModel, output.usage);
+                    calculateCost(usageModel, output.usage, createdAt ?? dispatchedAt);
                     applyDeepSeekPricing(usageModel, output.usage, event.message.usage, createdAt ?? dispatchedAt, true);
                 }
                 else if (event.type === "content_block_start") {
@@ -498,7 +499,7 @@ export const stream = (model, context, options) => {
                         // Anthropic doesn't provide total_tokens, compute from components.
                         output.usage.totalTokens =
                             output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
-                        calculateCost(usageModel, output.usage);
+                        calculateCost(usageModel, output.usage, createdAt ?? dispatchedAt);
                         applyDeepSeekPricing(usageModel, output.usage, event.usage, createdAt ?? dispatchedAt,
                             ![event.usage?.input_tokens, event.usage?.output_tokens, event.usage?.cache_read_input_tokens]
                                 .every(value => Number.isSafeInteger(value) && value >= 0));

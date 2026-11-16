@@ -1,4 +1,7 @@
-import { MAX_RETRY_TIMER_MS } from "./provider-retry.js";
+import { MAX_RETRY_TIMER_MS, getSharedProviderCooldown } from "./provider-retry.js";
+export { setSharedProviderCooldown } from "./provider-retry.js";
+
+export const COOLDOWN_RETRY_WINDOW_MS = 120_000;
 
 function buildProviderErrorPattern(patterns) {
     return new RegExp(patterns.join("|"), "i");
@@ -125,6 +128,18 @@ export function assistantRetryDelay(message, backoffMs, maxRetryDelayMs = 60_000
     if (requested > MAX_RETRY_TIMER_MS || maxRetryDelayMs > 0 && requested > maxRetryDelayMs) return undefined;
     return Math.max(backoffMs, Math.ceil(requested));
 }
+
+/** Plan a same-route retry from the gate's deadline, if one was recorded. */
+export function assistantCooldownRetryDelay(message, attempt, maxRetryDelayMs = 60_000, windowUntil = Infinity, provider = message.provider) {
+    const now = Date.now();
+    const until = getSharedProviderCooldown(message);
+    const backoff = until === undefined
+        ? (provider === "ant-ling" ? Math.min(25_000, 8_000 * (attempt + 1)) : 25_000)
+        : Math.max(0, until - now);
+    if (until !== undefined && (backoff > MAX_RETRY_TIMER_MS || maxRetryDelayMs > 0 && backoff > maxRetryDelayMs)) return undefined;
+    const delay = assistantRetryDelay(message, backoff, maxRetryDelayMs);
+    return delay !== undefined && delay < windowUntil - now ? delay : undefined;
+}
 class RetrySleepAbortError extends Error {
     constructor() {
         super("Aborted");
@@ -169,7 +184,7 @@ export async function retryAssistantCall(produce, policy, signal, callbacks) {
     const maxAttempts = policy?.enabled ? policy.maxRetries : 0;
     let attempt = 0;
     let lastRetry;
-    let rateLimitLoopStart = 0;
+    let rateLimitDeadline;
     for (;;) {
         const response = await produce();
         /* PI_AUX_EMPTY_RESPONSE */
@@ -198,9 +213,7 @@ export async function retryAssistantCall(produce, policy, signal, callbacks) {
         }
         // PI_RATE_LIMIT_POLICY (local patch): cooldown-class errors (rate limits +
         // provider-unavailable 503s + gateway/upstream stream failures) get a
-        // FIXED 25s cooldown and no maxRetries cap while this call has spent
-        // <2min in the consecutive loop; beyond that, give up with the final
-        // error so callers stop hammering the same shared pool.
+        // shared route cooldown or a local fallback within a two-minute window.
         const rateLimited = usesProviderCooldown(response);
         // The ordinary retry cap must be evaluated AFTER classification;
         // otherwise the documented two-minute cooldown budget is unreachable.
@@ -209,19 +222,10 @@ export async function retryAssistantCall(produce, policy, signal, callbacks) {
                 await callbacks?.onRetryFinished?.(false, lastRetry.attempt, response.errorMessage);
             return response;
         }
-        if (rateLimited) {
-            if (!rateLimitLoopStart) rateLimitLoopStart = Date.now();
-            if (Date.now() - rateLimitLoopStart > 120000) {
-                if (lastRetry)
-                    await callbacks?.onRetryFinished?.(false, lastRetry.attempt, response.errorMessage);
-                return response;
-            }
-        } else {
-            rateLimitLoopStart = 0;
-        }
-        const delayMs = assistantRetryDelay(response, rateLimited
-            ? 25000
-            : policy.baseDelayMs * 2 ** attempt, policy.maxRetryDelayMs);
+        rateLimitDeadline = rateLimited ? (rateLimitDeadline ?? Date.now() + COOLDOWN_RETRY_WINDOW_MS) : undefined;
+        const delayMs = rateLimited
+            ? assistantCooldownRetryDelay(response, attempt, policy.maxRetryDelayMs, rateLimitDeadline)
+            : assistantRetryDelay(response, policy.baseDelayMs * 2 ** attempt, policy.maxRetryDelayMs);
         if (delayMs === undefined) {
             if (lastRetry)
                 await callbacks?.onRetryFinished?.(false, lastRetry.attempt, response.errorMessage);
@@ -230,6 +234,10 @@ export async function retryAssistantCall(produce, policy, signal, callbacks) {
         attempt++;
         lastRetry = { attempt, errorMessage: response.errorMessage || "Unknown error" };
         await callbacks?.onRetryScheduled?.(attempt, maxAttempts, delayMs, lastRetry.errorMessage);
+        if (!signal?.aborted && rateLimitDeadline !== undefined && delayMs >= rateLimitDeadline - Date.now()) {
+            await callbacks?.onRetryFinished?.(false, attempt, response.errorMessage);
+            return response;
+        }
         // Normalize aborts during retry backoff to the same AssistantMessage shape as
         // provider stream aborts, so callers do not need to care when cancellation happened.
         try {
@@ -245,6 +253,10 @@ export async function retryAssistantCall(produce, policy, signal, callbacks) {
                 return { ...rest, stopReason: "aborted" };
             }
             throw error;
+        }
+        if (rateLimitDeadline !== undefined && Date.now() >= rateLimitDeadline) {
+            await callbacks?.onRetryFinished?.(false, attempt, response.errorMessage);
+            return response;
         }
     }
 }

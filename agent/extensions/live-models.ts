@@ -1649,18 +1649,28 @@ function publishModels(
 	probes?: CacheEntry["probes"],
 ): LiveCatalogModel[] {
 	const idOnly = ["cerebras", "deepseek", "ant-ling"].includes(provider);
-    const officialDeepSeek = provider === "deepseek" && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""));
+    const baseUrl = wireFor(provider).baseUrl;
+    const officialDeepSeek = provider === "deepseek" && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(baseUrl.replace(/\/$/, ""));
+    const antLing = provider === "ant-ling";
+    const officialAntLing = antLing && baseUrl.replace(/\/$/, "") === DEFAULT_BASE_URLS["ant-ling"];
+    const observedAt = Date.now();
     // Keep the canonical ID available in older cached lists.
     if (officialDeepSeek && idOnlyFacts("deepseek")["deepseek-flash"] && !models.some(m => m.id === "deepseek-flash"))
         models = [...models, {...minimalModel("deepseek-flash", provider, 384_000), ...idOnlyFacts("deepseek")["deepseek-flash"]}];
 	const store = idOnly || provider === "together" ? storeModels(provider) : undefined;
 	const config = providerConfigJson(provider);
+	const configuredPrices = new Map<string, LiveCatalogModel["cost"]>();
+	if (antLing && Array.isArray(config?.models)) {
+		for (const model of config.models) {
+			if (typeof model?.id === "string" && isRecord(model.cost)) configuredPrices.set(model.id, model.cost);
+		}
+	}
 	const configuredCompat = providerJsonCompat(provider);
 	const discovered = !Object.hasOwn(REFRESHERS, provider);
-	const listing = idOnly || discovered ? directoryProvider(loadDirectory(), provider, wireFor(provider).baseUrl) : undefined;
+	const listing = idOnly || discovered ? directoryProvider(loadDirectory(), provider, baseUrl) : undefined;
 	if (discovered) models = models.filter((model) => directoryFacts(listing, model.id)?.chat !== false);
 	// The built-in catalog and /models can both outlive a model the vendor has withdrawn.
-	if (provider === "ant-ling") models = models.filter((model) => !antLingRetired(model.id));
+	if (antLing) models = models.filter((model) => !antLingRetired(model.id, observedAt));
 	for (const key of outputFallbacks.keys()) if (key.startsWith(`${provider}/`)) outputFallbacks.delete(key);
 	return validModels(models).map((cachedModel) => {
 		const { outputLimitEstimated, ...cachedRaw } = cachedModel;
@@ -1684,7 +1694,7 @@ function publishModels(
 			}
 			: rawModel;
 		const snapshotFacts =
-			idOnly && (provider !== "deepseek" || ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""))) && Object.hasOwn(idOnlyFacts(provider), model.id)
+			idOnly && (provider !== "deepseek" || officialDeepSeek) && Object.hasOwn(idOnlyFacts(provider), model.id)
 				? idOnlyFacts(provider)[model.id]
 				: undefined;
         const facts = snapshotFacts && Object.fromEntries(Object.entries(snapshotFacts).filter(([key]) =>
@@ -1718,9 +1728,13 @@ function publishModels(
 			mergeCompat(mergeCompat(defaults, model.compat ?? {}), facts?.compat ?? {}),
 			configuredCompat,
 		);
-		const directPeak = provider === "deepseek" && ["https://api.deepseek.com", "https://api.deepseek.com/v1"].includes(wireFor(provider).baseUrl.replace(/\/$/, ""))
-            ? directDeepseekCost(model.id) : undefined;
-		const antLingPrice = provider === "ant-ling" ? antLingCost(model.id) : undefined;
+		const directPeak = officialDeepSeek ? directDeepseekCost(model.id, observedAt) : undefined;
+		// Ant Ling's /models is id-only. Retained catalog and directory rates
+		// have no independent evidence of staying valid after the promotion.
+		const antLingPrice: LiveCatalogModel["cost"] | undefined = antLing
+			? configuredPrices.get(model.id) ?? (officialAntLing ? antLingCost(model.id, observedAt) : undefined)
+				?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, missing: ["input", "output"] }
+			: undefined;
 		return normalizeModelLimits({
 			...model,
 			...(provider === "runinfra" && !knownModelFacts(provider) && !model.liveImageInput ? {input:["text"]} : {}),

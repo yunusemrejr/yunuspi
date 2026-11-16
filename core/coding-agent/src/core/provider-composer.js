@@ -34,6 +34,7 @@ function applyModelOverride(model, override) {
             ...(override.cost.cacheWrite1h !== undefined ? { cacheWrite1h: override.cost.cacheWrite1h } : {}),
             ...(override.cost.knownFree !== undefined ? { knownFree: override.cost.knownFree } : {}),
             tiers: override.cost.tiers ?? model.cost.tiers,
+            ...(model.cost.validUntil !== undefined ? { afterExpiry: { ...override.cost } } : {}),
         };
         if (remainingMissing?.length) {
             mergedCost.missing = remainingMissing;

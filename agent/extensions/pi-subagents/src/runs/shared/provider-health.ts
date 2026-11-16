@@ -609,6 +609,8 @@ export interface RecordedFailure {
 	kind: FailureKind;
 	scope: FailureScope;
 	cooldownUntil: number;
+	/** Binding deadline for retrying the failed route in the committed snapshot. */
+	retryCooldownUntil: number;
 	consecutive: number;
 }
 
@@ -693,6 +695,8 @@ export function recordFailure(input: RecordFailureInput): RecordedFailure | unde
 			kind: classification.kind,
 			scope: classification.scope,
 			cooldownUntil: classification.scope === "provider" ? entry.cooldownUntil : routeState?.cooldownUntil ?? cooldownUntil,
+			retryCooldownUntil: Math.max(entry.cooldownUntil, routeState?.cooldownUntil ?? 0,
+				input.model ? entry.models[input.model]?.cooldownUntil ?? 0 : 0),
 			consecutive,
 		};
 	});

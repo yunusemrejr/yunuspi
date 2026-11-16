@@ -154,7 +154,7 @@ test('inside its window the provider\'s own price list outranks the directory, w
   saveDirectory({ deepseek: { api: 'https://api.deepseek.com', models: { 'deepseek-flash': { limit: { context: 1_048_576, output: 393_216 }, cost: { input: 0.15, output: 0.6, cache_read: 0.003 } } } } });
   const current = (await providers.deepseek.refreshModels(context({ allowNetwork: false }))).find(model => model.id === 'deepseek-flash');
   // Exactly the peak rates: the core halves them outside peak hours when it recognises them.
-  assert.deepEqual(current.cost, { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0 });
+  assert.deepEqual(current.cost, { input: 0.3, output: 1.2, cacheRead: 0.006, cacheWrite: 0, validUntil: Date.parse('2026-12-12T00:00:00Z') });
   assert.deepEqual([current.contextWindow, current.maxTokens], [1_048_576, 393_216], 'limits still come from the directory');
 });
 

@@ -20,28 +20,34 @@ const { taskFileObservation } = await import('../agent/extensions/lib/task-state
 const { taskStatePaths } = await import('../agent/extensions/lib/task-state/store.ts');
 const { requirementState, applyEvent } = await import('../agent/extensions/lib/task-state/reducer.ts');
 const { readSessionLedger } = await import('../agent/extensions/lib/requirement-ledger.ts');
-const { createExtensionRuntime, loadExtensionFromFactory } = await import('../core/coding-agent/src/core/extensions/loader.js');
+const { createExtensionRuntime, loadExtensionFromFactory, loadExtensions } = await import('../core/coding-agent/src/core/extensions/loader.js');
 const { ExtensionRunner } = await import('../core/coding-agent/src/core/extensions/runner.js');
 const { createEventBus } = await import('../core/coding-agent/src/core/event-bus.js');
 const { SessionManager } = await import('../core/coding-agent/src/core/session-manager.js');
 const { withSessionObservability } = await import('../core/coding-agent/src/core/session-observability.js');
 const { createWriteTool } = await import('../core/coding-agent/src/core/tools/write.js');
 const { createBashTool } = await import('../core/coding-agent/src/core/tools/bash.js');
+const { validateToolArguments } = await import('@yunuspi/ai');
 test.after(() => { clearTaskStateServices(); fs.rmSync(directory, { recursive: true, force: true }); });
 
-async function harness(t, ledger = false) {
+async function harness(t, ledger = false, withTodo = false) {
   clearTaskStateServices();
   const cwd = fs.mkdtempSync(path.join(directory, 'workspace-'));
   const manager = SessionManager.inMemory(cwd);
   const runtime = createExtensionRuntime();
   runtime.appendEntry = (type, data) => manager.appendCustomEntry(type, data);
-  runtime.getActiveTools = () => ['task_state', 'write', 'bash'];
+  runtime.getActiveTools = () => withTodo ? ['task_state', 'write', 'bash', 'todo'] : ['task_state', 'write', 'bash'];
   runtime.getAllTools = () => [];
   runtime.sendMessage = message => manager.appendCustomMessageEntry(message.customType, message.content, !!message.display, message.details);
   const bus = createEventBus();
   // Reverse the usual ordering: task state runs before the ledger owner.
   const extensions = [await loadExtensionFromFactory(taskState, cwd, bus, runtime)];
   if (ledger) extensions.push(await loadExtensionFromFactory(checkpoints, cwd, bus, runtime));
+  if (withTodo) {
+    const registered = await loadExtensions([path.resolve(import.meta.dirname, '../agent/extensions/rpiv-todo/index.ts')], cwd, bus, runtime);
+    assert.deepEqual(registered.errors, []);
+    extensions.push(...registered.extensions);
+  }
   const runner = new ExtensionRunner(extensions, runtime, cwd, manager, { getAvailable: () => [] });
   const errors = [];
   runner.onError(error => errors.push(error));
@@ -53,11 +59,21 @@ async function harness(t, ledger = false) {
   const query = params => scope(() => tool.execute('query', params, undefined, undefined, runner.createContext()));
   const result = event => scope(() => runner.emitToolResult({ type: 'tool_result', content: [], isError: false, ...event }));
   const call = (toolName, toolCallId, input) => scope(() => runner.emitToolCall({ type: 'tool_call', toolName, toolCallId, input }));
+  const todo = async (toolCallId, raw) => {
+    const definition = runner.getToolDefinition('todo');
+    const input = validateToolArguments(definition, { name: 'todo', arguments: definition.prepareArguments(raw) });
+    const preflight = await call('todo', toolCallId, input);
+    assert.ok(!preflight?.block, preflight?.reason);
+    const output = await scope(() => definition.execute(toolCallId, input, undefined, undefined, runner.createContext()));
+    await result({ toolName: 'todo', toolCallId, input, ...output });
+    manager.appendMessage({ role: 'toolResult', toolName: 'todo', toolCallId, ...output, isError: output.isError === true, timestamp: Date.now() });
+    return output;
+  };
   const input = (text, requestId) => scope(() => runner.emitInput(text, undefined, 'interactive', undefined, { requestId }));
   const before = text => scope(() => runner.emitBeforeAgentStart(text, undefined, '', { cwd }));
   const message = message => scope(() => runner.emitMessageEnd({ type: 'message_end', message }));
   t.after(async () => { await emit('session_shutdown'); assert.deepEqual(errors, [], 'native hooks must not fail silently'); bus.clear(); });
-  return { cwd, manager, service, input, emit, before, query, result, call, message };
+  return { cwd, manager, service, input, emit, before, query, result, call, message, todo };
 }
 
 async function seed(h) {
@@ -97,18 +113,16 @@ test('native ledger owner and runtime preserve requirements regardless of input-
 });
 
 test('unmapped creative requirements stay advisory at the actual last-todo gate', async t => {
-  const h = await harness(t, true);
+  const h = await harness(t, true, true);
   const prompt = '- Render the diagram as SVG\n- Preserve its typography';
   await h.input(prompt, 'creative'); await h.before(prompt);
   await h.result({ toolName: 'render_see', toolCallId: 'render', input: { action: 'render' }, details: { status: 'rendered' } });
-  const todo = { id: 1, status: 'in_progress', subject: 'Deliver the diagram' };
-  h.manager.appendMessage({ role: 'toolResult', toolName: 'todo', toolCallId: 'todo-list', content: [], details: { tasks: [todo] }, isError: false, timestamp: Date.now() });
-  await h.result({ toolName: 'todo', toolCallId: 'todo-list', details: { tasks: [todo] } });
+  const opened = await h.todo('todo-create', { action: 'create', status: 'in_progress', subject: 'Deliver the diagram' });
   assert.equal(h.service.stats().requirements, 2);
   assert.equal(h.service.stats().verified, 0);
   assert.deepEqual(h.service.completionBlockers(), []);
-  const completion = await h.call('todo', 'finish', { action: 'update', id: 1, status: 'completed' });
-  assert.notEqual(completion?.block, true, 'unmapped creative requirements cannot demand irrelevant tests');
+  const completion = await h.todo('finish', { action: 'update', id: opened.details.tasks[0].id, status: 'completed' });
+  assert.equal(completion.details.tasks[0].status, 'completed', 'unmapped creative requirements cannot demand irrelevant tests');
   assert.ok(h.service.query(entity => entity.kind === 'completion-claim' && /completion plan-complete.*allowed/.test(entity.detail ?? '')).length, 'the real gate ran, not a shadow/disabled bypass');
 });
 

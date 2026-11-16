@@ -14,6 +14,7 @@ export interface ModelCostFacts {
   cacheRead: number;
   cacheWrite: number;
   knownFree?: true;
+  validUntil?: number;
 }
 export interface ModelFactsEntry {
   verifiedAt: string;
@@ -72,9 +73,10 @@ export function knownModelFacts(provider: string, now = Date.now()): ModelFactsE
 }
 /** The core applies the direct API's off-peak schedule to these peak rates. */
 export function directDeepseekCost(id: string, now = Date.now()): ModelCostFacts | undefined {
-  if (!currentModelFacts("deepseek",now)) return undefined;
+  const facts = currentModelFacts("deepseek", now);
+  if (!facts) return undefined;
   const rate = deepSeekPublishedPeakRate(id, now);
-  return rate && { ...rate };
+  return rate && { ...rate, validUntil: Date.parse(facts.expiresAt) };
 }
 /** Ant Ling prices are promotional yuan per million tokens and the end of the promotion
  * is not published, so each is quoted only until its review date. One yuan is 0.14988
@@ -94,7 +96,10 @@ const ANT_LING_PRICES: Record<string, {reviewAt: string; cost: ModelCostFacts}> 
 };
 export function antLingCost(id: string, now = Date.now()): ModelCostFacts | undefined {
   const price = Object.hasOwn(ANT_LING_PRICES,id) ? ANT_LING_PRICES[id] : undefined;
-  return price && currentModelFacts("ant-ling",now) && now < Date.parse(price.reviewAt) ? price.cost : undefined;
+  const facts = currentModelFacts("ant-ling", now);
+  if (!price || !facts) return undefined;
+  const validUntil = Math.min(Date.parse(price.reviewAt), Date.parse(facts.expiresAt));
+  return now < validUntil ? { ...price.cost, validUntil } : undefined;
 }
 /** Models Ant Ling has withdrawn, with the moment it stopped serving them; its published
  * replacement for all three is Ling-3.1-flash (https://developer.ant-ling.com/en/docs/models/deprecation/).

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import fs from 'node:fs';
@@ -260,31 +261,51 @@ test('a goal owns the requirements its kickoff carried: no ledger footer while i
   assert.match(footer(await final('Chart added.')), /R\d+: Fix the footer credit/, 'after the goal, a new multi-part request is tracked again');
 });
 
-test('deploys and the last todo completion wait for unresolved verification receipts, with a recorded waiver', async () => {
-  const { registerContinuationSource } = await import(pathToFileURL(path.join(agent, 'extensions/lib/continuation-notice.ts')));
-  const hooks = {};
-  const appended = [];
-  const pi = {
-    on: (name, fn) => { (hooks[name] ??= []).push(fn); },
-    registerTool: () => {}, registerCommand: () => {}, sendMessage: () => {},
-    appendEntry: (customType, data) => appended.push({ customType, data }),
-    getActiveTools: () => [],
+test('deploys and the last todo completion wait for unresolved verification receipts, with a recorded waiver', async t => {
+  const [{ registerContinuationSource }, { loadExtensions }, { ExtensionRunner }, { SessionManager }, { wrapToolDefinition }, { validateToolArguments }] = await Promise.all([
+    import(pathToFileURL(path.join(agent, 'extensions/lib/continuation-notice.ts'))),
+    import('../core/coding-agent/dist/core/extensions/loader.js'),
+    import('../core/coding-agent/dist/core/extensions/runner.js'),
+    import('../core/coding-agent/dist/core/session-manager.js'),
+    import('../core/coding-agent/dist/core/tools/tool-definition-wrapper.js'),
+    import('@yunuspi/ai'),
+  ]);
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'session-stop-gate-'));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const { extensions, errors, runtime } = await loadExtensions([
+    path.join(agent, 'extensions/checkpoints.ts'), path.join(agent, 'extensions/rpiv-todo/index.ts'),
+  ], cwd);
+  assert.deepEqual(errors, []);
+  const manager = SessionManager.inMemory(cwd);
+  runtime.appendEntry = (customType, data) => manager.appendCustomEntry(customType, data);
+  const runner = new ExtensionRunner(extensions, runtime, cwd, manager, {});
+  t.after(() => runner.invalidate());
+  const todo = wrapToolDefinition(runner.getToolDefinition('todo'), () => runner.createContext());
+  let calls = 0;
+  const call = async (toolName, input) => runner.emitToolCall({ type: 'tool_call', toolCallId: String(++calls), toolName, input });
+  const changePlan = async raw => {
+    const input = validateToolArguments(todo, { name: 'todo', arguments: todo.prepareArguments(raw) });
+    const preflight = await call('todo', input);
+    assert.ok(!preflight?.block, preflight?.reason);
+    return todo.execute(String(calls), input);
   };
-  checkpoints.default(pi);
-  const branch = [];
-  const ctx = scopeCtx(branch, 'gate-session');
-  const call = async (toolName, input) => { let out; for (const fn of hooks.tool_call) { const r = await fn({ toolCallId: 't', toolName, input }, ctx); if (r) out = r; } return out; };
-  const dispose = registerContinuationSource({ name: 'quality review', session: ctx.sessionManager, pending: () => [], verification: () => ['Independent review pending: 0 rounds'] });
+  const gateDecisions = () => manager.getEntries().filter(e => e.customType === 'completion-gate-v1').map(e => [e.data.moment, e.data.decision]);
+  const dispose = registerContinuationSource({ name: 'quality review', session: manager, pending: () => [], verification: () => ['Independent review pending: 0 rounds'] });
   try {
     const refused = await call('bash', { command: 'git push namecheap main' });
     assert.equal(refused?.block, true);
     assert.match(refused.reason, /Deploy refused[\s\S]*0 rounds/);
     assert.equal(await call('bash', { command: 'git push namecheap main' }), undefined, 'explicit retry proceeds');
-    assert.deepEqual(appended.filter(e => e.customType === 'completion-gate-v1').map(e => e.data.decision), ['refused', 'waived']);
+    assert.deepEqual(gateDecisions(), [['deploy', 'refused'], ['deploy', 'waived']]);
     assert.equal(await call('bash', { command: 'git push origin feature-x' }), undefined, 'ordinary pushes are not deploys');
-    branch.push({ type: 'message', message: { role: 'toolResult', toolName: 'todo', details: { tasks: [{ id: 1, subject: 'a', status: 'in_progress' }, { id: 2, subject: 'b', status: 'pending' }], nextId: 3 } } });
-    assert.equal(await call('todo', { action: 'update', id: 1, status: 'completed' }), undefined, 'intermediate progress is never gated');
-    assert.equal((await call('todo', { action: 'batch', operations: [{ action: 'update', id: 1, status: 'completed' }, { action: 'update', id: 2, status: 'completed' }] }))?.block, true);
+    await changePlan({ action: 'batch', operations: [{ action: 'create', subject: 'a', status: 'in_progress' }, { action: 'create', subject: 'b' }] });
+    const intermediate = await changePlan({ action: 'update', id: 1, status: 'completed' });
+    assert.deepEqual(intermediate.details.tasks.map(task => task.status), ['completed', 'pending'], 'intermediate progress is never gated');
+    const finish = { action: 'batch', operations: [{ action: 'update', id: 1, status: 'completed' }, { action: 'update', id: 2, status: 'completed' }] };
+    await assert.rejects(changePlan(finish), /Completing the last open task refused[\s\S]*0 rounds/);
+    assert.equal((await changePlan({ action: 'list' })).details.tasks[1].status, 'pending');
+    assert.equal((await changePlan(finish)).details.tasks[1].status, 'completed');
+    assert.deepEqual(gateDecisions(), [['deploy', 'refused'], ['deploy', 'waived'], ['plan-complete', 'refused'], ['plan-complete', 'waived']]);
   } finally {
     dispose();
   }

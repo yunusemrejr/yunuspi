@@ -173,6 +173,39 @@ test('a saved paid response survives cancellation and resumes without a second r
   for (const file of files.filter(file => file.endsWith('.json'))) assert.equal((await fs.readFile(path.join(cache, file), 'utf8')).includes(env.ELEVENLABS_API_KEY), false);
 });
 
+test('registered hosted audio associates billing with its exact tool call even without a provider ID', async t => {
+  const dir = await workspace(t), audio = await fixtureAudio(dir);
+  const { default: registerVideoStudio } = await import(pathToFileURL(path.join(agent, 'extensions/video-studio.ts')).href);
+  const { collectSessionCost } = await load('session-cost.ts');
+  const previousKey = process.env.ELEVENLABS_API_KEY, previousRate = process.env.ELEVENLABS_USD_PER_1000_BILLING_UNITS;
+  process.env.ELEVENLABS_API_KEY = env.ELEVENLABS_API_KEY;
+  process.env.ELEVENLABS_USD_PER_1000_BILLING_UNITS = '2';
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.ELEVENLABS_API_KEY; else process.env.ELEVENLABS_API_KEY = previousKey;
+    if (previousRate === undefined) delete process.env.ELEVENLABS_USD_PER_1000_BILLING_UNITS; else process.env.ELEVENLABS_USD_PER_1000_BILLING_UNITS = previousRate;
+  });
+  const entries = [], tools = new Map();
+  registerVideoStudio({ on() {}, registerTool(tool) { tools.set(tool.name, tool); },
+    appendEntry(customType, data) { entries.push({ type:'custom', customType, data }); } });
+  const ctx = { cwd:dir, model:{input:['text']}, sessionManager:{getSessionId:()=>'fixture-audio'} };
+  const mocked = t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(String(url), 'https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128');
+    assert.equal(options.method, 'POST');
+    return new Response(audio, { headers: { 'character-cost':'25.5' } });
+  });
+  const result = await tools.get('audio_generate').execute('sound-fixture', { kind:'sfx', prompt:'Synthetic sound', seconds:1 }, undefined, undefined, ctx);
+  assert.equal(mocked.mock.callCount(), 1);
+  assert.deepEqual(entries.map(({ data })=>[data.toolCallId,data.status]), [['sound-fixture','pending'],['sound-fixture','completed']]);
+  const oldResult = { type:'message', message:{ role:'toolResult', toolName:'audio_generate', toolCallId:'sound-fixture', details:result.details } };
+  const legacy = collectSessionCost([oldResult]);
+  assert.equal(legacy.unknown, true);
+  assert.equal(legacy.rows[0].billingUnits, 25.5);
+  const settled = collectSessionCost([oldResult,...entries,oldResult]);
+  assert.equal(settled.total, .051);
+  assert.equal(settled.unknown, false);
+  assert.equal(settled.rows[0].billingUnits, 25.5);
+});
+
 test('corrupt completed speech receipts fail without initiating paid regeneration', async t => {
   const dir = await workspace(t), bytes = await fixtureAudio(dir), original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });

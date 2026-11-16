@@ -463,7 +463,8 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
                 cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
             };
         }
-        if (response?.usage) calculateCost(model, output.usage);
+        const requestAt = createdAt ?? providerCreatedMs(response?.created_at) ?? options?.dispatchedAt ?? output.timestamp;
+        if (response?.usage) calculateCost(model, output.usage, requestAt);
         if (response?.usage && options?.applyServiceTierPricing) {
             const serviceTier = options.resolveServiceTier
                 ? options.resolveServiceTier(response?.service_tier, options.serviceTier)
@@ -475,7 +476,7 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
   let host = '';
   try { const url = new URL(model.baseUrl); if (url.protocol === 'https:') host = url.hostname; } catch {}
   const raw = response?.usage, cost = output.usage.cost;
-  if (raw) applyDeepSeekPricing(model, output.usage, raw, createdAt ?? providerCreatedMs(response.created_at) ?? options?.dispatchedAt ?? output.timestamp,
+  if (raw) applyDeepSeekPricing(model, output.usage, raw, requestAt,
       ![raw.input_tokens, raw.output_tokens].every(value => Number.isSafeInteger(value) && value >= 0) || !output.usage.cacheReadReported);
   if (model.provider === 'openrouter' && host === 'openrouter.ai' && Number.isFinite(raw?.cost) && raw.cost >= 0) {
     cost.estimatedTotal = cost.total; cost.total = raw.cost; cost.source = 'provider-reported'; cost.complete = true;

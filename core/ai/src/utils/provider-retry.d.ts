@@ -1,5 +1,7 @@
 import type { AssistantMessage, ProviderRequestOptions } from "../types.ts";
 export declare const MAX_RETRY_TIMER_MS = 2147483647;
+export declare function setSharedProviderCooldown(target: AssistantMessage | Error, until: number | undefined): void;
+export declare function getSharedProviderCooldown(target: AssistantMessage | Error | undefined): number | undefined;
 interface ProviderRetryOptions extends Pick<ProviderRequestOptions, "retryOwner"> {
     maxRetries?: number;
     maxRetryDelayMs?: number;

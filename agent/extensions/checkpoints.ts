@@ -49,7 +49,7 @@ import { flushLensBeforeVerification } from "./pi-lens/context-lsp.mjs";
 import { askJev } from "./lib/jev-client.ts";
 import { checkpointHistoryIntent } from "./lib/intervention-intents.ts";
 import { checkpointWorktree } from "./lib/worktree-checkpoint.ts";
-import { completesPlan, completionGateReceipts } from "./lib/completion-gate.ts";
+import { completionGateReceipts, TODO_COMPLETION_CHECK, type TodoCompletionCheck } from "./lib/completion-gate.ts";
 import { currentTaskStateService } from "./lib/task-state/service.ts";
 import { completionClaimEvents } from "./lib/task-state/ingest.ts";
 import { collectVerificationReceipts } from "./lib/continuation-notice.ts";
@@ -773,7 +773,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		const declared = Boolean(candidate && projectTests.snapshot().assessment?.checks.some(check => check.key === candidate.key));
 		const deferred = await flushLensBeforeVerification(event, ctx, declared);
 		if (deferred) return deferred;
-		const gate = gateCompletion(event, ctx);
+		const gate = event.toolName === "bash" && isDeployCommand("bash", event.input ?? {}) ? gateCompletion("deploy", ctx) : undefined;
 		if (gate) return gate;
 		if (
 			["bash", "read", "read_symbol", "read_enclosing"].includes(event.toolName)
@@ -919,13 +919,15 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 	/** Deploys and the call that closes the last open todo wait for the
 	 * registered verification receipts (tests, review); see completion-gate. */
 	const refusedGates = new Set<string>();
-	function gateCompletion(event: any, ctx: ExtensionContext): { block: true; reason: string } | undefined {
+	pi.events?.on?.(TODO_COMPLETION_CHECK, data => {
+		const check = data as TodoCompletionCheck;
+		if (typeof check?.refuse !== "function") return;
+		const gate = gateCompletion("plan-complete", check.ctx);
+		if (gate) check.refuse(gate.reason);
+	});
+	function gateCompletion(moment: "deploy" | "plan-complete", ctx: ExtensionContext): { block: true; reason: string } | undefined {
 		try {
 			if (SHADOW || isSessionStopped(ctx)) return undefined;
-			const moment = event.toolName === "bash" && isDeployCommand("bash", event.input ?? {}) ? "deploy"
-				: event.toolName === "todo" && completesPlan(latestTodoTasks(ctx), event.input ?? {}) ? "plan-complete"
-				: undefined;
-			if (!moment) return undefined;
 			// A previous deploy's own live-verification receipt never blocks the next deploy.
 			const receipts = collectVerificationReceipts(8, ctx.sessionManager).filter((receipt) => receipt.source !== "deploy");
 			try {
@@ -941,7 +943,17 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 				/* the gate never depends on the graph */
 			}
 			const lines = receipts.map((receipt) => receipt.line);
-			const decision = completionGateReceipts(moment, receipts, refusedGates);
+			let decision = completionGateReceipts(moment, receipts, refusedGates);
+			if (decision.block || decision.waived) {
+				try {
+					pi.appendEntry("completion-gate-v1", { moment, decision: decision.block ? "refused" : "waived", unresolved: lines, receipts: receipts.map((receipt) => `${receipt.source}:${receipt.id}:${receipt.revision ?? ""}:${receipt.state}:${receipt.count ?? ""}`) });
+					if (decision.block) refusedGates.add(decision.key);
+					else refusedGates.delete(decision.key);
+				} catch {
+					// A failed history write cannot turn a refusal into approval or consume a waiver.
+					if (decision.waived) decision = { ...decision, block: true, waived: false, reason: "Verification waiver could not be recorded. Retry when session history is writable." };
+				}
+			}
 			try {
 				const service = currentTaskStateService();
 				if (service) {
@@ -958,15 +970,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 			} catch {
 				/* claim recording is advisory */
 			}
-			if (decision.waived) {
-				refusedGates.delete(decision.key);
-				pi.appendEntry("completion-gate-v1", { moment, decision: "waived", unresolved: lines, receipts: receipts.map((receipt) => `${receipt.source}:${receipt.id}:${receipt.revision ?? ""}:${receipt.state}:${receipt.count ?? ""}`) });
-				return undefined;
-			}
-			if (!decision.block) return undefined;
-			refusedGates.add(decision.key);
-			pi.appendEntry("completion-gate-v1", { moment, decision: "refused", unresolved: lines, receipts: receipts.map((receipt) => `${receipt.source}:${receipt.id}:${receipt.revision ?? ""}:${receipt.state}:${receipt.count ?? ""}`) });
-			return { block: true, reason: decision.reason! };
+			return decision.block ? { block: true, reason: decision.reason! } : undefined;
 		} catch {
 			return undefined; /* the gate never breaks a tool call it cannot evaluate */
 		}
@@ -1004,18 +1008,6 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 			/* ignore */
 		}
 	});
-}
-
-/** The todo tool's latest persisted snapshot (last-write-wins, as its own
- * replay does); only ids and statuses are read. */
-function latestTodoTasks(ctx: ExtensionContext): Array<{ id: number; status?: string }> {
-	const branch = ctx.sessionManager.getBranch();
-	for (let i = branch.length - 1; i >= 0; i--) {
-		const message = (branch[i] as any)?.type === "message" ? (branch[i] as any).message : undefined;
-		if (message?.role !== "toolResult" || message.toolName !== "todo" || !Array.isArray(message.details?.tasks)) continue;
-		return message.details.tasks.filter((task: any) => Number.isSafeInteger(task?.id)).map((task: any) => ({ id: task.id, status: String(task.status ?? "") }));
-	}
-	return [];
 }
 
 const LEDGER_ENTRY = "requirement-ledger-v1";

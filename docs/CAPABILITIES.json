@@ -2802,7 +2802,7 @@
       {
         "name": "catalog-status",
         "source": "agent/extensions/live-models.ts",
-        "line": 1863
+        "line": 1877
       },
       {
         "name": "claude-cache",
@@ -2967,7 +2967,7 @@
       {
         "name": "provider-health",
         "source": "agent/extensions/provider-gate.ts",
-        "line": 516
+        "line": 522
       },
       {
         "name": "reminder",
@@ -3095,7 +3095,7 @@
           "registerCommand() receives a computed name"
         ],
         "lines": [
-          180
+          187
         ]
       }
     ],
@@ -3998,7 +3998,7 @@
           "registration uses the source-owned TOOL_NAME constant"
         ],
         "lines": [
-          125
+          126
         ],
         "knownNames": [
           "todo"

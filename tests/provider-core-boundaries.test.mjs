@@ -2,12 +2,29 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { getEventListeners } from 'node:events';
 import { retryProviderRequest } from '../core/ai/src/utils/provider-retry.js';
-import { retryAssistantCall } from '../core/ai/src/utils/retry.js';
+import { assistantCooldownRetryDelay, retryAssistantCall, setSharedProviderCooldown } from '../core/ai/src/utils/retry.js';
 import { calculateContextTokens } from '../core/ai/src/utils/estimate.js';
 import { clampMaxTokensToContext } from '../core/ai/src/api/simple-options.js';
 
 const failed = () => ({ role: 'assistant', content: [], stopReason: 'error', errorMessage: 'network error' });
 const policy = { enabled: true, maxRetries: 1, baseDelayMs: 1 };
+
+test('shared cooldown plans respect elapsed time, longer server advice and retry caps', t => {
+  t.mock.timers.enable({ apis: ['Date'], now: 10_000 });
+  const response = { ...failed(), provider: 'ant-ling', errorMessage: '429', providerRetry: { status: 429 } };
+  assert.equal(assistantCooldownRetryDelay(response, 0), 8_000);
+  setSharedProviderCooldown(response, 13_000);
+  assert.equal(assistantCooldownRetryDelay({ ...response }, 2), 3_000);
+  assert.equal(assistantCooldownRetryDelay(response, 2, 2_999), undefined);
+  assert.equal(assistantCooldownRetryDelay(response, 2, 60_000, 13_000), undefined);
+  assert.equal(assistantCooldownRetryDelay(JSON.parse(JSON.stringify(response)), 0), 8_000);
+  response.providerRetry.retryAfterMs = 4_000;
+  assert.equal(assistantCooldownRetryDelay(response, 2), 4_000);
+  assert.equal(assistantCooldownRetryDelay(response, 2, 3_999), undefined);
+  delete response.providerRetry.retryAfterMs;
+  t.mock.timers.tick(3_001);
+  assert.equal(assistantCooldownRetryDelay(response, 2), 0);
+});
 
 test('provider retry never starts a request after cancellation', async () => {
   const controller = new AbortController();

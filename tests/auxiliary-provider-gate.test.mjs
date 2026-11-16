@@ -26,7 +26,7 @@ const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalToke
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 const context = text => ({ messages: [{ role: "user", content: [{ type: "text", text }], timestamp: Date.now() }] });
 
-async function fixture(t, dispatch = async () => undefined, sharedRuntime, persist = false) {
+async function fixture(t, dispatch = async () => undefined, sharedRuntime, persist = false, selectedModel = model) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-aux-gate-"));
   if (!sharedRuntime) process.env.PI_PROVIDER_STATE_FILE = path.join(cwd, "health.json");
   delete process.env.PI_PROVIDER_GATE;
@@ -60,7 +60,7 @@ async function fixture(t, dispatch = async () => undefined, sharedRuntime, persi
   };
   if (!sharedRuntime) {
     runtime.registerNativeProvider({
-      id: model.provider, name: model.name, getModels: () => [model],
+      id: selectedModel.provider, name: selectedModel.name, getModels: () => [selectedModel],
       auth: { apiKey: { name: "Fixture", resolve: async () => ({ source: "fixture", auth: { apiKey: "synthetic-token" } }) } },
       stream, streamSimple: stream,
     });
@@ -83,7 +83,7 @@ async function fixture(t, dispatch = async () => undefined, sharedRuntime, persi
   });
   await loader.reload();
   const { session } = await createAgentSession({
-    cwd, agentDir: cwd, resourceLoader: loader, settingsManager, modelRuntime: runtime, model,
+    cwd, agentDir: cwd, resourceLoader: loader, settingsManager, modelRuntime: runtime, model: selectedModel,
     sessionManager: persist ? SessionManager.create(cwd, cwd) : SessionManager.inMemory(cwd), noTools: "all",
   });
   t.after(() => { session.dispose(); fs.rmSync(cwd, { recursive: true, force: true }); });
@@ -297,6 +297,62 @@ test("manual compaction and branch summarization use auxiliary admission without
   assert.equal(f.mainCalls(), 2);
   assert.equal(f.transcriptMessages(), 2);
   assert.equal(health.readHealth().providers.openrouter.requests.length, 6);
+});
+
+test("Ling main and native-summary retries consume the shared deadline; a local denial adds no provider evidence", { timeout: 10_000 }, async t => {
+  const selected = { ...model, provider: "ant-ling", baseUrl: "https://fixture.invalid/v1" };
+  let rejectNext = false;
+  const dispatched = [];
+  const f = await fixture(t, async () => {
+    const at = Date.now();
+    const active = health.readHealth().providers[selected.provider]?.cooldownUntil ?? 0;
+    dispatched.push({ at, active });
+    if (rejectNext) {
+      rejectNext = false;
+      return { stopReason: "error", errorMessage: "429 too many requests", usage: emptyUsage,
+        providerRetry: { status: 429, retryAfterMs: 200 } };
+    }
+  }, undefined, false, selected);
+  f.session.settingsManager.applyOverrides({ retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 } });
+  const scheduled = [];
+  let cancelLocal = false;
+  let siblingUntil;
+  f.session.subscribe(event => {
+    if (event.type === "auto_retry_start" || event.type === "summarization_retry_scheduled") {
+      scheduled.push([event.type, event.delayMs]);
+      if (scheduled.length === 1) siblingUntil = health.recordFailure({ provider: selected.provider, model: selected.id,
+        source: "sibling-extension", errorMessage: "429 too many requests", providerRetry: { status: 429, retryAfterMs: 350 } }).cooldownUntil;
+      if (cancelLocal || event.delayMs > 2_000) {
+        if (event.type === "auto_retry_start") f.session.abortRetry();
+        else f.session.abortCompaction();
+      }
+    }
+  });
+  rejectNext = true;
+  await f.session.prompt("A synthetic first turn.");
+  await f.session.prompt("A second turn to prepare native compaction.");
+  rejectNext = true;
+  await f.session.compact();
+  assert.deepEqual(scheduled, [["auto_retry_start", 200], ["summarization_retry_scheduled", 200]]);
+  assert.equal(dispatched.length, 6);
+  assert.ok(dispatched.every(({ at, active }) => at >= active), "every physical request is after the shared hold");
+  assert.ok(dispatched[1].at >= siblingUntil, "admission rechecks a longer hold published after retry planning");
+
+  process.env.PI_PROVIDER_GATE_MAX_WAIT_MS = "0";
+  const hold = health.recordFailure({ provider: selected.provider, model: selected.id, source: "sibling",
+    errorMessage: "429 too many requests", providerRetry: { status: 429, retryAfterMs: 1_500 } });
+  cancelLocal = true;
+  await f.session.prompt("A locally refused turn.");
+  assert.equal(dispatched.length, 6);
+  assert.equal(scheduled.length, 3);
+  assert.equal(scheduled[2][0], "auto_retry_start");
+  assert.ok(scheduled[2][1] > 0 && scheduled[2][1] <= 1_500);
+  const after = health.readHealth().providers[selected.provider];
+  assert.equal(after.failure.source, "sibling");
+  assert.equal(after.failure.consecutive, hold.consecutive);
+  const refused = f.session.sessionManager.getEntries().findLast(entry => entry.message?.role === "assistant").message;
+  assert.equal(refused.usage.dispatchOutcome, "not-dispatched");
+  assert.equal(refused.providerRetry, undefined);
 });
 
 test("failed split compaction preserves usage from both calls and keeps the previous context", async t => {

@@ -13,6 +13,7 @@
  */
 
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
+import { completesPlan, mayCompleteTask, TODO_COMPLETION_CHECK, type TodoCompletionCheck } from "../lib/completion-gate.ts";
 import { PLAN_USE_RULE, renderPlan } from "./state/plan.ts";
 import { loadConfig, validateGuidanceFields } from "./config.js";
 import { t } from "./state/i18n-bridge.js";
@@ -131,7 +132,7 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 		promptGuidelines: guidance.promptGuidelines ?? DEFAULT_PROMPT_GUIDELINES,
 		parameters: TodoParamsSchema,
 		prepareArguments: prepareTodoArguments,
-		// Completing the plan is gated on verification receipts at preflight. A
+		// Completing the plan is gated on verification receipts before commit. A
 		// barrier lets a sibling quality_review/project_tests call in the same
 		// message settle first, so the gate never refuses on pre-batch state.
 		executionMode: "sequential",
@@ -139,13 +140,19 @@ export function registerTodoTool(pi: ExtensionAPI): void {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const wrong = unlistedFieldError(params);
 			if (wrong) throw new Error(wrong);
-			const result = applyTaskMutation(
-				getState(sid(ctx)),
-				params.action,
-				params as TaskMutationParams,
-			);
-			commitState(sid(ctx), result.state);
-			try { if (result.op.kind !== "error" && !["get", "list"].includes(params.action)) pi.events?.emit("todo-plan-changed", {sessionId:sid(ctx), cwd:ctx.cwd, tasks:result.state.tasks}); } catch { /* Optional peer publication cannot invalidate a committed plan. */ }
+			const sessionId = sid(ctx);
+			const state = getState(sessionId);
+			const result = applyTaskMutation(state, params.action, params as TaskMutationParams);
+			if (result.op.kind !== "error" && mayCompleteTask(params) && completesPlan(state.tasks, result.state.tasks)) {
+				let refusal: string | undefined;
+				const check: TodoCompletionCheck = { ctx, refuse: reason => { refusal ??= reason; } };
+				// EventBus dispatches synchronous listeners now. No await separates
+				// this decision from the state commit, even if a prior receipt was lost.
+				pi.events?.emit?.(TODO_COMPLETION_CHECK, check);
+				if (refusal) throw new Error(refusal);
+			}
+			commitState(sessionId, result.state);
+			try { if (result.op.kind !== "error" && !["get", "list"].includes(params.action)) pi.events?.emit("todo-plan-changed", {sessionId, cwd:ctx.cwd, tasks:result.state.tasks}); } catch { /* Optional peer publication cannot invalidate a committed plan. */ }
 			return buildToolResult(
 				params.action,
 				params as TaskMutationParams,

@@ -16,6 +16,9 @@ export interface RetryPolicy {
 }
 export declare function usesProviderCooldown(message: AssistantMessage): boolean;
 export declare function assistantRetryDelay(message: AssistantMessage, backoffMs: number, maxRetryDelayMs?: number): number | undefined;
+export declare const COOLDOWN_RETRY_WINDOW_MS = 120000;
+export { setSharedProviderCooldown } from "./provider-retry.ts";
+export declare function assistantCooldownRetryDelay(message: AssistantMessage, attempt: number, maxRetryDelayMs?: number, windowUntil?: number, provider?: string): number | undefined;
 /** Optional callbacks emitted by {@link retryAssistantCall} around each retry. */
 export interface RetryCallbacks {
     /** Emitted before the backoff sleep of each retry attempt (1-indexed). */

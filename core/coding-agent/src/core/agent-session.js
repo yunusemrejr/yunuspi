@@ -15,7 +15,7 @@
 import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname } from "node:path";
-import { assistantRetryDelay, contentText, isFlatPlanProvider, usesProviderCooldown } from "@yunuspi/ai";
+import { assistantCooldownRetryDelay, assistantRetryDelay, COOLDOWN_RETRY_WINDOW_MS, contentText, isFlatPlanProvider, usesProviderCooldown } from "@yunuspi/ai";
 import { clampThinkingLevel, cleanupSessionResources, getSupportedThinkingLevels, isContextOverflow, isRecoverableLength, isRetryableAssistantError, modelsAreEqual, resetApiProviders, streamSimple, } from "@yunuspi/ai/compat";
 import { getThemeByName, theme } from "../modes/interactive/theme/theme.js";
 import { stripFrontmatter } from "../utils/frontmatter.js";
@@ -42,10 +42,6 @@ import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapp
 import { collectSessionStats, readCostEvidence } from "./session-accounting.js";
 import { GuardianSupervisor, tagGuardianRequestMessage } from "./guardian/guardian-supervisor.js";
 import { sessionObservability, withSessionObservability } from "./session-observability.js";
-/** Providers that limit requests per second and send no Retry-After (Ling: 2 requests/s). A retry 5 to 8 s
- * later is answered, so their rate-limit wait starts at 8 s and grows to the general 25 s. The children's
- * list is REQUEST_RATE_PROVIDERS in pi-subagents provider-health.ts. */
-const REQUEST_RATE_PROVIDERS = new Set(["ant-ling"]);
 /**
  * Parse a skill block from message text.
  * Returns null if the text doesn't contain a skill block.
@@ -535,8 +531,11 @@ export class AgentSession {
             if (!usesProviderCooldown(message))
                 return this._retryAttempt < settings.maxRetries;
             const started = this._piRateLimitLoopStart;
-            const elapsed = Date.now() - started;
-            return !started || elapsed <= 120000 || elapsed > 480000;
+            const now = Date.now();
+            const origin = started === undefined || now - started > 480_000 ? now : started;
+            const provider = this._lastAssistantResponse?.providerRequest?.model.provider;
+            return assistantCooldownRetryDelay(message, this._retryAttempt, settings.maxRetryDelayMs,
+                origin + COOLDOWN_RETRY_WINDOW_MS, provider) !== undefined;
         }
         return false;
     }
@@ -2628,11 +2627,11 @@ export class AgentSession {
    try { await this._extensionRunner.emit(event);
      if(controller.signal.aborted) return false;
      if(event.decision!==undefined) {
-       if(event.decision==="retry") {
+       if(event.decision!=="retry") return false;
+       if(this.model!==selectedBeforeRecovery && !modelsAreEqual(this.model, requestedModel ?? selectedBeforeRecovery)) {
          this._flushPendingCustomMessages();this.agent.state.messages=this.agent.state.messages.filter(m=>m!==message);
-         return {providerRequest:this.model===selectedBeforeRecovery?providerRequest:undefined};
+         return {};
        }
-       return false;
      }
    } finally { if(this._retryAbortController===controller)this._retryAbortController=undefined; }
  }
@@ -2641,39 +2640,31 @@ export class AgentSession {
         if (!settings.enabled) {
             return false;
         }
-        // PI_RATE_LIMIT_POLICY (local patch; re-applied by verify-harness.mjs): cooldown-class
-        // errors (rate limits + gateway SSE injection + upstream
-        // finish_reason: error) cool off a
-        // FIXED 25s per retry (no exponential growth, no maxRetries cap; a
-        // request-rate provider starts at 8s, see REQUEST_RATE_PROVIDERS) and
-        // keep retrying while the consecutive loop is <2min; beyond that the run
-        // pauses — the final error is annotated and prompt() resets the clock on
-        // the next user message.
+        // PI_RATE_LIMIT_POLICY: retry cooldown-class errors within one bounded window.
         const rateLimited = usesProviderCooldown(message);
         const retryProvider = requestedModel?.provider ?? message.provider;
         const retryModel = requestedModel?.id ?? message.model;
-        if (!rateLimited) {
-            this._piRateLimitLoopStart = undefined;
-        } else if (!this._piRateLimitLoopStart) {
-            this._piRateLimitLoopStart = Date.now();
-        } else if (Date.now() - this._piRateLimitLoopStart > 480000) {
-            // >8min since the last failure: the old series is dead, start fresh.
-            this._piRateLimitLoopStart = Date.now();
-        }
-        if (rateLimited && Date.now() - this._piRateLimitLoopStart > 120000) {
+        const now = Date.now();
+        const started = this._piRateLimitLoopStart;
+        const origin = started === undefined || now - started > 480_000 ? now : started;
+        this._piRateLimitLoopStart = rateLimited ? origin : undefined;
+        const windowUntil = rateLimited ? origin + COOLDOWN_RETRY_WINDOW_MS : undefined;
+        const pauseCooldown = () => {
             /* PI_RETRY_PAUSE_RECORDED */ this.sessionManager.appendCustomEntry("harness-retry", {status: "paused", reason: "cooldown-window-exhausted", provider: retryProvider, model: retryModel, attempt: this._retryAttempt});
             message.errorMessage = (message.errorMessage || "429 rate limit") +
-                ` — paused: ${message.provider || "the provider"} kept answering with this error for 2 minutes; send a message to retry`;
+                (Date.now() >= windowUntil && message.usage?.dispatchOutcome !== "not-dispatched"
+                    ? ` — paused: ${retryProvider || "the provider"} kept answering with this error for 2 minutes; send a message to retry`
+                    : " — paused: the cooldown exceeds the remaining automatic retry budget; send a message to retry");
             this._piRateLimitLoopStart = undefined;
             return false;
-        }
+        };
         if (this._retryAttempt >= settings.maxRetries && !rateLimited) {
             return false;
         }
-        const delayMs = assistantRetryDelay(message, rateLimited
-            ? (REQUEST_RATE_PROVIDERS.has(retryProvider) ? Math.min(25000, 8000 * (this._retryAttempt + 1)) : 25000)
-            : settings.baseDelayMs * 2 ** this._retryAttempt, settings.maxRetryDelayMs);
-        if (delayMs === undefined) return false;
+        const delayMs = rateLimited
+            ? assistantCooldownRetryDelay(message, this._retryAttempt, settings.maxRetryDelayMs, windowUntil, retryProvider)
+            : assistantRetryDelay(message, settings.baseDelayMs * 2 ** this._retryAttempt, settings.maxRetryDelayMs);
+        if (delayMs === undefined) return rateLimited ? pauseCooldown() : false;
         this._retryAttempt++;
         this._retryAbortController = new AbortController();
         try { /* PI_RETRY_CONTROLLER_READY */
@@ -2685,13 +2676,7 @@ export class AgentSession {
             ...(rateLimited ? { rateLimited: true, provider: retryProvider } : {}),
             errorMessage: message.errorMessage || "Unknown error",
         });
-        // Remove error message from agent state (keep in session for history)
-        const messages = this.agent.state.messages;
-        if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
-            this.agent.state.messages = messages.slice(0, -1);
-        }
-        // Wait with exponential backoff (abortable)
-            await sleep(delayMs, this._retryAbortController.signal);
+        await sleep(delayMs, this._retryAbortController.signal);
         }
         catch {
             /* PI_RETRY_CANCEL_RECORDED */ this.sessionManager.appendCustomEntry("harness-retry", {status: "cancelled", reason: "retry-cancelled", provider: retryProvider, model: retryModel, attempt: this._retryAttempt});
@@ -2708,6 +2693,12 @@ export class AgentSession {
         }
         finally {
             this._retryAbortController = undefined;
+        }
+        if (windowUntil !== undefined && Date.now() >= windowUntil) return pauseCooldown();
+        // Keep the failed response in the transcript and resume from the last usable turn.
+        const messages = this.agent.state.messages;
+        if (messages.length > 0 && messages[messages.length - 1].role === "assistant") {
+            this.agent.state.messages = messages.slice(0, -1);
         }
         return providerRequest ? { providerRequest } : {};
     }

@@ -1,5 +1,15 @@
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000;
 export const MAX_RETRY_TIMER_MS = 2_147_483_647;
+// A gate deadline is local policy evidence. A symbol survives shallow result
+// copies while keeping the deadline out of serialized messages and receipts.
+const sharedProviderCooldown = Symbol.for("yunuspi.shared-provider-cooldown.v1");
+export function setSharedProviderCooldown(target, until) {
+    if (Number.isSafeInteger(until) && until > 0) target[sharedProviderCooldown] = until;
+}
+export function getSharedProviderCooldown(target) {
+    const until = target?.[sharedProviderCooldown];
+    return Number.isSafeInteger(until) && until > 0 ? until : undefined;
+}
 function isProviderError(error) {
     if (!(error instanceof Error) || !("status" in error) || !("headers" in error))
         return false;
