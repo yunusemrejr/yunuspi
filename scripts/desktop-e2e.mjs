@@ -158,8 +158,10 @@ try {
   assert.match(await page.locator('.tool-output').last().innerText(), /desktop tool fixture is readable/);
   check('real core tool execution expands in the GUI');
   // A turn of several steps folds into one block once it is done; the answer stays outside it.
-  await send('STEPS over the fixture'); await done();
-  const block = page.locator('.work').last();
+  await send('STEPS over the fixture');
+  const block = page.locator('.work:not(.bare)').last();
+  await page.locator('.work:not(.bare)[data-state="done"]').last().waitFor();
+  await done();
   assert.equal(await block.getAttribute('data-state'), 'done');
   assert.equal(await block.getAttribute('data-open'), 'false', 'a finished turn of three steps is folded');
   assert.equal(await block.locator('.work-body').isVisible(), false);

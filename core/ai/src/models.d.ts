@@ -191,8 +191,7 @@ export declare function createProvider<TApi extends Api = Api>(input: CreateProv
  * }
  * ```
  */
-/** True for flat token/coding-plan providers whose usage is subscription, not metered spend. */
-export declare function isFlatPlanProvider(provider: unknown): boolean;
+export { isFlatPlanProvider } from "./utils/flat-plan.js";
 export declare function hasApi<TApi extends Api>(model: Model<Api>, api: TApi): model is Model<TApi>;
 export declare function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage): Usage["cost"];
 export declare function getSupportedThinkingLevels<TApi extends Api>(model: Model<TApi>): ModelThinkingLevel[];

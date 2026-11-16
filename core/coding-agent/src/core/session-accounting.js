@@ -1,6 +1,6 @@
 /** Pure session accounting shared by the owned footer and harness reports. */
 import { addUsageToTotals, createUsageTotals } from './usage-totals.js';
-import { isFlatPlanProvider } from '@yunuspi/ai';
+import { isFlatPlanProvider } from '@yunuspi/ai/utils/flat-plan';
 /** Compact accounting facts; no prompt, endpoint, credential or response text. */
 export function readCostEvidence(usage, provider) {
   const valid = n => typeof n === 'number' && Number.isFinite(n) && n >= 0;

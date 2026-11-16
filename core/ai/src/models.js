@@ -6,6 +6,7 @@ import { ModelsError, resolveProviderAuth } from "./auth/resolve.js";
 import { InMemoryModelsStore } from "./models-store.js";
 import { operationSignal, raceWithAbortSignal } from "./utils/abort.js";
 export { ModelsError } from "./auth/resolve.js";
+export { isFlatPlanProvider } from "./utils/flat-plan.js";
 function mergeHeaders(base, override) {
     if (!base && !override)
         return undefined;
@@ -542,10 +543,6 @@ export function createProvider(input) {
 /** Providers sold as flat token or coding plans (API-key auth, prepaid quota).
  * Their calls are subscription usage, never marginal API spend; OAuth
  * subscriptions are recognised separately from auth state. */
-const FLAT_PLAN_PROVIDER = /(?:^|-)(?:token-plan|step-plan|coding-plan)(?:-|$)|^kimi-coding$|^streamlake-kat-coding(?:-|$)/;
-export function isFlatPlanProvider(provider) {
-    return typeof provider === "string" && FLAT_PLAN_PROVIDER.test(provider);
-}
 export function hasApi(model, api) {
     return model.api === api;
 }

@@ -3,6 +3,7 @@
 - Supported session transports submit once per admission. Main turns and summaries apply the session retry policy, including provider retry advice when the transport exposes it.
 - Inference proven to have stopped locally settles at zero. Failed and discarded summary attempts retain their charges when the operation settles, including split compactions and branch summaries.
 - The terminal footer reuses measurements between ledger, route, and telemetry changes. Costs and status update when new receipts or live events arrive.
+- Opening saved desktop history loads only the dependencies needed to read and account for the transcript.
 
 ## 0.56.4 — Background billing and safer edits
 

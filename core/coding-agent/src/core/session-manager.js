@@ -1,4 +1,4 @@
-import { uuidv7 } from "@yunuspi/ai";
+import { uuidv7 } from "@yunuspi/ai/utils/uuid";
 import { randomUUID } from "crypto";
 import { appendFileSync, closeSync, createReadStream, existsSync, fstatSync, fsyncSync, ftruncateSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync, writeFileSync, } from "fs";
 import { readdir, stat } from "fs/promises";
