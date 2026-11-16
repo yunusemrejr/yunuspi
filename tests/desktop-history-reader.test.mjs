@@ -118,6 +118,11 @@ test('passive totals refresh an owned child receipt even when the parent revisio
   const statusFile = path.join(statusRoot, runId, 'status.json');
   const usage = total => ({ input: 10, output: 2, cost: { total, source: 'provider-reported' } });
   const append = (file, ...records) => fs.appendFileSync(file, records.map(record => JSON.stringify(record) + '\n').join(''));
+  const hosted = (status, total) => ({
+    type: 'custom', id: `hosted-${status}`, parentId: 'answer', timestamp, customType: 'auxiliary-model-usage-v1',
+    data: { id: 'hosted-request', owner: 'fixture', provider: 'openrouter', model: 'fixture',
+      status, ...(total === undefined ? {} : { usage: usage(total) }) },
+  });
   append(f.file, entry('visible', null, 'Visible parent conversation'), {
     type: 'custom', id: 'child', parentId: 'visible', timestamp, customType: 'subagent-cost-v1',
     data: { runId, mode: 'single', state: 'complete',
@@ -130,15 +135,24 @@ test('passive totals refresh an owned child receipt even when the parent revisio
   append(childFile, { type: 'session', version: 3, id: randomUUID(), timestamp, cwd: f.cwd }, {
     type: 'message', id: 'answer', parentId: null, timestamp,
     message: { role: 'assistant', provider: 'openrouter', model: 'fixture', content: [], usage: usage(0.25) },
-  }, {
-    type: 'custom', id: 'hosted', parentId: 'answer', timestamp, customType: 'auxiliary-model-usage-v1',
-    data: { id: 'hosted-request', owner: 'fixture', provider: 'openrouter', model: 'fixture',
-      status: 'completed', usage: usage(0.125) },
-  });
+  }, hosted('pending'));
   fs.mkdirSync(path.dirname(statusFile), { recursive: true });
   fs.writeFileSync(statusFile, JSON.stringify({ runId, mode: 'single', state: 'complete', sessionId: f.file,
     steps: [{ status: 'complete', sessionFile: childFile }] }));
 
+  const pending = await readHistory({ ...f, revision: initial.revision });
+  assert.equal(pending.revision, initial.revision);
+  assert.equal(pending.messages, undefined);
+  assert.equal(pending.stats.cost, 0.25);
+  assert.equal(pending.stats.costLabel, '$0.250000+?');
+  append(childFile, hosted('completed', 0));
+  assert.equal((await readHistory({ ...f, statsOnly: true })).stats.costLabel, '$0.250000');
+
+  append(childFile, {
+    type: 'custom', id: 'later-hosted', parentId: 'answer', timestamp, customType: 'auxiliary-model-usage-v1',
+    data: { id: 'later-hosted-request', owner: 'fixture', provider: 'openrouter', model: 'fixture',
+      status: 'completed', usage: usage(0.125) },
+  });
   const refreshed = await readHistory({ ...f, revision: initial.revision });
   assert.equal(refreshed.revision, initial.revision);
   assert.equal(refreshed.messages, undefined);

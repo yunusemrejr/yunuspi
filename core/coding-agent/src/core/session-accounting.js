@@ -1,6 +1,7 @@
 /** Pure session accounting shared by the owned footer and harness reports. */
 import { addUsageToTotals, createUsageTotals } from './usage-totals.js';
 import { isFlatPlanProvider } from '@yunuspi/ai/utils/flat-plan';
+import { applyRetainedChildCost } from './subagent-cost-recovery.js';
 export { recoverRetainedChildCosts } from './subagent-cost-recovery.js';
 /** Compact accounting facts; no prompt, endpoint, credential or response text. */
 export function readCostEvidence(usage, provider) {
@@ -174,12 +175,14 @@ export function collectAuxiliaryModelUsage(entries) {
   return {rows:[...rows.values()], truncated, coveredSummaries};
 }
 
-export function collectSessionCost(entries, subscription = false, auxiliaryRequests = collectAuxiliaryModelUsage(entries)) {
+export function collectSessionCost(entries, subscription = false, auxiliaryRequests = collectAuxiliaryModelUsage(entries), onRecoveryChange) {
   entries = Array.isArray(entries) ? entries.filter(entry => entry && typeof entry === "object") : [];
   const sessionId = entries[0]?.type === 'session' ? entries[0].id : undefined;
   const empty = () => ({reported:0, estimated:0, unknown:false, subscription:false, seen:false});
   const valid = n => typeof n === 'number' && Number.isFinite(n) && n >= 0;
   const rows = new Map(), nodes = new Map(), aliases = new Map();
+  const retainedChildren = [];
+  const retainedChildAnchors = new Map();
   const pending = new Set(), settled = new Set(), seenEntries = new Set(), responses = new Map();
   let main = empty(), children = empty(), auxiliary = empty(), truncated = false;
   const addRow = (scope, route, evidence, billingUnits) => {
@@ -239,8 +242,9 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
     const own = node.usage ? readCostEvidence(node.usage, node.provider ?? node.usage.cost?.provider) : undefined;
     const totalEvidence = node.totalCost?.costDetails ? readCostEvidence({costDetails:node.totalCost.costDetails}) : undefined;
     const value = inclusive ?? (own?.seen ? own.reported + own.estimated : undefined);
-    const next = {key, native:nativeId(node), own, inclusive, totalEvidence, nested, value, turns:node.usage?.turns, routes:node.usage?.costByModel,
-      route:node.model ?? node.usage?.cost?.model ?? 'unattributed child', incomplete:node.accountingIncomplete === true};
+    const next = {key, native:nativeId(node), own, inclusive, totalEvidence, nested, value, usage:node.usage,
+      turns:node.usage?.turns, routes:node.usage?.costByModel, route:node.model ?? node.usage?.cost?.model ?? 'unattributed child',
+      incomplete:node.accountingIncomplete === true, explicitUnknown:own?.unknown && !!(own.seen || node.usage?.costDetails || node.usage?.cost?.complete === false) || totalEvidence?.unknown === true};
     nodes.set(key,mergeNode(nodes.get(key),next));
     return key;
   };
@@ -265,7 +269,12 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
     const m = entry.type === 'message' ? entry.message : undefined;
     if (m?.role === 'toolResult' && m.toolName === 'subagent') record(m.details, !m.details?.asyncId && Array.isArray(m.details?.results) && m.details.results.length > 0);
     if (entry.type === 'custom' && entry.customType === 'subagent-cost-v1') {
-      if (entry.data?.recoveredForSessionId !== undefined && sessionId !== undefined && entry.data.recoveredForSessionId !== sessionId) continue;
+      if (entry.data?.recoveredForSessionId !== undefined) {
+        if (typeof entry.data.recoveredForSessionId === 'string' && (sessionId === undefined || entry.data.recoveredForSessionId === sessionId)) {
+          retainedChildren.push(entry);
+        }
+        continue;
+      }
       record(entry.data,true);
       // Helper wrappers (auto-assist, quality-review, ...) carry the native
       // run's usage inside their own cost record; the native id never gets a
@@ -274,7 +283,13 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
       // Same linkage discipline as the metrics helper-run repair: exact
       // run-0 session paths only, never model, timing or neighbors.
       for (const node of Array.isArray(entry.data?.results) ? entry.data.results : []) {
-        if (!node || typeof node !== 'object' || isPlaceholderResult(node)) continue;
+        if (!node || typeof node !== 'object') continue;
+        if (isPlaceholderResult(node)) {
+          if (entry.data.results.length === 1 && typeof node.sessionFile === 'string') {
+            retainedChildAnchors.set(JSON.stringify([entry.data.runId, node.sessionFile]), node);
+          }
+          continue;
+        }
         if (typeof node.runId === 'string') { pending.delete(node.runId); settled.add(node.runId); }
         if (!node.usage) continue;
         const file = node.sessionFile;
@@ -335,6 +350,27 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
     auxiliary = mergeCostEvidence(auxiliary, row.evidence);
     addRow('auxiliary', row.route, row.evidence, row.billingUnits);
   }
+  // Recovery describes an already recorded physical child. Resolve the exact
+  // file alias after all native/wrapper snapshots, regardless of append order.
+  for (const entry of retainedChildren) {
+    const { runId, results, childLedgerCoverage } = entry.data;
+    if (!Array.isArray(results) || results.length !== 1 || typeof results[0]?.sessionFile !== 'string') continue;
+    const row = results[0];
+    let key = aliases.get(`file:${row.sessionFile}`);
+    if (key === undefined) {
+      const anchor = retainedChildAnchors.get(JSON.stringify([runId, row.sessionFile]));
+      if (!anchor) continue;
+      key = recordNode(anchor, `${runId}:${anchor.index ?? 0}`);
+    }
+    const node = nodes.get(key);
+    if (!node || node.nested.size) continue;
+    const updated = applyRetainedChildCost(node, row, childLedgerCoverage);
+    if (updated !== node) {
+      nodes.set(key, updated);
+      onRecoveryChange?.(entry);
+    }
+    pending.delete(runId);
+  }
   // Resolve inclusive tree snapshots into own charges. A shared descendant can
   // appear in both a workflow and a step; it is charged once for the session.
   for (const node of nodes.values()) node.nested = new Set([...node.nested].map(key => aliases.get(key) ?? key));
@@ -352,6 +388,7 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
     totals.set(key,total);
     return total;
   };
+  let childPending = 0;
   for (const node of nodes.values()) {
     const nested = [...node.nested].reduce((sum,id)=>sum+totalFor(id),0);
     const total = totalFor(node.key);
@@ -367,6 +404,7 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
     if (!node.own && node.inclusive === undefined && node.nested.size > 0) evidence = empty();
     evidence.unknown ||= node.incomplete;
     children = mergeCostEvidence(children,evidence);
+    for (const gap of node.retainedCoverage?.gaps?.values() ?? []) if (gap.state === 'pending') childPending++;
     const routes = Array.isArray(node.routes) ? node.routes.filter(r=>typeof r?.route === 'string' && r.route.length <= 512).map(r=>({route:r.route,evidence:readCostEvidence({costDetails:r.evidence})})) : [];
     const routeTotal = routes.reduce((sum,r)=>sum+r.evidence.reported+r.evidence.estimated,0);
     if (routes.length && Math.abs(routeTotal - evidence.reported - evidence.estimated) < 1e-10)
@@ -380,7 +418,7 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
   const total = evidence.reported + evidence.estimated;
   const amount = total > 0 && total < 0.000001 ? total.toExponential(3) : total > 0 && total < 1 ? total.toFixed(6) : total.toFixed(3);
   const formatted = evidence.seen ? `$${evidence.estimatedUsage ? '~' : ''}${amount}${evidence.unknown ? '+?' : ''}${evidence.subscription ? ' (sub)' : ''}` : evidence.subscription ? `sub${evidence.unknown ? '+?' : ''}` : '$?';
-  return {total, ...evidence, main, children, auxiliary, pending:pending.size + auxiliaryRequests.rows.filter(row=>row.status === 'pending').length, rows:[...rows.values()], formatted};
+  return {total, ...evidence, main, children, auxiliary, pending:pending.size + childPending + auxiliaryRequests.rows.filter(row=>row.status === 'pending').length, rows:[...rows.values()], formatted};
 }
 
 /** Shared by live RPC and the offline desktop history reader. The whole

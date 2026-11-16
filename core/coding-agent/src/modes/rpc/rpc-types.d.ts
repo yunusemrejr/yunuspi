@@ -33,6 +33,7 @@ export type RpcCommand = {
 } | {
     id?: string;
     type: "clear_queue";
+    abortPendingInput?: boolean;
 } | {
     id?: string;
     type: "new_session";

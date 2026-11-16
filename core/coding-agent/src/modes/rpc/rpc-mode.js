@@ -343,7 +343,7 @@ export async function runRpcMode(runtimeHost) {
                 return success(id, "abort");
             }
             case "clear_queue": {
-                return success(id, "clear_queue", session.clearQueue());
+                return success(id, "clear_queue", session.clearQueue({ abortPendingInput: command.abortPendingInput === true }));
             }
             case "new_session": {
                 const options = command.parentSession ? { parentSession: command.parentSession } : undefined;

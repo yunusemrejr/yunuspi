@@ -1,3 +1,11 @@
+## 0.56.12 — Child billing evidence and reliable browser reads
+
+- Retained child receipts update the footer when coverage changes, including missing usage, a reported zero, and a verified correction to an estimate. Native replays count the same child once.
+- Typing `/cost` in saved desktop history keeps the session dormant. History cursors stay bound to the transcript or runtime that supplied them.
+- Closing or archiving a desktop session cancels unfinished startup and prompt preparation. Accepted queued text returns to the draft once.
+- Browser text reads report truncation, preserve Unicode search offsets, and bound the work spent scanning oversized text nodes.
+- Codex streams accept LF, CRLF, and CR framing and abort pending reads on Stop. Structured provider errors reach the session retry and context-limit policies.
+
 ## 0.56.11 — Atomic edits and current session totals
 
 - Overlapping edits compose only when their replacements agree at the original positions. Conflicting edits and matches that split a Unicode character fail before writing.

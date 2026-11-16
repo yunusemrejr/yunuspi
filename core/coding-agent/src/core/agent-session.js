@@ -1030,6 +1030,7 @@ export class AgentSession {
                 expandedText = this._expandSkillCommand(expandedText);
                 expandedText = expandPromptTemplate(expandedText, [...this.promptTemplates]);
             }
+            inputAbortController.signal.throwIfAborted();
             // If streaming, queue via steer() or followUp() based on option
             if (this.isStreaming) {
                 if (!options?.streamingBehavior) {
@@ -1491,7 +1492,8 @@ export class AgentSession {
      * Useful for restoring to editor when user aborts.
      * @returns Object with steering and followUp arrays
      */
-    clearQueue() {
+    clearQueue(options) {
+        if (options?.abortPendingInput) this._abortPendingInputPreflights();
         const steering = [...this._steeringMessages];
         const followUp = [...this._followUpMessages];
         this._steeringMessages = [];

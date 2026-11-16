@@ -174,100 +174,124 @@ async function savedHistory(id, { before, revision, statsOnly } = {}) {
   return readHistory({ directory: transcriptRoot, sessionId: id, cwd: project.path, before, revision, statsOnly, limit: 80, coreRoot: path.join(root, 'core/coding-agent') });
 }
 
+const isWorkerHistory = revision => typeof revision === 'string' && revision.startsWith('worker:');
+
 async function workerFor(id) {
   if (quitting) throw Error('YunusPi is shutting down.');
   if (closing.has(id)) throw Error('Session is closing.');
-  const session = store.session(id), project = store.project(session.projectId);
-  if (session.state !== 'open') throw Error('Open this session first.');
+  if (store.session(id).state !== 'open') throw Error('Open this session first.');
   if (starting.has(id)) return starting.get(id);
   if (workers.has(id) && !workers.get(id).dead) return workers.get(id);
   const priorCreation = creationTail;
   let releaseCreation;
   creationTail = new Promise(resolve => { releaseCreation = resolve; });
-  await priorCreation;
-  await loginPath;
-  try {
-  if (store.session(id).state !== 'open' || closing.has(id) || quitting) throw Error('Session is no longer open.');
-  if (starting.has(id)) return starting.get(id);
-  if (workers.has(id) && !workers.get(id).dead) return workers.get(id);
-  // Even a fresh extension lifecycle can arm project schedules. A quiet model
-  // is not an inactivity lease; only an explicit close may stop that runtime.
-  // History browsing itself does not start a runtime or consume these slots.
-  if (workers.size >= 8) throw Error('Eight session workers are resident. Close a session to free a worker; its history will be retained.');
-  if (fs.realpathSync(project.path) !== project.path) throw Error('Project path changed. Reopen its folder.');
-  const node = process.env.YUNUSPI_NODE_BINARY || 'node';
-  const entry = path.join(root, 'core/coding-agent/dist/rpc-entry.js');
-  if (!fs.existsSync(entry)) throw Error('Build the owned core with npm run build:core first.');
-  const launcher = path.join(agentDir, 'scripts/pi-launch.sh');
-  const trusted = (await projectTrustStore()).get(project.path) === true;
-  const args = [entry, '--session-id', id, '--session-dir', store.transcriptDirectory(id), trusted ? '--approve' : '--no-approve'];
-  if (session.model) args.push('--provider', session.model.provider, '--model', session.model.id);
-  if (session.thinkingLevel) args.push('--thinking', session.thinkingLevel);
-  const env = { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_DESKTOP_SESSION: '1', YUNUSPI_CORE_ROOT: path.dirname(path.dirname(entry)), PI_SUBAGENT_PI_BINARY: path.join(agentDir, 'bin/yunuspi') };
-  delete env.ELECTRON_RUN_AS_NODE;
-  const worker = new AgentWorker({ command: fs.existsSync(launcher) ? '/bin/bash' : node, args: fs.existsSync(launcher) ? [launcher, node, ...args] : args, cwd: project.path, env });
-  worker.uiRequests = new Set();
-  workers.set(id, worker);
-  worker.on('event', (event, sequence) => {
-    if (event.type === 'extension_ui_request' && ['select', 'confirm', 'input', 'editor'].includes(event.method)) worker.uiRequests.add(event.id);
-    if (event.type === 'extension_ui_closed') worker.uiRequests.delete(event.id);
-    // Keep workspace.json in step with the session's real effort level: automatic
-    // changes (economy/adaptive, model-switch remap) only reach the transcript.
-    // workerFor() re-passes the cached level as `--thinking` on the next start
-    // (line 114), which would otherwise reopen the session at a stale level.
-    if (event.type === 'thinking_level_changed' && typeof event.level === 'string') {
-      try { store.update(id, { thinkingLevel: event.level }); } catch { /* a stale cache is recoverable next start */ }
-    }
-    send({ type: 'agent', sessionId: id, event, sequence });
-    if (event.type === 'agent_start' || event.type === 'agent_end') publish();
-    // Detached work and helpers can settle after the final turn, while the
-    // session is idle. Coalesce bursts and guarantee a follow-up for changes
-    // made while an earlier request was in flight.
-    if (event.type === 'turn_end' || event.type === 'agent_end' ||
-      event.type === 'entry_appended' && accountingEntries.has(event.entry?.customType)) refreshWorkerStats(id, worker);
-  });
-  worker.on('stopped', result => {
-    if (workers.get(id) !== worker) return;
-    workers.delete(id);
-    if (!result.expected) send({ type: 'failure', sessionId: id, message: result.message || 'Agent stopped unexpectedly. Reopen the session to reconnect.' });
+  const requireAdmission = () => {
+    if (starting.get(id) !== ready || closing.has(id) || quitting) throw Error('Session is no longer open.');
+    const session = store.session(id);
+    if (session.state !== 'open') throw Error('Session is no longer open.');
+    return session;
+  };
+  const ready = (async () => {
+    await priorCreation;
+    try {
+      await loginPath;
+      const project = store.project(requireAdmission().projectId);
+      // Even a fresh extension lifecycle can arm project schedules. A quiet model
+      // is not an inactivity lease; only an explicit close may stop that runtime.
+      // History browsing itself does not start a runtime or consume these slots.
+      if (workers.size >= 8) throw Error('Eight session workers are resident. Close a session to free a worker; its history will be retained.');
+      const node = process.env.YUNUSPI_NODE_BINARY || 'node';
+      const entry = path.join(root, 'core/coding-agent/dist/rpc-entry.js');
+      if (!fs.existsSync(entry)) throw Error('Build the owned core with npm run build:core first.');
+      const launcher = path.join(agentDir, 'scripts/pi-launch.sh');
+      const trusted = (await projectTrustStore()).get(project.path) === true;
+      // A close can complete while the import is pending, even if the same tab
+      // is opened again. The startup must still hold its original reservation.
+      const session = requireAdmission();
+      if (fs.realpathSync(project.path) !== project.path) throw Error('Project path changed. Reopen its folder.');
+      const args = [entry, '--session-id', id, '--session-dir', store.transcriptDirectory(id), trusted ? '--approve' : '--no-approve'];
+      if (session.model) args.push('--provider', session.model.provider, '--model', session.model.id);
+      if (session.thinkingLevel) args.push('--thinking', session.thinkingLevel);
+      const env = { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_DESKTOP_SESSION: '1', YUNUSPI_CORE_ROOT: path.dirname(path.dirname(entry)), PI_SUBAGENT_PI_BINARY: path.join(agentDir, 'bin/yunuspi') };
+      delete env.ELECTRON_RUN_AS_NODE;
+      const worker = new AgentWorker({ command: fs.existsSync(launcher) ? '/bin/bash' : node, args: fs.existsSync(launcher) ? [launcher, node, ...args] : args, cwd: project.path, env });
+      worker.uiRequests = new Set();
+      workers.set(id, worker);
+      worker.on('event', (event, sequence) => {
+        if (workers.get(id) !== worker) return;
+        if (event.type === 'extension_ui_request' && ['select', 'confirm', 'input', 'editor'].includes(event.method)) worker.uiRequests.add(event.id);
+        if (event.type === 'extension_ui_closed') worker.uiRequests.delete(event.id);
+        // Keep workspace.json in step with the session's real effort level: automatic
+        // changes (economy/adaptive, model-switch remap) only reach the transcript.
+        // workerFor() re-passes the cached level as `--thinking` on the next start
+        // (line 114), which would otherwise reopen the session at a stale level.
+        if (event.type === 'thinking_level_changed' && typeof event.level === 'string') {
+          try { store.update(id, { thinkingLevel: event.level }); } catch { /* a stale cache is recoverable next start */ }
+        }
+        send({ type: 'agent', sessionId: id, event, sequence });
+        if (event.type === 'agent_start' || event.type === 'agent_end') publish();
+        // Detached work and helpers can settle after the final turn, while the
+        // session is idle. Coalesce bursts and guarantee a follow-up for changes
+        // made while an earlier request was in flight.
+        if (event.type === 'turn_end' || event.type === 'agent_end' ||
+          event.type === 'entry_appended' && accountingEntries.has(event.entry?.customType)) refreshWorkerStats(id, worker);
+      });
+      worker.on('stopped', result => {
+        if (workers.get(id) !== worker) return;
+        workers.delete(id);
+        if (!result.expected) send({ type: 'failure', sessionId: id, message: result.message || 'Agent stopped unexpectedly. Reopen the session to reconnect.' });
+        publish();
+      });
+      publish();
+      return worker.request('get_state').then(state => {
+        requireAdmission();
+        if (workers.get(id) !== worker) throw Error('Session worker stopped during startup.');
+        worker.busy = state.isStreaming;
+        if (state.model) store.update(id, { model: { provider: state.model.provider, id: state.model.id }, thinkingLevel: state.thinkingLevel });
+        send({ type: 'state', sessionId: id, data: state });
+        return worker;
+      }).catch(async error => {
+        if (workers.get(id) === worker && !closing.has(id)) await worker.stop();
+        throw error;
+      });
+    } finally { releaseCreation(); }
+  })().finally(() => {
+    if (starting.get(id) === ready) starting.delete(id);
     publish();
   });
-  const ready = worker.request('get_state').then(state => {
-    worker.busy = state.isStreaming;
-    if (state.model) store.update(id, { model: { provider: state.model.provider, id: state.model.id }, thinkingLevel: state.thinkingLevel });
-    send({ type: 'state', sessionId: id, data: state });
-    return worker;
-  }).catch(async error => {
-    await worker.stop();
-    throw error;
-  }).finally(() => { starting.delete(id); publish(); });
   starting.set(id, ready);
-  publish();
   return ready;
-  } finally { releaseCreation(); }
 }
 
-async function stop(id) {
+function stop(id, finish) {
   if (closing.has(id)) return closing.get(id);
   const worker = workers.get(id);
-  if (!worker) return;
-  // Text the user queued while a turn was running lives only in the worker's
-  // memory (AgentSession._steeringMessages/_followUpMessages are never persisted)
-  // and vanishes with the process. Ask for it first and keep it as the draft.
-  let queued = null;
-  try { queued = await worker.request('clear_queue', {}, 2000); } catch { /* already closing */ }
-  const saved = [...(queued?.steering ?? []), ...(queued?.followUp ?? [])]
-    .filter((text) => typeof text === 'string' && text.trim());
-  if (saved.length) {
-    try {
-      const draft = saved.join('\n\n');
-      const existing = store.session(id).draft.trim();
-      store.setDraft(id, existing ? `${draft}\n\n${existing}` : draft);
-      publish();
-    } catch { /* the transcript still closes */ }
-  }
-  const pending = worker.stop().finally(() => { closing.delete(id); workers.delete(id); starting.delete(id); publish(); });
+  // Mark closure before the drain starts. A cancelled reservation may still
+  // resolve an import or ready response, but it can no longer admit a worker.
+  const pending = Promise.resolve().then(async () => {
+    if (worker) {
+      let queued = null;
+      try { queued = await worker.request('clear_queue', { abortPendingInput: true }, 2000); } catch { /* unavailable worker */ }
+      const saved = [...(queued?.steering ?? []), ...(queued?.followUp ?? [])]
+        .filter(text => typeof text === 'string' && text.trim());
+      if (saved.length) {
+        try {
+          const draft = saved.join('\n\n');
+          const existing = store.session(id).draft.trim();
+          store.setDraft(id, existing ? `${draft}\n\n${existing}` : draft);
+          publish();
+        } catch { /* the transcript still closes */ }
+      }
+      await worker.stop();
+    }
+    finish?.();
+  }).finally(() => {
+    if (workers.get(id) === worker) workers.delete(id);
+    if (closing.get(id) === pending) closing.delete(id);
+    publish();
+  });
   closing.set(id, pending);
+  starting.delete(id);
   return pending;
 }
 
@@ -295,12 +319,12 @@ async function sessionAction(id, action) {
     const result = await dialog.showMessageBox(window, { type: action === 'delete' ? 'warning' : 'question', message: action === 'delete' ? `Delete “${session.title}”?` : `Stop “${session.title}”?`, detail: action === 'delete' ? 'This permanently deletes this desktop session’s transcript and draft. Shared project memories and project files are kept.' : 'The current turn will stop. Your conversation is saved and can be resumed.', buttons: ['Cancel', action === 'delete' ? 'Delete session' : 'Stop and continue'], defaultId: 0, cancelId: 0, noLink: true });
     if (result.response === 0) return { cancelled: true };
   }
+  if (closing.has(id)) throw Error('Session is closing.');
   if (action === 'restore') store.update(id, { state: 'closed' });
-  else {
-    await stop(id);
+  else await stop(id, () => {
     if (action === 'delete') store.delete(id);
     else store.update(id, { state: action === 'archive' ? 'archived' : 'closed' });
-  }
+  });
   publish();
   return { cancelled: false };
 }
@@ -309,8 +333,8 @@ async function projectAction(id, action) {
   const project = store.project(text(id, 40));
   if (!['archive', 'restore'].includes(action)) throw Error('Unknown project action.');
   if (action === 'archive') {
-    const running = store.data.sessions.filter(s => s.projectId === project.id && workers.has(s.id));
-    if (running.some(s => workers.get(s.id).busy)) {
+    const running = store.data.sessions.filter(s => s.projectId === project.id && (workers.has(s.id) || starting.has(s.id)));
+    if (running.some(s => workers.get(s.id)?.busy)) {
       const result = await dialog.showMessageBox(window, { type: 'question', message: `Stop running sessions in “${project.name}”?`, detail: 'Archiving the project stops its sessions. Conversations are saved; restore the project from Archive to continue them.', buttons: ['Cancel', 'Stop and archive'], defaultId: 0, cancelId: 0, noLink: true });
       if (result.response === 0) return { cancelled: true };
     }
@@ -332,18 +356,27 @@ async function dispatch(action, input = {}) {
       await cancelPendingHistoryReads();
       if (version !== historyOpenVersion) throw Error('A newer session open superseded this request.');
       store.activate(input.id); publish();
-      const previousWorker = workers.get(input.id);
-      if (!previousWorker && !starting.has(input.id)) {
+      if (!workers.has(input.id) && !starting.has(input.id)) {
         const session = store.session(input.id);
-        return { state: { model: session.model, thinkingLevel: session.thinkingLevel, isStreaming: false }, ...await savedHistory(input.id, { revision: input.revision }), sequence: 0, passive: true };
+        const revision = isWorkerHistory(input.revision) ? undefined : input.revision;
+        return { state: { model: session.model, thinkingLevel: session.thinkingLevel, isStreaming: false }, ...await savedHistory(input.id, { revision }), sequence: 0, passive: true };
       }
       const worker = await workerFor(input.id);
-      const reuse = input.loaded && previousWorker === worker;
+      const reuse = input.revision === worker.historyRevision;
       const [state, history] = await Promise.all([worker.request('get_state'), reuse ? Promise.resolve({ data: {}, sequence: worker.sequence }) : worker.requestWithBoundary('get_messages', { projection: 'desktop', limit: 80 })]);
-      return { state: { ...state, isStreaming: history.data.isStreaming ?? worker.busy }, ...history.data, sequence: history.sequence };
+      return { state: { ...state, isStreaming: history.data.isStreaming ?? worker.busy }, ...history.data, sequence: history.sequence, revision: worker.historyRevision };
     }
     case 'warm': await workerFor(input.id); return;
-    case 'history': return workers.has(input.id) ? (await workerFor(input.id)).request('get_messages', { projection: 'desktop', limit: 80, before: input.before }) : savedHistory(input.id, { before: input.before, revision: input.revision });
+    case 'history': {
+      const { id, revision, before } = input;
+      // A numeric index addresses the source that supplied it. Warming a
+      // session does not transfer saved cursors to the live process.
+      if (!isWorkerHistory(revision)) return savedHistory(id, { before, revision });
+      if (workers.get(id)?.historyRevision !== revision) return { reset: true };
+      const worker = await workerFor(id);
+      if (worker.historyRevision !== revision) return { reset: true };
+      return worker.request('get_messages', { projection: 'desktop', limit: 80, before });
+    }
     case 'updateSession': {
       if (!input.patch || Object.keys(input.patch).some(k => !['title', 'draft'].includes(k))) throw Error('Invalid session update.');
       if (Object.keys(input.patch).length === 1 && input.patch.draft !== undefined) { store.setDraft(input.id, text(input.patch.draft)); return; }
@@ -357,13 +390,18 @@ async function dispatch(action, input = {}) {
       const images = input.images ?? [];
       if (!Array.isArray(images) || images.length > 6 || images.some(i => i?.type !== 'image' || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(i.mimeType) || typeof i.data !== 'string' || i.data.length > 14_000_000 || !/^[A-Za-z0-9+/]*={0,2}$/.test(i.data))) throw Error('Invalid image attachment.');
       if (images.reduce((sum, image) => sum + image.data.length, 0) > 14_000_000) throw Error('Attachments together must be smaller than 10 MiB.');
-      if (store.session(input.id).draft.trim() === message.trim()) store.setDraft(input.id, '');
       const worker = await workerFor(input.id);
+      if (closing.has(input.id) || quitting || workers.get(input.id) !== worker || worker.stopping) throw Error('Session is closing.');
+      const { draft, updatedAt } = store.session(input.id);
       // During a run, Enter steers: the agent reads the message at its next step. Every message used to
       // wait for the whole run, so "you don't have to use Blender" arrived 49 minutes and a finished render
       // later. Alt+Enter still queues a message for after the run.
       const result = await worker.request('prompt', { message, images, streamingBehavior: input.delivery === 'followUp' ? 'followUp' : 'steer' });
-      if (store.session(input.id).title === 'New session') store.update(input.id, { title: message.slice(0, 72) });
+      if (workers.get(input.id) === worker) {
+        const session = store.session(input.id);
+        if (draft.trim() === message.trim() && session.draft === draft && session.updatedAt === updatedAt) store.setDraft(input.id, '');
+        if (!closing.has(input.id) && session.title === 'New session') store.update(input.id, { title: message.slice(0, 72) });
+      }
       publish(); return result;
     }
     case 'abort': return (await workerFor(input.id)).request('abort', {}, 20_000);
@@ -548,7 +586,7 @@ else {
         if (result.response === 0) return;
       }
       quitting = true;
-      await Promise.allSettled([...workers.keys()].map(stop));
+      await Promise.allSettled([...new Set([...workers.keys(), ...starting.keys()])].map(id => stop(id)));
       await closeHistoryReaders();
       try { store.flush(); }
       catch (error) {

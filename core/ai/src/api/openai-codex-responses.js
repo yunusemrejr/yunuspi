@@ -9,6 +9,7 @@ import { headersToRecord } from "../utils/headers.js";
 import { resolveHttpProxyUrlForTarget } from "../utils/node-http-proxy.js";
 import { getPiUserAgent } from "../utils/pi-user-agent.js";
 import { captureProviderRetryAdvice, MAX_RETRY_TIMER_MS, readRetryAfterMs } from "../utils/provider-retry.js";
+import { iterateSseMessages } from "../utils/sse.js";
 import { uuidv7 } from "../utils/uuid.js";
 import { createGrammarToolInputProperties } from "./constrained-sampling.js";
 import { clampOpenAIPromptCacheKey } from "./openai-prompt-cache.js";
@@ -30,6 +31,15 @@ const CODEX_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]
 const WEBSOCKET_MESSAGE_TOO_BIG_CLOSE_CODE = 1009;
 const WEBSOCKET_CONNECTION_LIMIT_REACHED_CODE = "websocket_connection_limit_reached";
 const PREVIOUS_RESPONSE_NOT_FOUND_CODE = "previous_response_not_found";
+const CODEX_EVENT_RETRY_ADVICE = new Map([
+    ["server_error", true],
+    ["rate_limit_exceeded", true],
+    ["invalid_prompt", false],
+    ["model_not_found", false],
+    ["invalid_api_key", false],
+    ["context_length_exceeded", false],
+    ["insufficient_quota", false],
+]);
 const CODEX_RESPONSE_STATUSES = new Set([
     "completed",
     "incomplete",
@@ -340,6 +350,16 @@ export const stream = (model, context, options) => {
             output.stopReason = options?.signal?.aborted ? "aborted" : "error";
             captureProviderRetryAdvice(output, error);
             output.errorMessage = formatProviderError(normalizeProviderError(error));
+            if (output.stopReason === "error" && error instanceof CodexApiError) {
+                const retryAllowed = CODEX_EVENT_RETRY_ADVICE.get(error.code);
+                if (retryAllowed !== undefined) {
+                    output.providerRetry = { ...output.providerRetry, retryAllowed };
+                    // The shared cooldown and overflow classifiers also inspect this text.
+                    if (!output.errorMessage.includes(error.code)) {
+                        output.errorMessage = `${error.code}: ${output.errorMessage}`;
+                    }
+                }
+            }
             stream.push({ type: "error", reason: output.stopReason, error: output });
             stream.end();
         }
@@ -533,6 +553,7 @@ async function* mapCodexEvents(events, output) {
             const response = event.response;
             const code = response?.error?.code;
             const message = response?.error?.message;
+            output.rawStopReason = "failed";
             throw new CodexApiError(message || "Codex response failed", { code, payload: event });
         }
         if (type === "response.done" || type === "response.completed" || type === "response.incomplete") {
@@ -560,64 +581,18 @@ function normalizeCodexStatus(status) {
 async function* parseSSE(response, signal) {
     if (!response.body)
         return;
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = "";
-    const onAbort = () => {
-        void reader.cancel().catch(() => { });
-    };
-    signal?.addEventListener("abort", onAbort, { once: true });
-    try {
-        while (true) {
-            if (signal?.aborted) {
-                throw new Error("Request was aborted");
-            }
-            const { done, value } = await reader.read();
-            if (signal?.aborted) {
-                throw new Error("Request was aborted");
-            }
-            buffer += done ? decoder.decode() : decoder.decode(value, { stream: true });
-            // Treat EOF as terminating the residual SSE frame.
-            if (done && buffer.trim())
-                buffer += "\n\n";
-            let idx = buffer.indexOf("\n\n");
-            while (idx !== -1) {
-                const chunk = buffer.slice(0, idx);
-                buffer = buffer.slice(idx + 2);
-                const dataLines = chunk
-                    .split("\n")
-                    .filter((l) => l.startsWith("data:"))
-                    .map((l) => l.slice(5).trim());
-                if (dataLines.length > 0) {
-                    const data = dataLines.join("\n").trim();
-                    if (data && data !== "[DONE]") {
-                        try {
-                            yield JSON.parse(data);
-                        }
-                        catch (cause) {
-                            throw new CodexProtocolError(`Invalid Codex SSE JSON: ${formatThrownValue(cause)}`, {
-                                cause,
-                                payload: data,
-                            });
-                        }
-                    }
-                }
-                idx = buffer.indexOf("\n\n");
-            }
-            if (done)
-                break;
-        }
-    }
-    finally {
-        signal?.removeEventListener("abort", onAbort);
+    for await (const frame of iterateSseMessages(response.body, signal)) {
+        const data = frame.data.trim();
+        if (!data || data === "[DONE]") continue;
         try {
-            await reader.cancel();
+            yield JSON.parse(data);
         }
-        catch { }
-        try {
-            reader.releaseLock();
+        catch (cause) {
+            throw new CodexProtocolError(`Invalid Codex SSE JSON: ${formatThrownValue(cause)}`, {
+                cause,
+                payload: data,
+            });
         }
-        catch { }
     }
 }
 // ============================================================================

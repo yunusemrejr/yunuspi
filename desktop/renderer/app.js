@@ -14,7 +14,13 @@ const projectOf = session => workspace.projects.find(p => p.id === session?.proj
 const conversationOf = id => { if (!conversations.has(id)) conversations.set(id, createConversation()); return conversations.get(id); };
 const viewOf = id => { if (!views.has(id)) views.set(id, { pinned: true, top: 0, limit: 80, nodes: new Map(), widgets: new Map(), work: new Map() }); return views.get(id); };
 const strip = value => String(value ?? '').replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, '');
-const statsCommand = /^\/(metrics|cost|self|session)\s*$/;
+const statsCommands = ['/cost', '/metrics', '/self', '/session'];
+const isStatsCommand = text => statsCommands.includes(text.trim());
+function passiveStatsPrefix(id, text) {
+  const prefix = text.trim();
+  return prefix.startsWith('/') && statsCommands.some(command => command.startsWith(prefix)) &&
+    !workspace.runtime.some(worker => worker.id === id);
+}
 // The core's cost label is a compact footer token ("sub", "$?", "$~1.20+?"); spell it out here.
 const costText = stats => {
   const label = String(stats.costLabel || '$?');
@@ -147,7 +153,9 @@ async function newSession(projectId) {
   await openSession(session.id);
 }
 async function openSession(id, reload = false) {
-  if (!reload && current()?.id === id && !conversationOf(id).error && workspace.runtime.some(r => r.id === id)) { hideSidebarOnNarrow(); $('prompt').focus(); return; }
+  const cachedConversation = conversationOf(id);
+  if (!reload && current()?.id === id && !cachedConversation.error && cachedConversation.historyRevision?.startsWith('worker:')
+    && workspace.runtime.some(r => r.id === id)) { hideSidebarOnNarrow(); $('prompt').focus(); return; }
   saveView(); closeCommandMenu();
   const version = ++switchVersion;
   activeId = id; opening = true;
@@ -158,16 +166,14 @@ async function openSession(id, reload = false) {
   conversationOf(id).error = '';
   renderSidebar(); renderMessages(true); renderChrome(); hideSidebarOnNarrow();
   try {
-    const cachedConversation = conversationOf(id);
-    const result = await api.openSession(id, !reload && Boolean(cachedConversation.loaded), reload ? undefined : cachedConversation.historyRevision);
+    const result = await api.openSession(id, reload ? undefined : cachedConversation.historyRevision);
     if (version !== switchVersion || activeId !== id) return;
     // The worker emits during initialization. get_messages is authoritative at
     // its response boundary, and deltas arriving afterwards continue the reducer.
     const previous = conversationOf(id);
     const state = result.messages ? createConversation([...result.messages, ...(result.streamingMessage ? [result.streamingMessage] : [])]) : previous;
     if (result.messages) { state.historyBefore = result.before; state.hasMore = result.hasMore; pendingView.savedGoal = result.goal ?? null; }
-    state.loaded = true;
-    state.historyRevision = result.passive ? result.revision : undefined;
+    state.historyRevision = result.revision;
     Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming,
       stats: result.stats ?? (result.passive && result.messages ? undefined : previous.stats) });
     if (state.busy) {
@@ -477,7 +483,7 @@ async function sendPrompt(event, { checked = false, later = false } = {}) {
   if (!message && !images.length) return;
   let reading = null;
   if (/^\/models?(?:\s|$)/.test(message)) { setEditorDraft(id, ''); return showModels(); }
-  if (statsCommand.test(message)) { setEditorDraft(id, ''); setWorkbench(true, 'context'); await refreshStats(id); return; }
+  if (isStatsCommand(message)) { setEditorDraft(id, ''); setWorkbench(true, 'context'); await refreshStats(id); return; }
   if (/^\/(skills|tools|help)\s*$/.test(message)) { setEditorDraft(id, ''); return showCommands(); }
   if (/^\/new\s*$/.test(message)) { setEditorDraft(id, ''); return newSession(session.projectId); }
   const rename = /^\/name(?:\s+([\s\S]+))?$/.exec(message);
@@ -584,11 +590,11 @@ function scheduleLens() {
   let same = 0; while (same < text.length && same < lensText.length && text[same] === lensText[same]) same++;
   drawLens(lensReading && /^\s*\//.test(text) ? { ...lensReading, marks: lensReading.marks.filter(mark => mark.end <= same) } : null, text);
   clearTimeout(lensTimer);
-  if (/^\s*\//.test(text) && !statsCommand.test(text.trim())) lensTimer = setTimeout(() => void updateLens(), 140);
+  if (/^\s*\//.test(text) && !isStatsCommand(text) && !passiveStatsPrefix(activeId, text)) lensTimer = setTimeout(() => void updateLens(), 140);
 }
 async function updateLens() {
   const id = activeId, text = $('prompt').value, sequence = ++lensSequence;
-  if (!id || !/^\s*\//.test(text)) return drawLens(null);
+  if (!id || !/^\s*\//.test(text) || isStatsCommand(text) || passiveStatsPrefix(id, text)) return drawLens(null);
   let commands = [], check;
   try { [commands, check] = await Promise.all([commandsFor(id), api.checkCommand(id, text)]); } catch { /* the lens is a reading aid only */ }
   if (sequence !== lensSequence || id !== activeId || text !== $('prompt').value) return;
@@ -710,6 +716,10 @@ const COMMAND_GROUPS = [
 ];
 const groupOf = command => command.name === 'goal' ? 'command' : command.chainable ? 'boost' : command.source === 'skill' ? 'skill' : 'command';
 const listed = commands => commands.filter(c => !c.hidden).sort((a, b) => (b.name === 'goal') - (a.name === 'goal'));
+const passiveCommands = [
+  { name: 'goal', description: 'Keep working until the goal holds.' },
+  ...statsCommands.map(command => ({ name: command.slice(1), description: 'Show recorded session usage.' })),
+];
 function commandOption(command, symbol) {
   const button = element('button'), detail = element('span', '', `/${command.name}`);
   detail.append(element('small', '', command.description || command.source)); button.append(icon(symbol), detail);
@@ -760,8 +770,11 @@ function rankCommands(commands, query) {
 }
 async function updateCommandMenu() {
   const id = activeId, request = ++commandMenuRequest;
-  if (!id || !slashContext()) return closeCommandMenu();
-  let commands; try { commands = await commandsFor(id); } catch { return closeCommandMenu(); }
+  const text = $('prompt').value;
+  if (!id || isStatsCommand(text) || !slashContext()) return closeCommandMenu();
+  let commands;
+  try { commands = passiveStatsPrefix(id, text) && !commandLists.has(id) ? passiveCommands : await commandsFor(id); }
+  catch { if (request === commandMenuRequest) closeCommandMenu(); return; }
   const context = slashContext();
   if (request !== commandMenuRequest || id !== activeId || !context) return request === commandMenuRequest ? closeCommandMenu() : undefined;
   const sections = [];
@@ -1040,9 +1053,11 @@ $('prompt').oninput = () => {
   resizePrompt();
   scheduleLens();
   if (!activeId) return;
-  setEditorDraft(activeId, $('prompt').value);
-  if (statsCommand.test($('prompt').value.trim())) { closeCommandMenu(); return; }
+  const text = $('prompt').value;
+  setEditorDraft(activeId, text);
+  if (isStatsCommand(text)) { closeCommandMenu(); return; }
   void updateCommandMenu();
+  if (passiveStatsPrefix(activeId, text)) return;
   // Typing is intent to send: start a closed session's runtime now so the
   // send (and the model menu) does not wait for it. Browsing alone never does.
   if (!warming.has(activeId) && !workspace.runtime.some(r => r.id === activeId)) {

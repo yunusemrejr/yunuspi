@@ -10,6 +10,8 @@ import { streamSimple as google } from "../core/ai/src/api/google-generative-ai.
 import { streamSimple as bedrock } from "../core/ai/src/api/bedrock-converse-stream.js";
 import { streamSimple as codex } from "../core/ai/src/api/openai-codex-responses.js";
 import { readRetryAfterMs, retryProviderRequest } from "../core/ai/src/utils/provider-retry.js";
+import { isContextOverflow } from "../core/ai/src/utils/overflow.js";
+import { isRetryableAssistantError, retryAssistantCall, usesProviderCooldown } from "../core/ai/src/utils/retry.js";
 
 const prompt = { messages: [{ role: "user", content: [{ type: "text", text: "Fixture prompt" }], timestamp: 1 }] };
 const session = { retryOwner: "session", maxRetries: 2, apiKey: "synthetic-token" };
@@ -116,6 +118,97 @@ test("Bedrock session ownership overrides Smithy's internal attempt budget", { t
 const codexAuth = ["synthetic", Buffer.from(JSON.stringify({ "https://api.openai.com/auth": {
   chatgpt_account_id: "synthetic-account",
 } })).toString("base64url"), "synthetic"].join(".");
+
+const codexFixtureModel = model("fixture", "openai-codex", "openai-codex-responses", "https://example.invalid/backend-api");
+const codexCreated = { type: "response.created", response: { id: "synthetic-response" } };
+const codexText = [
+  { type: "response.output_item.added", output_index: 0, item: { type: "message" } },
+  { type: "response.output_text.delta", output_index: 0, delta: "Fixture café" },
+];
+const codexWire = (frames, newline = "\n") => frames.map(frame => `data: ${JSON.stringify(frame)}${newline}${newline}`).join("");
+
+function fakeCodex(fetch, options = {}) {
+  return codex(codexFixtureModel, prompt, { ...session, apiKey: codexAuth, transport: "sse", fetch, ...options });
+}
+
+for (const [name, newline] of [["CRLF", "\r\n"], ["CR", "\r"]]) {
+  test(`Codex fake SSE decodes ${name} split across reads without waiting for response EOF`, { timeout: 3000 }, async () => {
+    const terminal = JSON.stringify(responsesDone, null, 2).split("\n").map(line => `data: ${line}`).join(newline);
+    const wire = new TextEncoder().encode(`: keepalive${newline}${newline}${codexWire([codexCreated, ...codexText], newline)}${terminal}${newline}${newline}`);
+    let cancelled = false;
+    const signal = AbortSignal.timeout(1000);
+    const result = await fakeCodex(async () => new Response(new ReadableStream({
+      start(controller) {
+        for (const byte of wire) {
+          controller.enqueue(Uint8Array.of(byte));
+          if (byte === 0x0d) controller.enqueue(new Uint8Array());
+        }
+      },
+      cancel() { cancelled = true; },
+    })), { signal }).result();
+    assert.equal(result.stopReason, "stop", result.errorMessage);
+    assert.equal(result.responseId, "synthetic-response");
+    assert.equal(result.content[0].text, "Fixture café");
+    assert.equal(cancelled, true);
+  });
+}
+
+test("Codex fake SSE flushes the final data line at EOF", async () => {
+  const wire = `${codexWire([codexCreated, ...codexText])}data: ${JSON.stringify(responsesDone)}`;
+  const result = await fakeCodex(async () => new Response(wire)).result();
+  assert.equal(result.stopReason, "stop", result.errorMessage);
+  assert.equal(result.content[0].text, "Fixture café");
+});
+
+test("Codex fake SSE abort wakes a pending response body read", { timeout: 2000 }, async () => {
+  const controller = new AbortController();
+  let announceRead;
+  const reading = new Promise(resolve => { announceRead = resolve; });
+  let cancelled = false;
+  const result = fakeCodex(async () => new Response(new ReadableStream({
+    pull() { announceRead(); },
+    cancel() { cancelled = true; },
+  }, { highWaterMark: 0 })), { signal: controller.signal }).result();
+  await reading;
+  controller.abort();
+  assert.equal((await result).stopReason, "aborted");
+  assert.equal(cancelled, true);
+});
+
+test("Codex fake SSE structured transient failure returns ownership to the session retry loop", async () => {
+  const failure = { type: "response.failed", response: {
+    id: "synthetic-response", status: "failed", error: { code: "server_error", message: "Fixture processing interruption" },
+  } };
+  let requests = 0;
+  let admissions = 0;
+  const attempt = () => fakeCodex(async () => new Response(codexWire(++requests === 1
+    ? [codexCreated, failure]
+    : [codexCreated, ...codexText, responsesDone])), { onPayload() { admissions++; } }).result();
+  const result = await retryAssistantCall(attempt, { enabled: true, maxRetries: 1, baseDelayMs: 1 });
+  assert.equal(result.stopReason, "stop", result.errorMessage);
+  assert.equal(requests, 2);
+  assert.equal(admissions, 2);
+});
+
+test("Codex fake SSE in-band error codes preserve throttling, known terminal failures and default policy", async () => {
+  for (const { code, message, retry, cooldown = false, overflow = false } of [
+    { code: "rate_limit_exceeded", message: "Fixture processing interruption", retry: true, cooldown: true },
+    { code: "invalid_prompt", message: "Fixture server error", retry: false },
+    { code: "model_not_found", message: "Fixture server error", retry: false },
+    { code: "invalid_api_key", message: "Fixture server error", retry: false },
+    { code: "context_length_exceeded", message: "Fixture server error", retry: false, overflow: true },
+    { code: "insufficient_quota", message: "Fixture server error", retry: false },
+    { code: "server_errorish", message: "Fixture processing interruption", retry: false },
+    { code: "unknown", message: "Fixture server error", retry: true },
+  ]) {
+    const frame = { type: "error", error: { code, message } };
+    const result = await fakeCodex(async () => new Response(codexWire([codexCreated, frame]))).result();
+    assert.equal(result.stopReason, "error", code);
+    assert.equal(isRetryableAssistantError(result), retry, code);
+    assert.equal(usesProviderCooldown(result), cooldown, code);
+    assert.equal(isContextOverflow(result), overflow, code);
+  }
+});
 
 test("Codex SSE preserves HTTP retry advice without privately retrying a session request", { timeout: 10_000 }, async t => {
   const { origin, hits } = await relay(t, (_req, res) => {

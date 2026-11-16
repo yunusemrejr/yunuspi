@@ -1,5 +1,6 @@
 function flushSseEvent(state) {
     if (!state.event && state.data.length === 0) {
+        state.raw = [];
         return null;
     }
     const event = {
@@ -34,29 +35,18 @@ function decodeSseLine(line, state) {
     }
     return null;
 }
-function nextLineBreakIndex(text) {
-    const carriageReturnIndex = text.indexOf("\r");
-    const newlineIndex = text.indexOf("\n");
-    if (carriageReturnIndex === -1) {
-        return newlineIndex;
-    }
-    if (newlineIndex === -1) {
-        return carriageReturnIndex;
-    }
-    return Math.min(carriageReturnIndex, newlineIndex);
-}
-function consumeLine(text, final = false) {
-    const lineBreakIndex = nextLineBreakIndex(text);
-    if (lineBreakIndex === -1 || (!final && lineBreakIndex === text.length - 1 && text[lineBreakIndex] === "\r")) {
+function consumeLine(text) {
+    const lineBreakIndex = text.search(/[\r\n]/);
+    if (lineBreakIndex === -1) {
         return null;
     }
-    let nextIndex = lineBreakIndex + 1;
-    if (text[lineBreakIndex] === "\r" && text[nextIndex] === "\n") {
-        nextIndex += 1;
-    }
+    const carriageReturn = text[lineBreakIndex] === "\r";
+    const afterBreak = lineBreakIndex + 1;
+    const nextIndex = carriageReturn && text[afterBreak] === "\n" ? afterBreak + 1 : afterBreak;
     return {
         line: text.slice(0, lineBreakIndex),
         rest: text.slice(nextIndex),
+        trailingCarriageReturn: carriageReturn && afterBreak === text.length,
     };
 }
 /** A rejection from the response body's reader, before any SSE decoding. */
@@ -70,7 +60,10 @@ export async function* iterateSseMessages(body, signal) {
     const reader = body.getReader();
     const decoder = new TextDecoder();
     const state = { event: null, data: [], raw: [] };
+    const onAbort = () => { void reader.cancel().catch(() => {}); };
+    signal?.addEventListener("abort", onAbort, { once: true });
     let buffer = "";
+    let skipLeadingLf = false;
     try {
         while (true) {
             if (signal?.aborted) {
@@ -88,14 +81,23 @@ export async function* iterateSseMessages(body, signal) {
                     (trailing.trim() !== "" && !trailing.startsWith(":"));
                 throw new SseBodyReadError(error, pendingEvent);
             }
+            if (signal?.aborted) {
+                throw new Error("Request was aborted");
+            }
             const { value, done } = read;
             if (done) {
                 break;
             }
-            buffer += decoder.decode(value, { stream: true });
+            const chunk = decoder.decode(value, { stream: true });
+            if (chunk.length === 0) continue;
+            // CR is itself a line break. Consume it immediately, then ignore
+            // the optional LF even when it arrives in the next chunk.
+            buffer += skipLeadingLf && chunk.startsWith("\n") ? chunk.slice(1) : chunk;
+            skipLeadingLf = false;
             let consumed = consumeLine(buffer);
             while (consumed) {
                 buffer = consumed.rest;
+                skipLeadingLf = consumed.trailingCarriageReturn;
                 const event = decodeSseLine(consumed.line, state);
                 if (event) {
                     yield event;
@@ -104,14 +106,14 @@ export async function* iterateSseMessages(body, signal) {
             }
         }
         buffer += decoder.decode();
-        let consumed = consumeLine(buffer, true);
+        let consumed = consumeLine(buffer);
         while (consumed) {
             buffer = consumed.rest;
             const event = decodeSseLine(consumed.line, state);
             if (event) {
                 yield event;
             }
-            consumed = consumeLine(buffer, true);
+            consumed = consumeLine(buffer);
         }
         if (buffer.length > 0) {
             const event = decodeSseLine(buffer, state);
@@ -125,6 +127,7 @@ export async function* iterateSseMessages(body, signal) {
         }
     }
     finally {
+        signal?.removeEventListener("abort", onAbort);
         void reader.cancel().catch(() => {});
         reader.releaseLock();
     }

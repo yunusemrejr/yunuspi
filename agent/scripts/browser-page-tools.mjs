@@ -46,20 +46,60 @@ export function collectBrowserTargets(root, { limit = 50, viewportOnly = false }
 }
 
 export function readBrowserPage(root, { offset = 0, maxChars = 8000, query } = {}) {
+  const textCap = 250000, nodeCap = 20000;
+  const hidden = 'script,style,template,noscript,input,textarea,select,[hidden],[inert],[aria-hidden="true"]';
   const parts = [], scopes = [root];
-  let visited = 0, chars = 0, truncated = false;
+  let visited = 0, chars = 0, truncated = false, sourceRemaining = 1000000;
+  const isHigh = code => code >= 0xd800 && code <= 0xdbff;
+  const splitsPair = (value, index) => {
+    const next = value.charCodeAt(index);
+    return isHigh(value.charCodeAt(index - 1)) && next >= 0xdc00 && next <= 0xdfff;
+  };
+  const readText = (node, capacity) => {
+    const chunks = [];
+    const length = node.length;
+    let start = 0, kept = 0, pendingSpace = false;
+    while (start < length && sourceRemaining > 0) {
+      const count = Math.min(8192, length - start, sourceRemaining);
+      let raw = node.substringData(start, count);
+      sourceRemaining -= count;
+      // Revisit a trailing high surrogate with the next chunk so normalization
+      // and copying see the complete pair. Charge both reads to the budget.
+      if (start + count < length && isHigh(raw.charCodeAt(count - 1))) raw = raw.slice(0, -1);
+      if (!raw.length) break;
+      start += raw.length;
+      const collapsed = raw.replace(/\s+/g, ' ');
+      const body = collapsed.trim();
+      if (!body) { pendingSpace = true; continue; }
+      const prefix = kept && (pendingSpace || collapsed.startsWith(' ')) ? ' ' : '';
+      const next = prefix + body;
+      const room = capacity - kept;
+      if (next.length > room) {
+        chunks.push(next.slice(0, splitsPair(next, room) ? room - 1 : room));
+        truncated = true;
+        break;
+      }
+      chunks.push(next);
+      kept += next.length;
+      pendingSpace = collapsed.endsWith(' ');
+    }
+    if (start < length) truncated = true;
+    return chunks.join('');
+  };
   // DOM text only: skip form contents and hidden nodes; follow open shadow roots.
   for (const scope of scopes) {
     const walker = document.createTreeWalker(scope, NodeFilter.SHOW_ELEMENT | NodeFilter.SHOW_TEXT);
     let node = walker.currentNode;
     while (node) {
-      if (++visited > 20000 || chars >= 250000) { truncated = true; break; }
-      if (node.shadowRoot) scopes.push(node.shadowRoot);
+      if (++visited > nodeCap) { truncated = true; break; }
+      if (node.shadowRoot && !node.closest(hidden)) scopes.push(node.shadowRoot);
       if (node.nodeType === Node.TEXT_NODE) {
-        const parent = node.parentElement;
-        if (parent && !parent.closest('script,style,template,noscript,input,textarea,select,[hidden],[inert],[aria-hidden="true"]') && parent.getClientRects().length && getComputedStyle(parent).visibility === 'visible') {
-          const text = node.textContent.replace(/\s+/g, ' ').trim().slice(0, 250000 - chars);
-          if (text) { parts.push(text); chars += text.length + 1; }
+        const parent = node.parentElement ?? scope.host;
+        if (parent && !parent.closest(hidden) && parent.getClientRects().length && getComputedStyle(parent).visibility === 'visible') {
+          const separator = parts.length ? 1 : 0;
+          const text = readText(node, Math.max(0, textCap - chars - separator));
+          if (text) { parts.push(text); chars += separator + text.length; }
+          if (truncated) break;
         }
       }
       node = walker.nextNode();
@@ -67,12 +107,29 @@ export function readBrowserPage(root, { offset = 0, maxChars = 8000, query } = {
     if (truncated) break;
   }
   const text = parts.join('\n');
-  const start = query ? text.toLowerCase().indexOf(query.toLowerCase(), offset) : offset;
-  const end = start < 0 ? offset : Math.min(text.length, start + maxChars);
+  // Native lowercase keeps contextual case behavior. Only build a coordinate
+  // mapping when it expands the text (for example, capital dotted I).
+  let start = splitsPair(text, offset) ? offset + 1 : offset;
+  if (query) {
+    const folded = text.toLowerCase();
+    const expanded = folded.length !== text.length;
+    const foldedOffset = expanded ? text.slice(0, start).toLowerCase().length : start;
+    start = folded.indexOf(query.toLowerCase(), foldedOffset);
+    if (expanded && start >= 0) {
+      let sourceIndex = 0, foldedIndex = 0;
+      for (const point of text) {
+        foldedIndex += point.toLowerCase().length;
+        if (foldedIndex > start) { start = sourceIndex; break; }
+        sourceIndex += point.length;
+      }
+    }
+  }
+  let end = start < 0 ? offset : Math.min(text.length, start + maxChars);
+  if (start >= 0 && splitsPair(text, end)) end--;
   return { text: start < 0 ? '' : text.slice(start, end), offset: start < 0 ? offset : start,
     nextOffset: end, hasMore: start >= 0 && end < text.length, chars: text.length, truncated,
     ...(query ? { found: start >= 0 } : {}),
-    limitations: 'Visible DOM text, capped at 250000 characters/20000 nodes; form values and hidden text omitted. Frame scope is explicit; open shadow roots follow light DOM. Offsets refer to this page state, not a durable document.' };
+    limitations: 'Visible DOM text, capped at 250000 UTF-16 code units, 20000 nodes, and 1000000 source code units per read. Form values and hidden text are omitted. Frame scope is explicit; open shadow roots follow light DOM. Offsets refer to this page state.' };
 }
 
 export function browserHumanHelp(root) {

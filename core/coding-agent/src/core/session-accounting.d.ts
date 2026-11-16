@@ -5,7 +5,13 @@ export declare function hasRecordedTokenUsage(usage: any, noExecution?: boolean)
 export declare function collectAuxiliaryModelUsage(entries: any[]): any;
 export declare function collectSessionCost(entries: any[], subscription?: boolean): any;
 export declare function recoverRetainedChildCosts(entries: any[], options: { sessionFile: string | null | undefined; statusRoot?: string }): {
-    entries: { type: 'custom'; customType: 'subagent-cost-v1'; data: { runId: string; recoveredForSessionId: string; results: any[] } }[];
+    entries: { type: 'custom'; customType: 'subagent-cost-v1'; data: {
+        runId: string; recoveredForSessionId: string; results: any[];
+        childLedgerCoverage?: {
+            direct?: { route: string; tokens: Record<'input' | 'output' | 'cacheRead' | 'cacheWrite', number> };
+            requests?: [string, string, 'pending' | 'unpriced' | 'known'][];
+        };
+    } }[];
     candidates: boolean;
 };
 export declare function collectSessionStats(entries: any[], subscription?: boolean): Omit<import("./agent-session.js").SessionStats, "sessionId" | "sessionFile" | "contextUsage">;

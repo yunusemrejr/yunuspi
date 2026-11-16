@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runInNewContext } from "node:vm";
 import { parseHTML } from "linkedom";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -18,6 +19,78 @@ const load = (relative) => import(pathToFileURL(path.join(agent, relative)));
 const markers = await load("scripts/browser-markers.mjs");
 const { createBrowserLease } = await load("scripts/browser-session-lease.mjs");
 const { matchHook } = await load("extensions/lib/session-hooks.ts");
+const { readBrowserPage } = await load("scripts/browser-page-tools.mjs");
+
+const visible = { closest: () => null, getClientRects: () => [{}] };
+function textNode(text, parent = visible) {
+  return { nodeType: 3, parentElement: parent, length: text.length, textContent: text,
+    substringData: (offset, length) => text.slice(offset, offset + length) };
+}
+function readPage(nodes, options) {
+  const read = runInNewContext(`(${readBrowserPage})`, {
+    Node: { TEXT_NODE: 3 }, NodeFilter: { SHOW_ELEMENT: 1, SHOW_TEXT: 4 },
+    getComputedStyle: () => ({ visibility: "visible" }),
+    document: { createTreeWalker: scope => {
+      let i = 0;
+      return { currentNode: scope, nextNode: () => scope.nodes[i++] ?? null };
+    } },
+  });
+  return read({ nodes }, options);
+}
+
+test("browser read distinguishes a complete page at the character cap from an omitted tail", () => {
+  const full = 'x'.repeat(249998);
+  const tail = { offset: 249998, maxChars: 100 };
+  const exact = readPage([textNode(full), textNode('y')], tail);
+  assert.deepEqual([exact.text, exact.chars, exact.hasMore, exact.truncated], ['\ny', 250000, false, false]);
+  const omitted = readPage([textNode(full), textNode('yz')], tail);
+  assert.deepEqual([omitted.text, omitted.chars, omitted.hasMore, omitted.truncated], ['\ny', 250000, false, true]);
+  const giantFinal = readPage([textNode('x'.repeat(250000) + ' marker')], tail);
+  assert.deepEqual([giantFinal.text, giantFinal.chars, giantFinal.hasMore, giantFinal.truncated], ['xx', 250000, false, true]);
+  const exactWithWhitespace = readPage([textNode('x'.repeat(250000) + '   '), textNode('  ')], tail);
+  assert.equal(exactWithWhitespace.truncated, false);
+});
+
+test("browser read bounds raw text scanning and reports the DOM node cap", () => {
+  let total = 0, maxChunk = 0;
+  const huge = { nodeType: 3, parentElement: visible, length: 5000000,
+    get textContent() { throw new Error('must not read the entire text node'); },
+    substringData(_offset, count) { total += count; maxChunk = Math.max(maxChunk, count); return ' '.repeat(count); } };
+  const result = readPage([textNode('kept'), huge, textNode('after')]);
+  assert.deepEqual([result.text, result.truncated], ['kept', true]);
+  assert.ok(total > 0 && total <= 1000000);
+  assert.ok(maxChunk <= 8192);
+  assert.equal(readPage(Array(19999).fill({})).truncated, false);
+  assert.equal(readPage(Array(20000).fill({})).truncated, true);
+});
+
+test("browser read maps case-insensitive matches and pagination to original Unicode offsets", () => {
+  const text = 'İ FOO İ FOO';
+  const first = readPage([textNode(text)], { query: 'foo' });
+  assert.deepEqual([first.offset, first.text, first.found], [2, 'FOO İ FOO', true]);
+  const second = readPage([textNode(text)], { query: 'foo', offset: 3 });
+  assert.deepEqual([second.offset, second.text, second.found], [8, 'FOO', true]);
+  const input = 'x'.repeat(99) + '🐈 end';
+  const page = readPage([textNode(input)], { maxChars: 100 });
+  assert.deepEqual([page.nextOffset, page.text.isWellFormed(), page.hasMore], [99, true, true]);
+  assert.equal(readPage([textNode(input)], { offset: page.nextOffset }).text, '🐈 end');
+  const interior = readPage([textNode(input)], { offset: 100 });
+  assert.deepEqual([interior.offset, interior.text], [101, ' end']);
+  const rawBoundary = readPage([textNode('x'.repeat(8191) + '🐈 end')], { offset: 8191 });
+  assert.deepEqual([rawBoundary.text, rawBoundary.truncated], ['🐈 end', false]);
+  const retainedBoundary = readPage([textNode('x'.repeat(249999) + '🐈 end')], { offset: 249998 });
+  assert.deepEqual([retainedBoundary.text, retainedBoundary.chars, retainedBoundary.truncated], ['x', 249999, true]);
+});
+
+test("browser read follows open shadow roots and keeps collapsed whitespace across chunks", () => {
+  const host = { ...visible };
+  host.shadowRoot = { host, nodes: [textNode('shadow direct text', null), textNode('  shadow child   ')] };
+  const hiddenHost = { ...visible, closest: () => ({}) };
+  hiddenHost.shadowRoot = { host: hiddenHost, nodes: [textNode('hidden shadow child')] };
+  const prefix = 'a'.repeat(8191);
+  const result = readPage([textNode(prefix + ' \t\n  b'), host, hiddenHost], { offset: 8188 });
+  assert.deepEqual([result.text, result.truncated], ['aaa b\nshadow direct text\nshadow child', false]);
+});
 
 test("marker overlay paints numbered badges and cleans up", () => {
   const { document } = parseHTML(`<main><button>Go</button></main>`);

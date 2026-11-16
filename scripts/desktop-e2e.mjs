@@ -207,9 +207,13 @@ try {
   const jobPid = Number(fs.readFileSync(path.join(scratch, 'job.pid'), 'utf8'));
   await open(history.id);
   assert.match(await page.locator('#usage-caption').innerText(), /\$0\.250000 total/);
-  await send('/cost');
+  await page.locator('#prompt').pressSequentially('/');
+  await page.getByRole('option', { name: /\/goal/ }).waitFor();
+  await page.locator('#prompt').press('Escape');
+  await page.locator('#prompt').pressSequentially('cost', { delay: 55 });
+  await page.locator('#prompt').press('Enter');
   await page.waitForFunction(() => document.getElementById('context-content').textContent.includes('$0.250000 total') && !document.getElementById('workbench').hidden);
-  assert.ok(!(await page.evaluate(() => window.yunuspi.snapshot())).runtime.some(worker => worker.id === history.id));
+  assert.ok(!(await page.evaluate(() => window.yunuspi.snapshot())).runtime.some(worker => worker.id === history.id), 'typing /cost must not start an agent while completing the slash command');
   await page.locator('#workbench-close').click();
   await open(first.id);
   manager.appendSummaryUsageReceipt({ id: 'late-desktop-cost', owner: 'fixture', provider: 'desktop-example', model: 'metered-helper',
@@ -238,6 +242,23 @@ try {
   assert.ok(!(await page.evaluate(() => window.yunuspi.snapshot())).runtime.some(worker => worker.id === history.id));
   await page.locator('#workbench-close').click();
   check('live cost refresh and passive reopen show the recorded total, including /cost on a dormant session');
+  const savedPage = await page.evaluate(id => window.yunuspi.openSession(id), history.id);
+  const branch = manager.getBranch();
+  manager.branch(branch[130].id);
+  manager.appendMessage({ role: 'user', content: 'Current history after starting the runtime', timestamp: Date.now() });
+  await page.evaluate(id => window.yunuspi.warm(id), history.id);
+  const stalePage = await page.evaluate(({ id, before, revision }) => window.yunuspi.history(id, before, revision),
+    { id: history.id, before: savedPage.before, revision: savedPage.revision });
+  assert.equal(stalePage.reset, true, 'starting a runtime must not apply its numeric cursor to an old saved branch');
+  await page.locator('#load-earlier').click();
+  await page.getByText('Current history after starting the runtime', { exact: true }).waitFor();
+  assert.doesNotMatch(await page.locator('#messages').innerText(), /Late saved transcript row/);
+  const livePage = await page.evaluate(id => window.yunuspi.openSession(id), history.id);
+  assert.match(livePage.revision, /^worker:/);
+  const unchanged = await page.evaluate(({ id, revision }) => window.yunuspi.openSession(id, revision),
+    { id: history.id, revision: livePage.revision });
+  assert.equal(unchanged.messages, undefined, 'reopen on the same runtime keeps existing pages');
+  check('a saved history cursor stays bound to its snapshot when the runtime starts');
   await page.locator('#jump-bottom').click();
   await page.locator('#prompt').fill('A long draft\n'.repeat(35));
   gap = await page.locator('#conversation').evaluate(node => node.scrollHeight - node.scrollTop - node.clientHeight);

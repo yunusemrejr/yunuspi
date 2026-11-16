@@ -452,7 +452,7 @@ export declare class AgentSession {
      * Useful for restoring to editor when user aborts.
      * @returns Object with steering and followUp arrays
      */
-    clearQueue(): {
+    clearQueue(options?: { abortPendingInput?: boolean }): {
         steering: string[];
         followUp: string[];
     };

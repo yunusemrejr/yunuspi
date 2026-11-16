@@ -49,7 +49,7 @@ test('browser workflows keep tab/ref ownership, recover asynchronous UI and requ
     <button id="captcha" onclick="document.querySelector('#article').textContent='Verify you are human';document.querySelector('#challenge').hidden=false">Show challenge</button>
     <label id="challenge" hidden>Challenge answer<input id="answer" oninput="if(this.value==='fixture answer'){document.querySelector('#article').textContent='Verified';document.querySelector('#challenge').hidden=true}"></label>
     <iframe id="embedded" src="/frame"></iframe><div id="shadow"></div>
-    <script>const shadow=document.querySelector('#shadow').attachShadow({mode:'open'});shadow.innerHTML='<button>Shadow action</button>';shadow.firstChild.onclick=event=>event.target.textContent='Shadow saved';</script>`;
+    <script>const shadow=document.querySelector('#shadow').attachShadow({mode:'open'});shadow.innerHTML='<button>Shadow action</button>';shadow.firstChild.onclick=event=>event.target.textContent='Shadow saved';shadow.append('Bare shadow text');</script>`;
   const server = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'text/html');
     res.end(req.url === '/frame' ? '<button>Frame button</button>' : req.url === '/popup' ? '<script>console.error("Popup diagnostic"); throw new Error("Popup script diagnostic")</script><h1>Popup detail</h1>' : fixture);
@@ -123,7 +123,7 @@ test('browser workflows keep tab/ref ownership, recover asynchronous UI and requ
     assert.equal(JSON.parse((await call({ action: 'evaluate', script: 'return !!window.wrong;' })).evaluation.text), false);
     const shadow = (await call({ action: 'snapshot' })).targets.find(row => row.name === 'Shadow action');
     await call({ action: 'click', ref: shadow.ref });
-    assert.match((await call({ action: 'read' })).reading.text, /Shadow saved/);
+    assert.match((await call({ action: 'read' })).reading.text, /Shadow saved\nBare shadow text/);
     const frame = (await call({ action: 'snapshot' })).frames.find(frame => frame.url.endsWith('/frame')).frame;
     const inFrame = await call({ action: 'snapshot', frame });
     assert.ok(inFrame.targets.find(row => row.name === 'Frame button'));
@@ -162,6 +162,12 @@ test('browser workflows keep tab/ref ownership, recover asynchronous UI and requ
     assert.doesNotMatch((await call({ action: "read" })).reading.text, /SECRET_DRAFT_VALUE|SECRET_HIDDEN_TEXT|SECRET_FIXTURE_PASSWORD/);
     assert.equal((await call({ action: 'read', offset: read.nextOffset, maxChars: 100 })).reading.offset, 100);
     assert.equal((await call({ action: 'read', query: 'absent fixture phrase' })).reading.found, false);
+    await call({ action: 'evaluate', script: "document.querySelector('#article').textContent='İ FOO İ FOO'; return true;" });
+    const unicode = (await call({ action: 'read', selector: '#article', query: 'foo', offset: 3 })).reading;
+    assert.deepEqual([unicode.offset, unicode.text, unicode.found], [8, 'FOO', true]);
+    await call({ action: 'evaluate', script: "document.querySelector('#article').textContent='x'.repeat(250000)+' omitted'; return true;" });
+    const cap = (await call({ action: 'read', selector: '#article', offset: 249998, maxChars: 100 })).reading;
+    assert.deepEqual([cap.text, cap.hasMore, cap.truncated], ['xx', false, true]);
     const timed = await raw({ action: 'evaluate', session, timeoutMs: 100, script: 'await new Promise(()=>{});' });
     assert.equal(timed.isError, true);
     assert.equal(timed.details.failure.kind, 'timeout');

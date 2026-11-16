@@ -42,6 +42,7 @@ export class AgentWorker extends EventEmitter {
     this.dead = false;
     this.stopping = false;
     this.sequence = 0;
+    this.historyRevision = `worker:${randomUUID()}`;
     this.stderr = '';
     this.child = spawnProcess(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     this.child.stdin.on('error', error => this.fatal(error));
