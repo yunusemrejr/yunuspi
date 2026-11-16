@@ -46,7 +46,10 @@ test('source and built terminal footer agree with receipt collectors for retries
  const auxiliary=data=>({type:'custom',customType:'auxiliary-model-usage-v1',data:{id:'observer-1',owner:'session-observer',provider:'fixture',model:'observer',...data}});
  const auxiliaryFinal=auxiliary({status:'completed',usage:{input:100,output:20,cacheRead:80,cacheWrite:0,reasoning:7,cost:{total:.04,source:'provider-reported'}}});
  const auxiliaryCase=[auxiliary({status:'pending'}),auxiliaryFinal,auxiliaryFinal,auxiliary({status:'pending'})];
- const cases=[retries,auxiliaryCase,[auxiliary({status:'timeout'})],[receipt('quality-review-fixture',{index:0,status:'failed',usage:{}})],
+ const summaryUsage={input:120,output:20,cacheRead:100,cacheWrite:0,cost:{total:.02,source:'provider-reported'}};
+ const summaryAttempt={...auxiliary({id:'summary-1',owner:'compaction',status:'completed',usage:summaryUsage}),accountingOnly:true};
+ const summaryCase=[summaryAttempt,{type:'compaction',usage:{...summaryUsage,summaryReceiptIds:['summary-1']}}];
+ const cases=[retries,auxiliaryCase,summaryCase,[auxiliary({status:'timeout'})],[receipt('quality-review-fixture',{index:0,status:'failed',usage:{}})],
   [receipt('quality-review-fixture',{index:0,status:'failed',stage:'launch',childProcessStarted:false,usage:{input:0,output:0,cacheRead:0,cacheWrite:0,turns:0,cost:0,costDetails:{reported:0,estimated:0,unknown:false,subscription:false,seen:true,estimatedUsage:false}}})],
   [receipt('started-timeout',{index:0,error:true,timedOut:true,exitCode:1,usage:{input:0,output:0,cacheRead:0,cacheWrite:0,turns:0,cost:0}})]];
  for(const entries of cases){
@@ -59,6 +62,7 @@ test('source and built terminal footer agree with receipt collectors for retries
    assert.ok(rendered.includes(`${collectSessionCost(entries).formatted} total`));
    for(const metric of collectSessionMetrics(entries).footer)assert.ok(rendered.includes(metric),metric);
    if(entries===auxiliaryCase){for(const text of ['↑100','↓20','R80','Agents 0 (0 active)'])assert.ok(rendered.includes(text),text);assert.ok(!rendered.includes('↓27'));}
+   if(entries===summaryCase)assert.match(plainFooter(footer.render(240)),/Tokens ↑120 · ↓20 · R100/);
   }
  }
 });

@@ -222,9 +222,34 @@ async function streamAssistantResponse(context, config, signal, emit, streamFunc
     };
     // Resolve API key (important for expiring tokens)
     const resolvedApiKey = (config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
-    const response = await piWithStreamIdle(config.model, { ...config, apiKey: resolvedApiKey, signal }, idleOptions => streamFunction(config.model, llmContext, idleOptions)); /* PI_STREAM_IDLE_CALL */
+    const providerRequest = Object.freeze({ model: config.model, reasoning: config.reasoning });
+    let outcomes = [];
+    const onPayload = config.onPayload && ((payload, model, requestSignal) => {
+        const attempt = [];
+        outcomes = attempt;
+        return config.onPayload(payload, model ?? config.model, requestSignal, observer => attempt.push(observer));
+    });
+    const response = await piWithStreamIdle(config.model, { ...config, onPayload, apiKey: resolvedApiKey, signal }, idleOptions => streamFunction(config.model, llmContext, idleOptions)); /* PI_STREAM_IDLE_CALL */
     let partialMessage = null;
     let addedPartial = false;
+    const finish = async finalMessage => {
+        for (const observe of outcomes.slice()) {
+            try { await observe(finalMessage); }
+            catch { /* Failure to observe an outcome cannot invalidate the response. */ }
+        }
+        if (addedPartial) {
+            context.messages[context.messages.length - 1] = finalMessage;
+        }
+        else {
+            context.messages.push(finalMessage);
+            await emit({ type: "message_start", message: { ...finalMessage } });
+        }
+        // The retry snapshot can contain model headers and belongs to the live session only.
+        const event = { type: "message_end", message: finalMessage };
+        Object.defineProperty(event, "providerRequest", { value: providerRequest });
+        await emit(event);
+        return finalMessage;
+    };
     for await (const event of response) {
         switch (event.type) {
             case "start":
@@ -253,32 +278,11 @@ async function streamAssistantResponse(context, config, signal, emit, streamFunc
                 }
                 break;
             case "done":
-            case "error": {
-                const finalMessage = await response.result();
-                if (addedPartial) {
-                    context.messages[context.messages.length - 1] = finalMessage;
-                }
-                else {
-                    context.messages.push(finalMessage);
-                }
-                if (!addedPartial) {
-                    await emit({ type: "message_start", message: { ...finalMessage } });
-                }
-                await emit({ type: "message_end", message: finalMessage });
-                return finalMessage;
-            }
+            case "error":
+                return finish(await response.result());
         }
     }
-    const finalMessage = await response.result();
-    if (addedPartial) {
-        context.messages[context.messages.length - 1] = finalMessage;
-    }
-    else {
-        context.messages.push(finalMessage);
-        await emit({ type: "message_start", message: { ...finalMessage } });
-    }
-    await emit({ type: "message_end", message: finalMessage });
-    return finalMessage;
+    return finish(await response.result());
 }
 /**
  * Pair requests that could not run with durable tool results, in call order.

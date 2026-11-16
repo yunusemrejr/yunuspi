@@ -1,3 +1,10 @@
+## 0.56.6 — Durable summary billing and consistent provider attribution
+
+- Native summary attempts persist pending and terminal receipts as they run. History, forks, child processes, and desktop totals reconcile those receipts with the corresponding summary without counting the same work twice.
+- A working turn keeps its admitted model, headers, and thinking effort across a same-route retry even if the picker changes. The next prompt uses the new selection.
+- Direct DeepSeek applies its published schedule and web-tool counters across Chat Completions, Responses, and Messages, including metered terminal errors. ElevenLabs keeps request IDs and metered units for reconciliation and can estimate charges with a configured account rate.
+- Stopping the test launcher reaps its test process group and removes temporary fixtures.
+
 ## 0.56.5 — Provider retry ownership and faster terminal redraws
 
 - Supported session transports submit once per admission. Main turns and summaries apply the session retry policy, including provider retry advice when the transport exposes it.

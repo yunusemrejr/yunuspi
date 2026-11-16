@@ -125,7 +125,7 @@ export default function (pi: ExtensionAPI) {
           leafId,
           cwd: ctx.cwd ?? null,
           scope,
-          branch,
+          branch: options.all ? branch : [...branch, ...(ctx.sessionManager.getBranchAccountingEntries?.(branch) ?? [])],
           retained,
           model: ctx.model ? {
             provider: ctx.model.provider, id: ctx.model.id,

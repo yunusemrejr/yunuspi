@@ -14,11 +14,26 @@ export type ElevenUsageSink = (receipt: {
   model: string;
   status: 'pending' | 'completed' | 'failed' | 'cancelled' | 'timeout';
   characterCost?: number;
-  usage?: { costDetails: { reported: 0; estimated: 0; unknown: false; subscription: false; seen: true } };
+  requestId?: string;
+  usdPer1000BillingUnits?: number;
+  usage?: { cost: { total: number; source: 'provider-reported' | 'estimate'; complete: true } };
 }) => void;
 const API = 'https://api.elevenlabs.io/v1';
 const keyOf = (env: Env) => env.ELEVENLABS_API_KEY || env.PI_ELEVENLABS_API_KEY || env.XI_API_KEY;
 const digest = (value: string | Buffer) => createHash('sha256').update(value).digest('hex');
+function nonnegativeDecimal(value?: string | null): number | undefined {
+  if (!value || value.length > 32 || !/^\d+(?:\.\d+)?$/.test(value)) return undefined;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+function failedBeforeConnection(cause: { code?: string; errors?: unknown[] } | undefined): boolean {
+  if (!cause) return false;
+  if (Array.isArray(cause.errors) && cause.errors.length) {
+    return cause.errors.every(error => !!error && typeof error === 'object' && 'code' in error &&
+      ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(String(error.code)));
+  }
+  return typeof cause.code === 'string' && ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(cause.code);
+}
 export function elevenStatus(env: Env = process.env) {
   return { provider: 'elevenlabs', configured: Boolean(keyOf(env)), voiceId: env.ELEVENLABS_VOICE_ID || 'JBFqnCBsd6RMkjVDRZzb', model: env.ELEVENLABS_TTS_MODEL || 'eleven_multilingual_v2',
     setup: 'Set ELEVENLABS_API_KEY in the private environment; optionally ELEVENLABS_VOICE_ID and ELEVENLABS_TTS_MODEL. narration_tts backend:auto prefers ElevenLabs when configured. backend:piper selects local speech.',
@@ -55,36 +70,42 @@ async function request(endpoint: string, body: any, signal: AbortSignal | undefi
   const bounded = signal ? AbortSignal.any([signal, AbortSignal.timeout(600_000)]) : AbortSignal.timeout(600_000);
   if (bounded.aborted) throw Object.assign(new Error('ElevenLabs request cancelled before submission'), { submissionNotSent: true });
   const multipart = body instanceof FormData;
+  const payload = body === undefined ? undefined : multipart ? body : JSON.stringify(body);
   const id = onUsage && typeof body?.model_id === 'string' ? randomUUID() : undefined;
-  const note = (status: Parameters<ElevenUsageSink>[0]['status'], header?: string | null, notSent = false) => {
+  const rate = nonnegativeDecimal(env.ELEVENLABS_USD_PER_1000_BILLING_UNITS);
+  const note = (status: Parameters<ElevenUsageSink>[0]['status'], headers?: Headers, notSent = false) => {
     if (!id) return;
-    const units = header && /^\d+(?:\.\d+)?$/.test(header) ? Number(header) : undefined;
-    // Account plans and negotiated rates govern USD charges. A character-cost
-    // header supplies usage units only.
+    const units = nonnegativeDecimal(headers?.get('character-cost'));
+    const requestId = headers?.get('request-id') || headers?.get('x-request-id');
+    const total = units !== undefined && rate !== undefined && rate > 0 ? (units / 1_000) * rate : undefined;
+    const zero = notSent || units === 0;
+    const cost = zero ? {total:0,source:'provider-reported' as const,complete:true as const}
+      : total !== undefined && Number.isFinite(total) ? {total,source:'estimate' as const,complete:true as const} : undefined;
     try {
       onUsage?.({id, provider:'elevenlabs', model:body.model_id, status,
-        ...(typeof units === 'number' && Number.isFinite(units) ? {characterCost:units} : {}),
-        ...(notSent ? {usage:{costDetails:{reported:0,estimated:0,unknown:false,subscription:false,seen:true}}} : {})});
+        ...(units !== undefined ? {characterCost:units} : {}),
+        ...(requestId && /^[a-zA-Z0-9_-]{1,128}$/.test(requestId) ? {requestId} : {}),
+        ...(cost?.source === 'estimate' ? {usdPer1000BillingUnits:rate} : {}),
+        ...(cost ? {usage:{cost}} : {})});
     } catch { /* accounting must not discard a paid response */ }
   };
   note('pending');
   const response = await fetch(API + endpoint, { method: body === undefined ? 'GET' : 'POST', redirect: 'error', signal: bounded,
-    headers: { 'xi-api-key': key, ...(body === undefined || multipart ? {} : { 'Content-Type': 'application/json' }) }, body: body === undefined ? undefined : multipart ? body : JSON.stringify(body) })
+    headers: { 'xi-api-key': key, ...(body === undefined || multipart ? {} : { 'Content-Type': 'application/json' }) }, body: payload })
     .catch((error: any) => {
       // DNS and refused connections fail before any byte is sent: nothing was paid for, so no
       // "outcome unknown" marker may block the next attempt or the local fallback.
-      const code = error?.cause?.code ?? error?.cause?.errors?.[0]?.code;
-      const notSent = ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED'].includes(code);
+      const notSent = failedBeforeConnection(error?.cause);
       note(signal?.aborted ? 'cancelled' : bounded.aborted ? 'timeout' : 'failed', undefined, notSent);
       throw notSent ? Object.assign(error, { submissionNotSent: true }) : error;
     });
   if (!response.ok) {
-    note('failed', response.headers.get('character-cost'));
+    note('failed', response.headers);
     const reason = await providerReason(response);
     throw Object.assign(new Error(`ElevenLabs returned HTTP ${response.status}${reason ? ` (${reason})` : ''}; no automatic retry or fallback was attempted`), { providerStatus: response.status, ...(reason ? { providerReason: reason } : {}) });
   }
   // The charge can survive a transport, decode, or local mastering failure.
-  note('completed', response.headers.get('character-cost'));
+  note('completed', response.headers);
   if (!response.body) throw Error('ElevenLabs returned no body');
   const reader = response.body.getReader(), chunks: Buffer[] = [];
   let bytes = 0;

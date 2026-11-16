@@ -147,7 +147,7 @@ export declare class ExtensionRunner {
      * Create an ExtensionContext for use in event handlers and tool execution.
      * Context values are resolved at call time, so changes via bindCore/bindUI are reflected.
      */
-    createContext(): ExtensionContext;
+    createContext(requestModel?: Model<Api>): ExtensionContext;
     createCommandContext(): ExtensionCommandContext;
     private isSessionBeforeEvent;
     emit<TEvent extends RunnerEmitEvent>(event: TEvent): Promise<RunnerEmitResult<TEvent>>;
@@ -156,7 +156,7 @@ export declare class ExtensionRunner {
     emitToolCall(event: ToolCallEvent): Promise<ToolCallEventResult | undefined>;
     emitUserBash(event: UserBashEvent): Promise<UserBashEventResult | undefined>;
     emitContext(messages: AgentMessage[], metadata?: Pick<ContextEvent, "requestMessages" | "requestId" | "turnId" | "requestMessageIndex">): Promise<AgentMessage[]>;
-    emitBeforeProviderRequest(payload: unknown, metadata?: Pick<BeforeProviderRequestEvent, "model" | "signal">): Promise<unknown>;
+    emitBeforeProviderRequest(payload: unknown, metadata?: Pick<BeforeProviderRequestEvent, "model" | "signal" | "onOutcome">): Promise<unknown>;
     emitBeforeProviderHeaders(headers: ProviderHeaders): Promise<ProviderHeaders>;
     completeAuxiliaryProviderRequest<T extends ProviderRequestOptions<any>>(purpose: AuxiliaryProviderRequestPurpose, model: Model<Api>, options: T | undefined, complete: (options: T | undefined) => Promise<AssistantMessage>): Promise<AssistantMessage>;
     emitBeforeAgentStart(prompt: string, images: ImageContent[] | undefined, systemPrompt: string, systemPromptOptions: BuildSystemPromptOptions, requestSignal?: AbortSignal): Promise<BeforeAgentStartCombinedResult | undefined>;

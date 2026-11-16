@@ -98,6 +98,21 @@ function piRedactDiagnosticEntry(entry) {
   const num = (v) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined);
   const hex8 = (v) => (typeof v === "string" && /^[0-9a-f]{8}$/.test(v) ? v : undefined);
   const words = (v) => (typeof v === "string" && /^[a-z0-9_.:/-]{1,160}$/i.test(v) ? v : undefined);
+  if (entry.customType === "auxiliary-model-usage-v1" && entry.accountingOnly === true) {
+    const data = entry.data ?? {};
+    if (!["compaction", "branch-summary"].includes(data.owner) || !words(data.id) ||
+        !["pending", "completed", "failed", "cancelled", "timeout"].includes(data.status)) return undefined;
+    const usage = {};
+    for (const field of ["input", "output", "cacheRead", "cacheWrite", "reasoning"]) {
+      if (num(data.usage?.[field]) !== undefined) usage[field] = data.usage[field];
+    }
+    if (data.usage) usage.costDetails = readCostEvidence(data.usage, data.provider);
+    return {
+      type: "custom", customType: entry.customType, accountingOnly: true,
+      data: { id: data.id, owner: data.owner, status: data.status, provider: words(data.provider) ?? "unattributed",
+        model: words(data.model) ?? "summary", ...(data.usage ? { usage } : {}) },
+    };
+  }
   if (entry.customType === "session-metrics-v1") {
     const data = entry.data ?? {};
     const hooks = {};
@@ -196,6 +211,7 @@ function piRedactExportData(data) {
 import { writeSessionExport } from "./export-file.js";
 import { resolvePath } from "../utils/paths.js";
 import { CURRENT_SESSION_VERSION } from "./session-manager.js";
+import { collectAuxiliaryModelUsage, readCostEvidence } from "./session-accounting.js";
 /** Write the current session branch and optional trailing export-only entries as JSONL. */
 export function exportSessionToJsonl(sessionManager, outputPath, createTrailingEntries) {
     const filePath = resolvePath(outputPath ?? `session-${new Date().toISOString().replace(/[:.]/g, "-")}.jsonl`, process.cwd());
@@ -209,9 +225,29 @@ export function exportSessionToJsonl(sessionManager, outputPath, createTrailingE
     };
     const lines = [JSON.stringify(piRedactExportEntry(header))];
     let parentId = null;
-    for (const entry of sessionManager.getBranch()) {
+    const branch = sessionManager.getBranch();
+    for (const entry of branch) {
         lines.push(JSON.stringify(piRedactExportEntry({ ...entry, parentId })));
         parentId = entry.id;
+    }
+    const receipts = sessionManager.getBranchAccountingEntries?.(branch) ?? [];
+    const { rows, coveredSummaries } = collectAuxiliaryModelUsage([...branch, ...receipts]);
+    const retained = new Set(rows.filter(row => row.accountingOnly).map(row => JSON.stringify([row.owner, row.id])));
+    for (const receipt of receipts) {
+        if (retained.has(JSON.stringify([receipt.data?.owner, receipt.data?.id]))) {
+            lines.push(JSON.stringify(piRedactExportEntry({ ...receipt, parentId })));
+        }
+    }
+    // Summary text is redacted. Preserve the safely projected aggregate in
+    // exports when an older or interrupted transcript lacks its linked bills.
+    for (const entry of branch) {
+        if ((entry.type !== "compaction" && entry.type !== "branch_summary") || entry.fromHook || !entry.usage?.summaryReceiptIds || coveredSummaries.has(entry)) continue;
+        lines.push(JSON.stringify(piRedactExportEntry({
+            id: `summary-usage-${entry.id}`, parentId, timestamp: entry.timestamp,
+            type: "custom", customType: "auxiliary-model-usage-v1", accountingOnly: true,
+            data: { id: `summary-usage-${entry.id}`, owner: entry.type === "compaction" ? "compaction" : "branch-summary",
+                status: "completed", provider: entry.usage.cost?.provider, model: entry.usage.cost?.model, usage: entry.usage },
+        })));
     }
     for (const entry of createTrailingEntries?.(parentId, timestamp) ?? []) {
         lines.push(JSON.stringify(piRedactExportEntry(entry)));

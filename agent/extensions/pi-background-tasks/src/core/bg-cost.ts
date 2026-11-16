@@ -104,7 +104,9 @@ function billingEvent(event) {
   let entry;
   if (event.type === "entry_appended" && event.entry?.type === "custom" && billingTypes.has(event.entry.customType)) entry = event.entry;
   else if (event.type === "compaction_end" && event.result?.usage) {
-    entry = { type: "compaction", usage: event.result.usage };
+    const usage = event.result.usage;
+    const id = Array.isArray(usage.summaryReceiptIds) ? "compaction:" + usage.summaryReceiptIds.join(":") : undefined;
+    entry = { type: "compaction", id, usage };
   } else if (event.type === "message_end" || event.type === "tool_result_end") {
     const message = event.message;
     if (message?.role === "assistant") {

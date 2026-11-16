@@ -3,9 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { setTimeout as delay } from 'node:timers/promises';
 import { parse } from 'yaml';
-import { QUICK_TESTS, SLOW_FIRST, orderForRun, shardFiles, testConcurrency, testPlan } from '../scripts/test.mjs';
+import { QUICK_TESTS, shardFiles, testConcurrency, testPlan } from '../scripts/test.mjs';
 import { annotation } from '../scripts/ci-failure-reporter.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -59,21 +61,78 @@ test('syntax checks fail visibly when the runtime parser is unavailable', t => {
   assert.doesNotMatch(checked.stdout, /parse\.|skipped/);
 });
 
-test('failed tests reach the shell and disposable fixture roots are cleaned on failure', t => {
-  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'test-cli-failure-'));
+function runnerFixture(t, source) {
+  const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'test-cli-fixture-'));
   t.after(() => fs.rmSync(fixture, { recursive: true, force: true }));
   for (const file of ['scripts/test.mjs', 'agent/scripts/publish-public.mjs']) {
     fs.mkdirSync(path.dirname(path.join(fixture, file)), { recursive: true });
     fs.cpSync(path.join(root, file), path.join(fixture, file));
   }
   fs.mkdirSync(path.join(fixture, 'tests'));
-  fs.writeFileSync(path.join(fixture, 'tests/failure.test.mjs'), `import test from 'node:test';import os from 'node:os';console.log('FIXTURE_TEMP='+os.tmpdir());test('fails',()=>{throw Error('expected fixture failure');});`);
+  fs.writeFileSync(path.join(fixture, 'tests/fixture.test.mjs'), source);
+  return fixture;
+}
+
+test('failed tests reach the shell and disposable fixture roots are cleaned on failure', t => {
+  const fixture = runnerFixture(t, `import test from 'node:test';import os from 'node:os';console.log('FIXTURE_TEMP='+os.tmpdir());test('fails',()=>{throw Error('expected fixture failure');});`);
   const result = spawnSync(process.execPath, [path.join(fixture, 'scripts/test.mjs')], { encoding: 'utf8', timeout: 10000 });
   assert.equal(result.status, 1, result.stderr);
   assert.match(result.stdout, /expected fixture failure/);
   const tempRoot = /FIXTURE_TEMP=([^\r\n]+)/.exec(result.stdout)?.[1];
   assert.ok(tempRoot);
   assert.equal(fs.existsSync(tempRoot), false, 'failure must not leave a fixture directory behind');
+});
+
+test('a targeted SIGTERM reaps test descendants and the disposable test root', { skip: process.platform !== 'linux', timeout: 15000 }, async t => {
+  const grandchild = `
+    const fs = require('node:fs'), os = require('node:os');
+    const file = process.env.YUNUSPI_TEST_FIXTURE_READY;
+    process.on('SIGTERM', () => {});
+    fs.writeFileSync(file + '.tmp', JSON.stringify({ testPid: process.ppid, workerPid: process.pid, tempRoot: os.tmpdir() }));
+    fs.renameSync(file + '.tmp', file);
+    setTimeout(() => {}, 14000);
+  `;
+  const fixture = runnerFixture(t, `
+    import test from 'node:test';
+    import { spawn } from 'node:child_process';
+    import { once } from 'node:events';
+    test('runs a nested job', async () => {
+      await once(spawn(process.execPath, ['-e', ${JSON.stringify(grandchild)}], { stdio: 'ignore' }), 'close');
+    });
+  `);
+  const ready = path.join(fixture, 'ready.json');
+  const launcher = spawn(process.execPath, [path.join(fixture, 'scripts/test.mjs')], {
+    cwd: fixture, stdio: 'ignore', env: { ...process.env, YUNUSPI_TEST_FIXTURE_READY: ready },
+  });
+  const closed = once(launcher, 'close');
+  const processIsAlive = pid => {
+    try { return fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ').at(-1)[0] !== 'Z'; }
+    catch (error) { if (error.code !== 'ENOENT') throw error; return false; }
+  };
+  let job;
+  t.after(() => {
+    launcher.kill('SIGKILL');
+    if (!job) return;
+    for (const pid of [job.workerPid, job.testPid]) {
+      if (!processIsAlive(pid)) continue;
+      try { process.kill(pid, 'SIGKILL'); }
+      catch (error) { if (error.code !== 'ESRCH') throw error; }
+    }
+    fs.rmSync(job.tempRoot, { recursive: true, force: true });
+  });
+  const limit = Date.now() + 10000;
+  while (!fs.existsSync(ready) && Date.now() < limit && launcher.exitCode === null) await delay(20);
+  assert.ok(fs.existsSync(ready), 'nested test job started');
+  job = JSON.parse(fs.readFileSync(ready, 'utf8'));
+  assert.ok(processIsAlive(job.workerPid));
+  assert.ok(fs.existsSync(job.tempRoot));
+  launcher.kill('SIGTERM');
+  assert.deepEqual(await closed, [143, null]);
+  const reapLimit = Date.now() + 1000;
+  while ((processIsAlive(job.workerPid) || processIsAlive(job.testPid)) && Date.now() < reapLimit) await delay(20);
+  assert.equal(processIsAlive(job.workerPid), false, 'nested job that ignores SIGTERM is gone');
+  assert.equal(processIsAlive(job.testPid), false, 'test process is gone');
+  assert.equal(fs.existsSync(job.tempRoot), false, 'interruption removes the disposable test root');
 });
 
 test('shards partition the selected tests exactly once and stay balanced by size', () => {
@@ -117,12 +176,4 @@ test('a crashed child annotates its error line, not the Node source location pri
   assert.match(line, /::Error \[ERR_FS_CP_EEXIST\]%3A Target already exists/);
   assert.doesNotMatch(line, /cp-sync/);
   assert.equal(annotation({ name: 'plain', details: { error: { message: 'expected 1, got 2' } } }, root), '::error title=plain::expected 1%2C got 2\n');
-});
-
-test('known slow files start first and every registered slow file exists', () => {
-  const all = ['tests/a.test.mjs', ...SLOW_FIRST.slice(0, 2).reverse(), 'tests/b.test.mjs'];
-  const ordered = orderForRun(all, file => file === 'tests/b.test.mjs' ? 10 : 1);
-  assert.deepEqual(ordered.slice(0, 2), SLOW_FIRST.slice(0, 2), 'slow files lead, in their listed order');
-  assert.deepEqual(ordered.slice(2), ['tests/b.test.mjs', 'tests/a.test.mjs'], 'the rest follows largest first');
-  for (const file of SLOW_FIRST) assert.ok(fs.existsSync(path.join(root, file)), `${file} must exist so a rename updates the list`);
 });

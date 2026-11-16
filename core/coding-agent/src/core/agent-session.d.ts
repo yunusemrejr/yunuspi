@@ -277,7 +277,7 @@ export declare class AgentSession {
     private _getIdleWaitPromise;
     private _resolveIdleWaitIfIdle;
     private _emitAgentSettled;
-    private _lastAssistantMessage;
+    private _lastAssistantResponse;
     /** Internal handler for agent events - shared by subscribe and reconnect */
     private _handleAgentEvent;
     private _willRetryAfterAgentEnd;

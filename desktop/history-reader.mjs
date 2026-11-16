@@ -87,7 +87,7 @@ function snapshotKey(files, sessionId) {
 }
 
 function readSnapshot(request, files, [manager, projection, accounting]) {
-  const { loadEntriesFromFile, migrateSessionEntries } = manager;
+  const { loadEntriesFromFile, migrateSessionEntries, isAccountingOnlySessionEntry } = manager;
   const { desktopBranchMessages, desktopGoal } = projection;
   const canonical = directory => { try { return fs.realpathSync(directory); } catch { return path.resolve(directory); } };
   const cwd = canonical(request.cwd);
@@ -113,7 +113,8 @@ function readSnapshot(request, files, [manager, projection, accounting]) {
     if (entry.type === 'session') continue;
     if (typeof entry.id !== 'string' || !entry.id || byId.has(entry.id)
       || entry.parentId != null && typeof entry.parentId !== 'string') throw Error('The transcript contains invalid entry identifiers. Its original file is retained.');
-    byId.set(entry.id, entry); leaf = entry;
+    byId.set(entry.id, entry);
+    if (!isAccountingOnlySessionEntry(entry)) leaf = entry;
   }
   const branch = [];
   while (leaf) {

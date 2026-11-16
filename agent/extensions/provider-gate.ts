@@ -26,10 +26,9 @@
  *      ~2min budget, pause until the user's next message) — and every
  *      re-request passes through this gate again.
  *
- * Main-turn failure recording rides `message_end`: a failed assistant message is
- * classified (quota-rate / provider-outage / route-failure / model-failure /
- * deterministic) and declared as executable cooldown BEFORE the next request
- * can fire; a successful assistant message clears it. This works in main
+ * The admitted request owns its terminal observer. It classifies each failure
+ * and records the cooldown before the next request can fire. A corresponding
+ * success can clear that cooldown. This works in main
  * sessions AND subagent children (extensions load in every pi process), so
  * the shared file coordinates the whole fleet. Auxiliary requests use a
  * separate admission hook and a callback bound to the admitted request.
@@ -67,7 +66,7 @@ import {
 } from "./pi-subagents/src/runs/shared/provider-health.ts";
 
 type AnyCtx = ExtensionContext | undefined;
-type RequestModel = BeforeAuxiliaryProviderRequestEvent["model"];
+type RequestModel = NonNullable<BeforeProviderRequestEvent["model"]>;
 
 interface RouteRef {
 	provider: string;
@@ -93,8 +92,7 @@ interface PendingAttempt {
 	estTokens?: number;
 }
 
-// `message_end` has no request id, so this map is only a bounded attribution
-// aid. A lost completion must not turn it into an unbounded per-route cache.
+// Legacy dispatchers without exact outcome callbacks may still emit `message_end`.
 const MAX_PENDING_ATTEMPTS = 128;
 const PENDING_ATTEMPT_TTL_MS = 10 * 60_000;
 
@@ -414,7 +412,7 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 	// THE GATE — runs for every inference request in this process.
 	pi.on("before_provider_request", async (event: BeforeProviderRequestEvent, ctx) => {
 		if (gateDisabled()) return undefined;
-		const { payload, model, signal } = event;
+		const { payload, model, signal, onOutcome } = event;
 		const route = (model?.id ? routeFromModel(model, model.id) : undefined) ?? resolveRoute(payload, ctx);
 		if (!route) {
 			const ambiguous = coolingAmbiguousRoute(payload, ctx as AnyCtx);
@@ -458,13 +456,22 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 			const bridge = ((globalThis as any)[Symbol.for("yunus-pi.cache-profile.v1")] ??= {}) as Record<string, unknown>;
 			bridge[`${route.provider}/${route.model}`] = { strategy: profile.strategy, ttlSeconds: profile.ttlSeconds, at: Date.now() };
 		} catch { /* cache telemetry must never block a request */ }
+		const requestSignal = signal ?? ctx.signal;
+		if (onOutcome) {
+			const attempt = await admitRoute(payload, route, model, ctx, requestSignal);
+			onOutcome(message => {
+				if (message.provider === route.provider) {
+					recordCompletion(message, attempt, model, "message_end", route.model);
+				}
+			});
+			return undefined;
+		}
 		const attempt: PendingAttempt = {
 			provider: route.provider,
 			model: route.model,
 			createdAt: performance.now(),
 			session: sessionLabel(ctx),
 		};
-		const requestSignal = signal ?? ctx.signal;
 		markPendingAttempt(pending, attempt);
 		try {
 			Object.assign(attempt, await admitRoute(payload, route, ctx.model, ctx, requestSignal));
@@ -494,7 +501,7 @@ export default function providerGateExtension(pi: ExtensionAPI): void {
 
 	pi.on("message_end", (event, ctx) => {
 		const message = event?.message;
-		if (message?.role !== "assistant" || !message.provider) return;
+		if (event?.requestedModel || message?.role !== "assistant" || !message.provider) return;
 		const session = sessionLabel(ctx);
 		const selected = ctx.model;
 		const attempt = takePendingAttempt(pending, message.provider, message.model, session);

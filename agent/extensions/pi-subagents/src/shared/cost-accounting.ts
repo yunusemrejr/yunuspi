@@ -35,8 +35,12 @@ export function addUsageCost(target: Usage, source: any, provider?: string, mode
 }
 
 export function addAuxiliaryUsage(target: Usage, event: any): void {
-  const entry = event.type === 'entry_appended' ? event.entry : undefined;
-  if (entry?.type === 'custom' && auxiliaryReceiptTypes.has(entry.customType)) {
+  const summary = event.type === 'compaction_end' ? event.result?.usage : undefined;
+  const linkedSummary = Array.isArray(summary?.summaryReceiptIds);
+  const entry = event.type === 'entry_appended' ? event.entry : linkedSummary ? {
+    type: 'compaction', id: `compaction:${summary.summaryReceiptIds.join(':')}`, usage: summary,
+  } : undefined;
+  if (linkedSummary || entry?.type === 'custom' && auxiliaryReceiptTypes.has(entry.customType)) {
     if (typeof entry.id === 'string' && !acceptAuxiliaryEvent(target, `receipt:${entry.id}`)) return;
     const ledger = auxiliaryReceipts.get(target) ?? {entries: []};
     ledger.entries.push(entry);
@@ -66,7 +70,7 @@ function acceptAuxiliaryEvent(target: Usage, id: string): boolean {
 }
 
 function aggregateAuxiliaryReceipts(entries: any[]): Usage {
-  const { rows, truncated } = collectAuxiliaryModelUsage(entries);
+  const { rows, truncated, coveredSummaries } = collectAuxiliaryModelUsage(entries);
   const aggregate: Usage = {input:0, output:0, cacheRead:0, cacheWrite:0, turns:0, cost:0};
   let evidence = {reported:0, estimated:0, unknown:truncated, subscription:false, seen:false};
   const routes = new Map<string, NonNullable<Usage['costDetails']>>();
@@ -82,9 +86,12 @@ function aggregateAuxiliaryReceipts(entries: any[]): Usage {
   }
   // Jev/Span predate per-request auxiliary rows. Reuse their legacy
   // evidence handling and keep them out of the modern request fold.
-  const legacy = entries.filter(entry => entry.customType !== 'auxiliary-model-usage-v1');
+  const legacy = entries.filter(entry => entry.customType !== 'auxiliary-model-usage-v1' && !coveredSummaries.has(entry));
   if (legacy.length) {
     for (const { route, ...cost } of collectSessionCost(legacy).rows) addRoute(route, cost);
+    for (const entry of legacy) if (entry.type === 'compaction') {
+      for (const field of tokenFields) aggregate[field] += entry.usage[field] ?? 0;
+    }
   }
   aggregate.costByModel = [...routes].map(([route, evidence]) => ({route, evidence}));
   aggregate.costDetails = evidence;

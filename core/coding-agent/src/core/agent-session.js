@@ -39,7 +39,7 @@ import { buildSystemPrompt } from "./system-prompt.js";
 import { createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
 import { createToolDefinitionFromAgentTool } from "./tools/tool-definition-wrapper.js";
-import { collectSessionStats } from "./session-accounting.js";
+import { collectSessionStats, readCostEvidence } from "./session-accounting.js";
 import { GuardianSupervisor, tagGuardianRequestMessage } from "./guardian/guardian-supervisor.js";
 import { sessionObservability, withSessionObservability } from "./session-observability.js";
 /** Providers that limit requests per second and send no Retry-After (Ling: 2 requests/s). A retry 5 to 8 s
@@ -433,8 +433,8 @@ export class AgentSession {
             this._resolveIdleWaitIfIdle();
         }
     }
-    // Track last assistant message for auto-compaction check
-    _lastAssistantMessage = undefined;
+    // The last completed assistant response and its request route drive post-run recovery.
+    _lastAssistantResponse = undefined;
     /** Exact message identity owns its durable-acceptance callback across queues. */
     _customMessageAcceptances = new WeakMap();
     /** Internal handler for agent events - shared by subscribe and reconnect */
@@ -466,7 +466,7 @@ export class AgentSession {
         // A tool-phase interrupt leaves a valid assistant/tool pair in history.
         // Skip retry and compaction without rewriting its recorded stop reason.
         if (event.type === "agent_end" && event.aborted) {
-            this._lastAssistantMessage = undefined;
+            this._lastAssistantResponse = undefined;
         }
         // Emit to extensions first
         await this._emitExtensionEvent((/* PI_RESPONSE_BILLING_V1 */
@@ -490,8 +490,8 @@ export class AgentSession {
             // Other message types (bashExecution, compactionSummary, branchSummary) are persisted elsewhere
             // Track assistant message for auto-compaction (checked on agent_end)
             if (event.message.role === "assistant") {
-                this._lastAssistantMessage = event.message;
                 const assistantMsg = event.message;
+                this._lastAssistantResponse = { message: assistantMsg, providerRequest: event.providerRequest };
                 if (assistantMsg.stopReason !== "error" && assistantMsg.stopReason !== "length") {
                     this._overflowRecoveryAttempted = false;
                 }
@@ -502,7 +502,7 @@ export class AgentSession {
                 // success here — it would reset the counter mid-sequence and turn the
                 // retry budget into an infinite pump. The classifier call also annotates
                 // the message at the earliest lifecycle point.
-                if (assistantMsg.stopReason !== "error" && this._retryAttempt > 0 && !this._isRetryableError(assistantMsg)) {
+                if (assistantMsg.stopReason !== "error" && this._retryAttempt > 0 && !this._isRetryableError(assistantMsg, event.providerRequest)) {
                     // A successful response starts a fresh cooldown series.
                     this._piRateLimitLoopStart = undefined;
                     this._emit({
@@ -531,7 +531,7 @@ export class AgentSession {
         for (let i = event.messages.length - 1; i >= 0; i--) {
             const message = event.messages[i];
             if (message.role !== "assistant") continue;
-            if (!this._isRetryableError(message)) return false;
+            if (!this._isRetryableError(message, this._lastAssistantResponse?.providerRequest)) return false;
             if (!usesProviderCooldown(message))
                 return this._retryAttempt < settings.maxRetries;
             const started = this._piRateLimitLoopStart;
@@ -608,9 +608,11 @@ export class AgentSession {
             await this._extensionRunner.emit(extensionEvent);
         }
         else if (event.type === "message_end") {
+            const model = event.providerRequest?.model;
             const extensionEvent = {
                 type: "message_end",
                 message: event.message,
+                ...(model ? { requestedModel: Object.freeze({ provider: model.provider, id: model.id, baseUrl: model.baseUrl }) } : {}),
             };
             const replacement = await this._extensionRunner.emitMessageEnd(extensionEvent);
             if (replacement) {
@@ -883,8 +885,9 @@ export class AgentSession {
         this._isAgentRunActive = true;
         try {
             await this.agent.prompt(messages);
-            while (await this._handlePostAgentRun()) {
-                await this.agent.continue();
+            let continuation;
+            while ((continuation = await this._handlePostAgentRun())) {
+                await this.agent.continue(continuation.providerRequest);
             }
         }
         finally {
@@ -895,13 +898,15 @@ export class AgentSession {
         }
     }
     async _handlePostAgentRun() {
-        const msg = this._lastAssistantMessage;
-        this._lastAssistantMessage = undefined;
-        if (!msg) {
-            return false;
+        const response = this._lastAssistantResponse;
+        this._lastAssistantResponse = undefined;
+        if (!response) {
+            return undefined;
         }
-        if (this._isRetryableError(msg) && (await this._prepareRetry(msg))) {
-            return true;
+        const { message: msg, providerRequest } = response;
+        if (this._isRetryableError(msg, providerRequest)) {
+            const retry = await this._prepareRetry(msg, providerRequest);
+            if (retry) return retry;
         }
         if (msg.stopReason === "error" && this._retryAttempt > 0) {
             this._emit({
@@ -913,11 +918,11 @@ export class AgentSession {
             this._retryAttempt = 0;
         }
         if (await this._checkCompaction(msg)) {
-            return true;
+            return {};
         }
         // The agent loop drains both queues before emitting agent_end. Any messages
         // here were queued by agent_end extension handlers and need a continuation.
-        return this.agent.hasQueuedMessages();
+        return this.agent.hasQueuedMessages() ? {} : undefined;
     }
     /**
      * Send a prompt to the agent.
@@ -1726,39 +1731,46 @@ export class AgentSession {
     // Compaction
     // =========================================================================
     /** Generate Pi's built-in compaction summary for manual and automatic compaction. */
-    async _runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, signal, env, reason, attempts) {
-        return compact(preparation, requestModel, apiKey, headers, customInstructions, signal, this.thinkingLevel, this._completeSessionSummary.bind(this, "compaction", attempts), env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }), undefined);
+    async _runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, signal, env, reason) {
+        return compact(preparation, requestModel, apiKey, headers, customInstructions, signal, this.thinkingLevel, this._completeSessionSummary.bind(this, "compaction"), env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }), undefined);
     }
-    async _completeSessionSummary(purpose, attempts, model, context, options) {
-        const attempt = { model, response: undefined };
-        attempts.push(attempt);
-        attempt.response = await this._extensionRunner.completeAuxiliaryProviderRequest(purpose, model, options, async (requestOptions) =>
-            (await this.agent.streamFunction(model, context, requestOptions)).result());
-        return attempt.response;
-    }
-    _recordSummaryAttemptCosts(purpose, attempts, committed = false) {
-        for (const { model, response } of attempts.splice(0)) {
-            const reason = response?.stopReason;
-            // Retry classification can turn an empty 'stop' into an error.
-            // A committed summary already accounts for each final response it used.
-            if (committed && response && reason !== "error" && reason !== "aborted") continue;
-            const status = reason === "aborted" ? "cancelled" : reason === "stop" ? "completed" : "failed";
+    async _completeSessionSummary(purpose, model, context, options) {
+        const sessionId = this.sessionManager.getSessionId();
+        const base = { id: randomUUID(), owner: purpose, provider: model.provider, model: model.id };
+        const record = (status, usage) => {
+            if (this.sessionManager.getSessionId() !== sessionId) return;
             try {
-                this._appendCustomEntry("auxiliary-model-usage-v1", {
-                    id: randomUUID(), owner: purpose, status,
-                    provider: response?.provider || model.provider,
-                    model: response?.model || model.id,
-                    ...(response?.usage ? { usage: response.usage } : {}),
-                });
+                const entry = this.sessionManager.appendSummaryUsageReceipt({ ...base, status, ...(usage ? { usage } : {}) });
+                this._emit({ type: "entry_appended", entry });
             }
             catch (error) {
-                // Keep a failed supplemental receipt from changing the summary outcome.
                 try {
                     this._extensionRunner.emitError({ extensionPath: "<runtime>", event: "summary_accounting", error: String(error) });
                 }
                 catch { /* A diagnostic cannot change summary settlement. */ }
             }
-        }
+        };
+        return this._extensionRunner.completeAuxiliaryProviderRequest(purpose, model, options, async (requestOptions) => {
+            requestOptions?.signal?.throwIfAborted();
+            record("pending");
+            let response;
+            try {
+                response = await (await this.agent.streamFunction(model, context, requestOptions)).result();
+            }
+            catch (error) {
+                record(requestOptions?.signal?.aborted ? "cancelled" : "failed");
+                throw error;
+            }
+            const status = response.stopReason === "aborted" ? "cancelled" : response.stopReason === "stop" ? "completed" : "failed";
+            const raw = response.usage;
+            const usage = raw && { costDetails: readCostEvidence(raw, response.provider ?? model.provider) };
+            for (const field of ["input", "output", "cacheRead", "cacheWrite", "reasoning"]) {
+                if (usage && Number.isFinite(raw[field]) && raw[field] >= 0) usage[field] = raw[field];
+            }
+            // Persist before a health observer, retry sleep, or the summary commit can block.
+            record(status, usage);
+            return raw ? { ...response, usage: { ...raw, summaryReceiptIds: [base.id] } } : response;
+        });
     }
     _clearManualCompactionState() {
         this._compactionAbortController = undefined;
@@ -1782,7 +1794,6 @@ export class AgentSession {
     async compact(customInstructions) {
         await this.abort();
         this._compactionAbortController = new AbortController();
-        const attempts = [];
         this._emit({ type: "compaction_start", reason: "manual" });
         let fromExtension = false;
         try {
@@ -1835,7 +1846,7 @@ export class AgentSession {
             }
             else {
                 // Shared default summary generator, also used by automatic compaction.
-                const result = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, this._compactionAbortController.signal, env, "manual", attempts);
+                const result = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, this._compactionAbortController.signal, env, "manual");
                 summary = result.summary;
                 firstKeptEntryId = result.firstKeptEntryId;
                 tokensBefore = result.tokensBefore;
@@ -1847,7 +1858,6 @@ export class AgentSession {
             }
             /* PI_COMPACTION_COMMIT_GUARD */if(typeof summary!=="string"||!summary.trim()||!Number.isFinite(tokensBefore)||tokensBefore<0||typeof firstKeptEntryId!=="string"||!this.sessionManager.getBranch().some(entry=>entry.id===firstKeptEntryId))throw new Error("Invalid compaction result; keeping existing history");
             const compactionId = this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-            this._recordSummaryAttemptCosts("compaction", attempts, true);
             const sessionContext = this.sessionManager.buildSessionContext();
             this.agent.state.messages = sessionContext.messages;
             const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
@@ -1882,7 +1892,6 @@ export class AgentSession {
             return compactionResult;
         }
         catch (error) {
-            this._recordSummaryAttemptCosts("compaction", attempts);
             const message = error instanceof Error ? error.message : String(error);
             const aborted = message === "Compaction cancelled" || (error instanceof Error && error.name === "AbortError");
             const errorMessage = aborted ? undefined : `Compaction failed: ${message}`;
@@ -2045,7 +2054,6 @@ export class AgentSession {
      */
     async _runAutoCompaction(reason, willRetry) {/* PI_AUTO_WINDOW_RUN */if(!this.model||!shouldCompact(estimateContextTokens(this.agent.state.messages).tokens,this.model.contextWindow,this.settingsManager.getCompactionSettings()))return false;
         const settings = this.settingsManager.getCompactionSettings();
-        const attempts = [];
         let started = false;
         let fromExtension = false;
         try {
@@ -2108,7 +2116,7 @@ export class AgentSession {
             }
             else {
                 // Shared default summary generator, also used by manual compaction.
-                const compactResult = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, undefined, this._autoCompactionAbortController.signal, env, reason, attempts);
+                const compactResult = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, undefined, this._autoCompactionAbortController.signal, env, reason);
                 summary = compactResult.summary;
                 firstKeptEntryId = compactResult.firstKeptEntryId;
                 tokensBefore = compactResult.tokensBefore;
@@ -2116,7 +2124,6 @@ export class AgentSession {
                 details = compactResult.details;
             }
             if (this._autoCompactionAbortController.signal.aborted) {
-                this._recordSummaryAttemptCosts("compaction", attempts);
                 this._emit({
                     type: "compaction_end",
                     reason,
@@ -2134,7 +2141,6 @@ export class AgentSession {
             }
             /* PI_COMPACTION_COMMIT_GUARD */if(typeof summary!=="string"||!summary.trim()||!Number.isFinite(tokensBefore)||tokensBefore<0||typeof firstKeptEntryId!=="string"||!this.sessionManager.getBranch().some(entry=>entry.id===firstKeptEntryId))throw new Error("Invalid compaction result; keeping existing history");
             const compactionId = this.sessionManager.appendCompaction(summary, firstKeptEntryId, tokensBefore, details, fromExtension, usage);
-            this._recordSummaryAttemptCosts("compaction", attempts, true);
             const sessionContext = this.sessionManager.buildSessionContext();
             this.agent.state.messages = sessionContext.messages;
             const estimatedTokensAfter = estimateMessagesTokens(sessionContext.messages);
@@ -2175,7 +2181,6 @@ export class AgentSession {
             return this.agent.hasQueuedMessages();
         }
         catch (error) {
-            if (attempts.length) this._recordSummaryAttemptCosts("compaction", attempts);
             const errorMessage = error instanceof Error ? error.message : "compaction failed";
             if (started) {
                 const formattedErrorMessage = reason === "overflow"
@@ -2569,9 +2574,9 @@ export class AgentSession {
      * Check if an error is retryable (overloaded, rate limit, server errors).
      * Context overflow errors are NOT retryable (handled by compaction instead).
      */
-    _isRetryableError(message) {
+    _isRetryableError(message, providerRequest) {
         // Context overflow is handled by compaction, not retry.
-        if (isContextOverflow(message, this.model?.contextWindow ?? 0))
+        if (isContextOverflow(message, (providerRequest?.model ?? this.model)?.contextWindow ?? 0))
             return false;
         if (message.providerRetry?.retryAfterMs !== undefined &&
             assistantRetryDelay(message, 0, this.settingsManager.getRetrySettings().maxRetryDelayMs) === undefined)
@@ -2608,21 +2613,24 @@ export class AgentSession {
     }
     /**
      * Prepare a retryable error for continuation with exponential backoff.
-     * @returns true if the caller should continue the agent, false otherwise
+     * @returns The continuation route when the caller should retry.
      */
-    async _prepareRetry(message) {
+    async _prepareRetry(message, providerRequest) {
+        const requestedModel = providerRequest?.model;
+        const route = requestedModel ? { provider: requestedModel.provider, id: requestedModel.id } : undefined;
  /* PI_AUTONOMOUS_RECOVERY_V4 */
  const _piRecoveryChildAllowed=(()=>{if(process.env.PI_SUBAGENT_CHILD!=="1")return true;try{const encoded=process.env.PI_SUBAGENT_RECOVERY_ROUTES??"";if(encoded.length>8192)return false;const routes=JSON.parse(encoded||"[]");return Array.isArray(routes)&&routes.length>=2&&routes.length<=8&&new Set(routes).size===routes.length&&routes.every(route=>typeof route==="string"&&route.length<=512&&route.includes("/")&&!/[\s\x00-\x1f]/.test(route));}catch{return false;}})();
  if(_piRecoveryChildAllowed && this.settingsManager.getRetrySettings().enabled && this._extensionRunner?.hasHandlers("pi_provider_recovery")) {
    if(message.content?.some(b=>b.type==="toolCall")) return false;
    const controller=new AbortController(); this._retryAbortController=controller;
-   const event={type:"pi_provider_recovery",message:message,signal:controller.signal,decision:undefined};
+   const event={type:"pi_provider_recovery",message:message,requestedModel:route,signal:controller.signal,decision:undefined};
+   const selectedBeforeRecovery=this.model;
    try { await this._extensionRunner.emit(event);
      if(controller.signal.aborted) return false;
      if(event.decision!==undefined) {
        if(event.decision==="retry") {
          this._flushPendingCustomMessages();this.agent.state.messages=this.agent.state.messages.filter(m=>m!==message);
-         return true;
+         return {providerRequest:this.model===selectedBeforeRecovery?providerRequest:undefined};
        }
        return false;
      }
@@ -2642,6 +2650,8 @@ export class AgentSession {
         // pauses — the final error is annotated and prompt() resets the clock on
         // the next user message.
         const rateLimited = usesProviderCooldown(message);
+        const retryProvider = requestedModel?.provider ?? message.provider;
+        const retryModel = requestedModel?.id ?? message.model;
         if (!rateLimited) {
             this._piRateLimitLoopStart = undefined;
         } else if (!this._piRateLimitLoopStart) {
@@ -2651,7 +2661,7 @@ export class AgentSession {
             this._piRateLimitLoopStart = Date.now();
         }
         if (rateLimited && Date.now() - this._piRateLimitLoopStart > 120000) {
-            /* PI_RETRY_PAUSE_RECORDED */ this.sessionManager.appendCustomEntry("harness-retry", {status: "paused", reason: "cooldown-window-exhausted", provider: message.provider, model: message.model, attempt: this._retryAttempt});
+            /* PI_RETRY_PAUSE_RECORDED */ this.sessionManager.appendCustomEntry("harness-retry", {status: "paused", reason: "cooldown-window-exhausted", provider: retryProvider, model: retryModel, attempt: this._retryAttempt});
             message.errorMessage = (message.errorMessage || "429 rate limit") +
                 ` — paused: ${message.provider || "the provider"} kept answering with this error for 2 minutes; send a message to retry`;
             this._piRateLimitLoopStart = undefined;
@@ -2661,7 +2671,7 @@ export class AgentSession {
             return false;
         }
         const delayMs = assistantRetryDelay(message, rateLimited
-            ? (REQUEST_RATE_PROVIDERS.has(message.provider) ? Math.min(25000, 8000 * (this._retryAttempt + 1)) : 25000)
+            ? (REQUEST_RATE_PROVIDERS.has(retryProvider) ? Math.min(25000, 8000 * (this._retryAttempt + 1)) : 25000)
             : settings.baseDelayMs * 2 ** this._retryAttempt, settings.maxRetryDelayMs);
         if (delayMs === undefined) return false;
         this._retryAttempt++;
@@ -2672,7 +2682,7 @@ export class AgentSession {
             attempt: this._retryAttempt,
             maxAttempts: settings.maxRetries,
             delayMs,
-            ...(rateLimited ? { rateLimited: true, provider: message.provider } : {}),
+            ...(rateLimited ? { rateLimited: true, provider: retryProvider } : {}),
             errorMessage: message.errorMessage || "Unknown error",
         });
         // Remove error message from agent state (keep in session for history)
@@ -2684,7 +2694,7 @@ export class AgentSession {
             await sleep(delayMs, this._retryAbortController.signal);
         }
         catch {
-            /* PI_RETRY_CANCEL_RECORDED */ this.sessionManager.appendCustomEntry("harness-retry", {status: "cancelled", reason: "retry-cancelled", provider: message.provider, model: message.model, attempt: this._retryAttempt});
+            /* PI_RETRY_CANCEL_RECORDED */ this.sessionManager.appendCustomEntry("harness-retry", {status: "cancelled", reason: "retry-cancelled", provider: retryProvider, model: retryModel, attempt: this._retryAttempt});
             // Aborted during sleep - emit end event so UI can clean up
             const attempt = this._retryAttempt;
             this._retryAttempt = 0;
@@ -2699,7 +2709,7 @@ export class AgentSession {
         finally {
             this._retryAbortController = undefined;
         }
-        return true;
+        return providerRequest ? { providerRequest } : {};
     }
     /**
      * Cancel in-progress retry.
@@ -2875,8 +2885,6 @@ export class AgentSession {
         };
         // Set up abort controller for summarization
         this._branchSummaryAbortController = new AbortController();
-        const attempts = [];
-        let summaryCommitted = false;
         try {
             let extensionSummary;
             let fromExtension = false;
@@ -2922,7 +2930,7 @@ export class AgentSession {
                     customInstructions,
                     replaceInstructions,
                     reserveTokens: branchSummarySettings.reserveTokens,
-                    streamFn: this._completeSessionSummary.bind(this, "branch-summary", attempts),
+                    streamFn: this._completeSessionSummary.bind(this, "branch-summary"),
                     retry: this.settingsManager.getRetrySettings(),
                     callbacks: this._summarizationRetryCallbacks({ source: "branchSummary" }),
                 });
@@ -2967,7 +2975,6 @@ export class AgentSession {
             if (summaryText) {
                 // Create summary at target position (can be null for root)
                 const summaryId = this.sessionManager.branchWithSummary(newLeafId, summaryText, summaryDetails, fromExtension, summaryUsage);
-                summaryCommitted = true;
                 summaryEntry = this.sessionManager.getEntry(summaryId);
                 // Attach label to the summary entry
                 if (label) {
@@ -3001,7 +3008,6 @@ export class AgentSession {
             return { editorText, cancelled: false, summaryEntry };
         }
         finally {
-            if (attempts.length) this._recordSummaryAttemptCosts("branch-summary", attempts, summaryCommitted);
             this._branchSummaryAbortController = undefined;
             this._resolveIdleWaitIfIdle();
         }

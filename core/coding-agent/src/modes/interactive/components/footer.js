@@ -61,7 +61,9 @@ function cacheHit(entries, model) {
 function expandedUsage(entries) {
     const totals = {input: 0, output: 0, cacheRead: 0, cacheWrite: 0};
     const fields = Object.keys(totals);
+    const auxiliary = collectAuxiliaryModelUsage(entries);
     for (const entry of entries) {
+        if (auxiliary.coveredSummaries.has(entry)) continue;
         const usage = entry.type === "message" && ["assistant", "toolResult"].includes(entry.message.role)
             ? entry.message.usage : ["branch_summary", "compaction"].includes(entry.type) ? entry.usage : undefined;
         for (const field of fields) {
@@ -69,7 +71,7 @@ function expandedUsage(entries) {
             if (Number.isFinite(value) && value >= 0) totals[field] += value;
         }
     }
-    for (const row of collectAuxiliaryModelUsage(entries).rows) {
+    for (const row of auxiliary.rows) {
         for (const field of fields) totals[field] += row.usage[field] ?? 0;
     }
     return totals;

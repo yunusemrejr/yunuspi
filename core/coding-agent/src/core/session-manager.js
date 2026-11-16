@@ -122,6 +122,9 @@ function buildEntryIndex(entries, byId) {
     }
     return index;
 }
+export function isAccountingOnlySessionEntry(entry) {
+    return entry.type === "custom" && entry.customType === "auxiliary-model-usage-v1" && entry.accountingOnly === true;
+}
 function buildSessionPath(entries, leafId, byId) {
     const index = buildEntryIndex(entries, byId);
     let leaf;
@@ -131,7 +134,7 @@ function buildSessionPath(entries, leafId, byId) {
     if (leafId) {
         leaf = index.get(leafId);
     }
-    leaf ??= entries[entries.length - 1];
+    leaf ??= entries.findLast(entry => !isAccountingOnlySessionEntry(entry));
     return walkSessionPath(index, leaf);
 }
 function walkSessionPath(index, leaf) {
@@ -712,7 +715,7 @@ export class SessionManager {
             if (entry.type === "session")
                 continue;
             this.byId.set(entry.id, entry);
-            this.leafId = entry.id;
+            if (!isAccountingOnlySessionEntry(entry)) this.leafId = entry.id;
             if (entry.type === "label") {
                 if (entry.label) {
                     this.labelsById.set(entry.targetId, entry.label);
@@ -826,7 +829,7 @@ export class SessionManager {
         const previousLeaf = this.leafId;
         this.fileEntries.push(entry);
         this.byId.set(entry.id, entry);
-        this.leafId = entry.id;
+        if (!isAccountingOnlySessionEntry(entry)) this.leafId = entry.id;
         try { this._persist(entry, durable); }
         catch (error) {
             this.fileEntries.pop();
@@ -907,6 +910,16 @@ export class SessionManager {
         };
         this._appendEntry(entry);
         return entry.id;
+    }
+    /** Persist summary accounting without creating a navigable branch node. */
+    appendSummaryUsageReceipt(data) {
+        this.flush();
+        const entry = {
+            type: "custom", customType: "auxiliary-model-usage-v1", accountingOnly: true,
+            id: generateId(this.byId), parentId: this.leafId, timestamp: new Date().toISOString(), data,
+        };
+        this._appendEntry(entry, true);
+        return entry;
     }
     /** Append a session info entry (e.g., display name). Returns entry id. */
     appendSessionInfo(name) {
@@ -1065,7 +1078,7 @@ export class SessionManager {
      * Orphaned entries (broken parent chain) are also returned as roots.
      */
     getTree() {
-        const entries = this.getEntries();
+        const entries = this.getEntries().filter(entry => !isAccountingOnlySessionEntry(entry));
         const nodeMap = new Map();
         const roots = [];
         // Create nodes with resolved labels
@@ -1133,7 +1146,8 @@ export class SessionManager {
         if (branchFromId !== null && !this.byId.has(branchFromId)) {
             throw new Error(`Entry ${branchFromId} not found`);
         }
-        const fromId = this.leafId ?? "root";
+        const previousLeaf = this.leafId;
+        const fromId = previousLeaf ?? "root";
         this.leafId = branchFromId;
         const entry = {
             type: "branch_summary",
@@ -1146,8 +1160,20 @@ export class SessionManager {
             usage,
             fromHook,
         };
-        this._appendEntry(entry);
+        try { this._appendEntry(entry); }
+        catch (error) { this.leafId = previousLeaf; throw error; }
         return entry.id;
+    }
+    getBranchAccountingEntries(branch) {
+        const branchIds = new Set(branch.map(entry => entry.id));
+        const summaryIds = new Set();
+        for (const entry of branch) {
+            if ((entry.type === "compaction" || entry.type === "branch_summary") && !entry.fromHook && Array.isArray(entry.usage?.summaryReceiptIds)) {
+                for (const id of entry.usage.summaryReceiptIds) summaryIds.add(id);
+            }
+        }
+        return this.getEntries().filter(entry => isAccountingOnlySessionEntry(entry) &&
+            (branchIds.has(entry.parentId) || summaryIds.has(entry.data?.id)));
     }
     /**
      * Create a new session file containing only the path from root to the specified leaf.
@@ -1199,6 +1225,9 @@ export class SessionManager {
         };
         // Collect labels for entries in the path
         const pathEntryIds = new Set(pathWithoutLabels.map((e) => e.id));
+        const accountingEntries = this.getBranchAccountingEntries(path).map(entry => ({
+            ...entry, parentId: pathEntryIds.has(entry.parentId) ? entry.parentId : null,
+        }));
         const labelsToWrite = [];
         for (const [targetId, label] of this.labelsById) {
             if (pathEntryIds.has(targetId)) {
@@ -1223,7 +1252,7 @@ export class SessionManager {
                 labelEntries.push(labelEntry);
                 parentId = labelEntry.id;
             }
-            this._replaceEntries([header, ...pathWithoutLabels, ...labelEntries]);
+            this._replaceEntries([header, ...pathWithoutLabels, ...labelEntries, ...accountingEntries]);
             this.sessionId = newSessionId;
             this.sessionFile = newSessionFile;
             this._buildIndex();
@@ -1233,7 +1262,7 @@ export class SessionManager {
             // and avoiding the duplicate-header bug when _persist()'s
             // no-assistant guard later resets flushed to false.
             const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
-            if (hasAssistant) {
+            if (hasAssistant || accountingEntries.length > 0) {
                 this._rewriteFile();
                 this.flushed = true;
             }
@@ -1257,7 +1286,7 @@ export class SessionManager {
             labelEntries.push(labelEntry);
             parentId = labelEntry.id;
         }
-        this._replaceEntries([header, ...pathWithoutLabels, ...labelEntries]);
+        this._replaceEntries([header, ...pathWithoutLabels, ...labelEntries, ...accountingEntries]);
         this.sessionId = newSessionId;
         this._buildIndex();
         return undefined;

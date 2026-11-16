@@ -163,6 +163,7 @@ test('a saved paid response survives cancellation and resumes without a second r
   assert.deepEqual(usage.map(row => row.status), ['pending', 'completed']);
   assert.equal(usage[0].id, usage[1].id);
   assert.equal(usage[1].characterCost, 12);
+  assert.equal(usage[1].requestId, 'fixture-paid-once');
   assert.equal(usage[1].usage, undefined, 'character billing units cannot establish USD cost');
   assert.equal(result.receipts[0].recovered, true); assert.equal(result.receipts[0].reused, true);
   assert.equal(result.words.map(word => word.w).join(' '), 'Hello world.');
@@ -296,4 +297,34 @@ test('an uncertain generated-audio submission retains its request without claimi
   const receipt = JSON.parse(await fs.readFile(submission, 'utf8'));
   assert.equal(receipt.status, 'unknown'); assert.equal(receipt.decodeVerified, false);
   assert.equal(syncFs.existsSync(path.join(path.dirname(submission), 'generated.mp3')), false);
+});
+
+test('audio billing receipts use reported units and keep transport uncertainty', async t => {
+  const dir = await workspace(t), original = globalThis.fetch;
+  t.after(() => { globalThis.fetch = original; });
+  const invoiceRate = { ...env, ELEVENLABS_USD_PER_1000_BILLING_UNITS: '0.12' };
+  async function capture(fetch, configuration = invoiceRate) {
+    globalThis.fetch = fetch;
+    const rows = [];
+    await assert.rejects(eleven.audioGenerate({ kind: 'sfx', prompt: 'Synthetic fixture' }, dir, undefined, configuration, row => rows.push(row)));
+    assert.deepEqual(rows.map(row => row.status), ['pending', 'failed']);
+    assert.equal(rows[0].id, rows[1].id);
+    return rows[1];
+  }
+  const rejected = (headers) => async () => new Response('{}', { status: 503, headers });
+  const quoted = await capture(rejected({ 'character-cost': '120', 'request-id': 'fixture-metered' }));
+  assert.equal(quoted.requestId, 'fixture-metered');
+  assert.equal(quoted.characterCost, 120);
+  assert.equal(quoted.usdPer1000BillingUnits, .12);
+  assert.deepEqual(quoted.usage.cost, { total: .0144, source: 'estimate', complete: true });
+  const zero = await capture(rejected({ 'character-cost': '0' }), env);
+  assert.deepEqual(zero.usage.cost, { total: 0, source: 'provider-reported', complete: true });
+  assert.equal((await capture(rejected({ 'character-cost': '12 GB' }))).usage, undefined);
+  assert.equal((await capture(rejected({ 'character-cost': '12' }), { ...env, ELEVENLABS_USD_PER_1000_BILLING_UNITS: 'invalid' })).usage, undefined);
+
+  const connectionFailure = async () => { throw new TypeError('Fixture network failure', { cause: new AggregateError([
+    Object.assign(new Error('first address refused'), { code: 'ECONNREFUSED' }),
+    Object.assign(new Error('second address reset'), { code: 'ECONNRESET' }),
+  ]) }); };
+  assert.equal((await capture(connectionFailure)).usage, undefined);
 });

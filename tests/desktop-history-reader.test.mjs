@@ -84,6 +84,20 @@ test('passive open includes whole-session charges, including discarded branches 
   assert.equal((await readHistory({ ...f, before: latest.before })).stats, undefined);
 });
 
+test('passive open preserves the forked branch and counts its linked summary once', async t => {
+  const usage = { input: 10, output: 2, cacheRead: 0, cacheWrite: 0, cost: { total: .08, source: 'provider-reported' } };
+  const f = fixture(t, { entries: [
+    entry('root', null, 'keep this message'),
+    { type: 'branch_summary', id: 'summary', parentId: 'root', summary: 'Earlier findings', usage: { ...usage, summaryReceiptIds: ['attempt'] } },
+    { type: 'custom', id: 'summary-receipt', parentId: null, accountingOnly: true, customType: 'auxiliary-model-usage-v1',
+      data: { id: 'attempt', owner: 'branch-summary', provider: 'openrouter', model: 'fixture', status: 'completed', usage } },
+  ] });
+  const result = await readHistory(f);
+  assert.equal(result.messages[0].content, 'keep this message');
+  assert.equal(result.stats.costLabel, '$0.080000');
+  assert.equal(result.stats.tokens.total, 12);
+});
+
 test('legacy migration occurs in memory and leaves the legacy transcript bytes intact', async t => {
   const f = fixture(t, { version: 1, newline: false, entries: [
     { type: 'message', timestamp: new Date().toISOString(), message: { role: 'user', content: 'Legacy request.' } },

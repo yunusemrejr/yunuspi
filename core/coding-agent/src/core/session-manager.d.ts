@@ -70,7 +70,10 @@ export interface CustomEntry<T = unknown> extends SessionEntryBase {
     type: "custom";
     customType: string;
     data?: T;
+    /** Durable native summary usage that does not advance the session branch. */
+    accountingOnly?: true;
 }
+export declare function isAccountingOnlySessionEntry(entry: SessionEntry): boolean;
 /** Label entry for user-defined bookmarks/markers on entries. */
 export interface LabelEntry extends SessionEntryBase {
     type: "label";
@@ -141,7 +144,7 @@ export interface SessionInfo {
     firstMessage: string;
     allMessagesText: string;
 }
-export type ReadonlySessionManager = Pick<SessionManager, "getCwd" | "getSessionDir" | "getSessionId" | "getSessionFile" | "getLeafId" | "getLeafEntry" | "getEntry" | "getLabel" | "getBranch" | "buildContextEntries" | "getHeader" | "getEntries" | "getTree" | "getSessionName">;
+export type ReadonlySessionManager = Pick<SessionManager, "getCwd" | "getSessionDir" | "getSessionId" | "getSessionFile" | "getLeafId" | "getLeafEntry" | "getEntry" | "getLabel" | "getBranch" | "buildContextEntries" | "getHeader" | "getEntries" | "getTree" | "getSessionName"> & Partial<Pick<SessionManager, "getBranchAccountingEntries">>;
 export declare function assertValidSessionId(id: string): void;
 /** Exported for testing */
 export declare function migrateSessionEntries(entries: FileEntry[]): void;
@@ -234,6 +237,7 @@ export declare class SessionManager {
     appendCompaction<T = unknown>(summary: string, firstKeptEntryId: string, tokensBefore: number, details?: T, fromHook?: boolean, usage?: Usage): string;
     /** Append a custom entry (for extensions) as child of current leaf, then advance leaf. Returns entry id. */
     appendCustomEntry(customType: string, data?: unknown): string;
+    appendSummaryUsageReceipt(data: unknown): CustomEntry;
     /** Append a session info entry (e.g., display name). Returns entry id. */
     appendSessionInfo(name: string): string;
     /** Get the current session name from the latest session_info entry, if any. */
@@ -318,6 +322,7 @@ export declare class SessionManager {
      * context from the abandoned conversation path.
      */
     branchWithSummary(branchFromId: string | null, summary: string, details?: unknown, fromHook?: boolean, usage?: Usage): string;
+    getBranchAccountingEntries(branch: readonly SessionEntry[]): CustomEntry[];
     /**
      * Create a new session file containing only the path from root to the specified leaf.
      * Useful for extracting a single conversation path from a branched session.

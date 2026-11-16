@@ -250,7 +250,7 @@ export class Agent {
         await this.runPromptMessages(messages);
     }
     /** Continue from the current transcript. The last message must be a user or tool-result message. */
-    async continue() {
+    async continue(providerRequest) {
         if (this.activeRun) {
             throw new Error("Agent is already processing. Wait for completion before continuing.");
         }
@@ -261,17 +261,17 @@ export class Agent {
         if (lastMessage.role === "assistant") {
             const queuedSteering = this.steeringQueue.drain();
             if (queuedSteering.length > 0) {
-                await this.runPromptMessages(queuedSteering, { skipInitialSteeringPoll: true });
+                await this.runPromptMessages(queuedSteering, { skipInitialSteeringPoll: true, providerRequest });
                 return;
             }
             const queuedFollowUps = this.followUpQueue.drain();
             if (queuedFollowUps.length > 0) {
-                await this.runPromptMessages(queuedFollowUps);
+                await this.runPromptMessages(queuedFollowUps, { providerRequest });
                 return;
             }
             throw new Error("Cannot continue from message role: assistant");
         }
-        await this.runContinuation();
+        await this.runContinuation(providerRequest);
     }
     normalizePromptInput(input, images) {
         if (Array.isArray(input)) {
@@ -291,9 +291,9 @@ export class Agent {
             await runAgentLoop(messages, this.createContextSnapshot(), this.createLoopConfig(options), (event) => this.processEvents(event), signal, this.streamFunction);
         });
     }
-    async runContinuation() {
+    async runContinuation(providerRequest) {
         await this.runWithLifecycle(async (signal) => {
-            await runAgentLoopContinue(this.createContextSnapshot(), this.createLoopConfig(), (event) => this.processEvents(event), signal, this.streamFunction);
+            await runAgentLoopContinue(this.createContextSnapshot(), this.createLoopConfig({ providerRequest }), (event) => this.processEvents(event), signal, this.streamFunction);
         });
     }
     createContextSnapshot() {
@@ -312,9 +312,11 @@ export class Agent {
             return selected.messages;
         };
         const shouldStopAfterTurn = this.shouldStopAfterTurn;
+        const { providerRequest } = options;
+        const reasoning = this._state.thinkingLevel === "off" ? undefined : this._state.thinkingLevel;
         return {
-            model: this._state.model,
-            reasoning: this._state.thinkingLevel === "off" ? undefined : this._state.thinkingLevel,
+            model: providerRequest?.model ?? this._state.model,
+            reasoning: providerRequest ? providerRequest.reasoning : reasoning,
             sessionId: this.sessionId,
             onPayload: this.onPayload,
             onResponse: this.onResponse,

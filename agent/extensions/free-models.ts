@@ -28,6 +28,7 @@ import { loadTeamConfig } from "./lib/team.ts";
 
 interface RecoveryEvent {
 	message: { provider?: string; model?: string; errorMessage?: string };
+	requestedModel?: { provider: string; id: string };
 	decision?: "retry";
 }
 
@@ -56,7 +57,9 @@ function teamFreeOn(cwd: string): boolean {
 export default function freeModels(pi: ExtensionAPI) {
 	if (process.env.PI_SUBAGENT_CHILD === "1") {
 		(pi as unknown as RecoveryHost).on("pi_provider_recovery", async (event, ctx) => {
-			const { provider, model, errorMessage } = event.message;
+			const provider = event.requestedModel?.provider ?? event.message.provider;
+			const model = event.requestedModel?.id ?? event.message.model;
+			const { errorMessage } = event.message;
 			const failed = provider && model ? (model.startsWith(`${provider}/`) ? model : `${provider}/${model}`) : undefined;
 			const routes = recoveryRoutes();
 			const at = failed ? routes.indexOf(failed) : -1;

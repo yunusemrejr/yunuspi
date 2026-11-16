@@ -6,6 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { AssistantMessageEventStream } from '@yunuspi/ai';
+import { stream as streamAnthropic, streamSimple as streamSimpleAnthropic } from '../core/ai/src/api/anthropic-messages.js';
 import { stream as streamOpenAICompletions, streamSimple as streamSimpleOpenAICompletions } from '../core/ai/src/api/openai-completions.js';
 import { ModelRuntime } from '../core/coding-agent/src/core/model-runtime.js';
 import { DefaultResourceLoader } from '../core/coding-agent/src/core/resource-loader.js';
@@ -339,4 +340,105 @@ test('real SDK retries reenter session admission and persist each response', { t
     assert.deepEqual(delays, [12]);
     assert.equal(messages().at(-1).stopReason, 'error');
   }
+});
+
+test('a model switch during an Anthropic stream keeps its cooldown and retry on the admitted alias', { timeout: 10_000 }, async t => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'provider-switched-alias-'));
+  process.env.PI_PROVIDER_STATE_FILE = path.join(cwd, 'health.json');
+  process.env.PI_PROVIDER_GATE_MAX_WAIT_MS = '2000';
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const requested = { ...model('anthropic', 'claude-sonnet-4-6'), api: 'anthropic-messages', name: 'Fixture alias',
+    input: ['text'], reasoning: true, contextWindow: 65_536, maxTokens: 4096,
+    headers: { 'x-fixture-request-route': 'synthetic-route-one' } };
+  const next = { ...requested, id: 'claude-haiku-4-5', name: 'Next selection',
+    headers: { 'x-fixture-request-route': 'synthetic-route-two' } };
+  const served = 'claude-sonnet-4-6-20261001';
+  const wire = [];
+  const wireRoutes = [];
+  let release;
+  let markStarted;
+  const started = new Promise(resolve => { markStarted = resolve; });
+  const continued = new Promise(resolve => { release = resolve; });
+  const encode = new TextEncoder();
+  const observedAtRetry = [];
+  const fetch = async (_url, init) => {
+    const request = JSON.parse(init.body);
+    wire.push(request);
+    wireRoutes.push(new Headers(init.headers).get('x-fixture-request-route'));
+    if (wire.length === 2) observedAtRetry.push(health.readHealth().providers.anthropic.models[requested.id]?.failure);
+    const first = wire.length === 1;
+    const body = new ReadableStream({ async start(controller) {
+      const send = event => controller.enqueue(encode.encode(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`));
+      send({ type: 'message_start', message: { role: 'assistant', id: 'synthetic-message',
+        model: request.model === requested.id ? served : request.model, usage: { input_tokens: 10, output_tokens: 0 } } });
+      if (first) {
+        send({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'Partial answer' } });
+        await continued;
+        send({ type: 'error', error: { type: 'api_error', message: '502 Bad Gateway; Retry-After: 0;' } });
+      } else {
+        send({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: 'Synthetic answer' } });
+        send({ type: 'content_block_stop', index: 0 });
+        send({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 2 } });
+        send({ type: 'message_stop' });
+      }
+      controller.close();
+    } });
+    return new Response(body, { headers: { 'content-type': 'text/event-stream' } });
+  };
+  const runtime = await ModelRuntime.create({ authPath: path.join(cwd, 'auth.json'), modelsPath: null, refreshOnCreate: false });
+  runtime.registerNativeProvider({ id: requested.provider, name: 'Fixture', getModels: () => [requested, next],
+    auth: { apiKey: { name: 'Fixture', resolve: async () => ({ source: 'fixture', auth: { apiKey: 'synthetic-fixture' } }) } },
+    stream: (actual, context, options) => streamAnthropic(actual, context, { ...options, fetch }),
+    streamSimple: (actual, context, options) => streamSimpleAnthropic(actual, context, { ...options, fetch }),
+  });
+  await runtime.refresh({ allowNetwork: false });
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false },
+    retry: { enabled: true, maxRetries: 1, baseDelayMs: 1 } });
+  const hookRoutes = [];
+  const healthAtMessageEnd = [];
+  const loader = new DefaultResourceLoader({ cwd, agentDir: cwd, settingsManager, noExtensions: true, noSkills: true,
+    noContextFiles: true, extensionFactories: [pi => {
+      pi.on('before_provider_request', (event, ctx) => { hookRoutes.push([event.model.id, ctx.model.id]); });
+      pi.on('message_end', ({ message }) => {
+        if (message.role === 'assistant' && message.stopReason === 'error') {
+          healthAtMessageEnd.push(health.readHealth().providers.anthropic.models[requested.id]?.failure?.source);
+        }
+      });
+      registerGate(pi);
+    }] });
+  await loader.reload();
+  const sessionManager = SessionManager.inMemory(cwd);
+  const { session } = await createAgentSession({ cwd, agentDir: cwd, resourceLoader: loader, settingsManager,
+    modelRuntime: runtime, model: requested, sessionManager, noTools: 'all' });
+  t.after(() => session.dispose());
+  session.setThinkingLevel('high');
+  const serialized = [];
+  const unsubscribe = session.subscribe(event => {
+    if (event.type === 'message_update' && event.message.model === served) markStarted();
+    if (event.type === 'message_end' && event.message.role === 'assistant') serialized.push(JSON.stringify(event));
+  });
+  t.after(unsubscribe);
+  const prompt = session.prompt('Run a split synthetic request.');
+  try {
+    await started;
+    await session.setModel(next);
+    session.setThinkingLevel('off');
+  } finally {
+    release();
+  }
+  await prompt;
+  await session.prompt('Use the new selection on this prompt.');
+  assert.deepEqual(wire.map(request => request.model), [requested.id, requested.id, next.id]);
+  assert.deepEqual(wireRoutes, ['synthetic-route-one', 'synthetic-route-one', 'synthetic-route-two']);
+  assert.deepEqual(hookRoutes, [[requested.id, requested.id], [requested.id, requested.id], [next.id, next.id]]);
+  assert.deepEqual(healthAtMessageEnd, ['message_end']);
+  assert.notEqual(wire[0].thinking?.type, 'disabled');
+  assert.deepEqual(wire[0].thinking, wire[1].thinking);
+  assert.equal(wire[2].thinking?.type, 'disabled');
+  assert.equal(observedAtRetry[0]?.source, 'message_end');
+  assert.equal(health.readHealth().providers.anthropic.models[served], undefined);
+  assert.equal(serialized.length, 3);
+  assert.ok(serialized.every(event => !event.includes('providerRequest') && !event.includes('x-fixture-request-route')));
+  assert.deepEqual(sessionManager.getEntries().filter(row => row.type === 'message' && row.message.role === 'assistant')
+    .map(({ message }) => [message.model, message.stopReason]), [[served, 'error'], [served, 'stop'], [next.id, 'stop']]);
 });

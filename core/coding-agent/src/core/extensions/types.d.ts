@@ -7,7 +7,7 @@
  * - Register commands, keyboard shortcuts, and CLI flags
  * - Interact with the user via UI primitives
  */
-import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback, ThinkingLevel, ToolExecutionMode } from "@yunuspi/agent-core";
+import type { AgentMessage, AgentToolResult, AgentToolUpdateCallback, ProviderRequestOutcomeObserver, ThinkingLevel, ToolExecutionMode } from "@yunuspi/agent-core";
 import type { Api, AssistantMessage, AssistantMessageEvent, AssistantMessageEventStream, ConstrainedSamplingConfig, Context, ImageContent, Model, OAuthCredentials, OAuthLoginCallbacks, Provider, ProviderHeaders, RefreshModelsContext, SimpleStreamOptions, TextContent, ToolResultMessage, Usage } from "@yunuspi/ai";
 import type { AutocompleteItem, AutocompleteProvider, Component, EditorComponent, EditorTheme, KeyId, OverlayHandle, OverlayOptions, TUI } from "@yunuspi/tui";
 import type { Static, TSchema } from "typebox";
@@ -533,9 +533,11 @@ export interface BeforeProviderRequestEvent {
     type: "before_provider_request";
     payload: unknown;
     /** The selected transport route. Available when the provider passes its model to the payload hook. */
-    model?: Pick<Model<Api>, "provider" | "id" | "baseUrl">;
+    model?: Readonly<Pick<Model<Api>, "provider" | "id" | "baseUrl"> & Partial<Pick<Model<Api>, "api" | "cost" | "compat">>>;
     /** The request lifetime, including caller cancellation and stream deadlines. */
     signal?: AbortSignal;
+    /** Register an observer for the terminal result of this request, before message transformations. */
+    onOutcome?: (observer: ProviderRequestOutcomeObserver) => void;
 }
 export type AuxiliaryProviderRequestPurpose = "extension" | "compaction" | "branch-summary";
 /** Observe a session-owned auxiliary request after payload transforms and before dispatch. */
@@ -639,6 +641,8 @@ export interface MessageUpdateEvent {
 export interface MessageEndEvent {
     type: "message_end";
     message: AgentMessage;
+    /** Requested model for a stream-owned assistant result. The message may name the actual serving model. */
+    requestedModel?: Readonly<Pick<Model<Api>, "provider" | "id" | "baseUrl">>;
 }
 /** Fired when a tool starts executing */
 export interface ToolExecutionStartEvent {

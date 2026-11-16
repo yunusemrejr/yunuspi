@@ -1,4 +1,5 @@
 import { calculateCost } from "../models.js";
+import { applyDeepSeekPricing, providerCreatedMs } from "../utils/deepseek-pricing.js";
 import { shortHash } from "../utils/hash.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
@@ -439,6 +440,7 @@ export async function processResponsesStream(openaiStream, output, stream, model
             });
         }
     };
+    let createdAt;
     const finalizeResponse = (response) => {
         sawTerminalResponseEvent = true;
         backfillReasoningSignatures(response.output ?? []);
@@ -461,8 +463,8 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
                 cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
             };
         }
-        calculateCost(model, output.usage);
-        if (options?.applyServiceTierPricing) {
+        if (response?.usage) calculateCost(model, output.usage);
+        if (response?.usage && options?.applyServiceTierPricing) {
             const serviceTier = options.resolveServiceTier
                 ? options.resolveServiceTier(response?.service_tier, options.serviceTier)
                 : (response?.service_tier ?? options.serviceTier);
@@ -473,6 +475,8 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
   let host = '';
   try { const url = new URL(model.baseUrl); if (url.protocol === 'https:') host = url.hostname; } catch {}
   const raw = response?.usage, cost = output.usage.cost;
+  if (raw) applyDeepSeekPricing(model, output.usage, raw, createdAt ?? providerCreatedMs(response.created_at) ?? options?.dispatchedAt ?? output.timestamp,
+      ![raw.input_tokens, raw.output_tokens].every(value => Number.isSafeInteger(value) && value >= 0) || !output.usage.cacheReadReported);
   if (model.provider === 'openrouter' && host === 'openrouter.ai' && Number.isFinite(raw?.cost) && raw.cost >= 0) {
     cost.estimatedTotal = cost.total; cost.total = raw.cost; cost.source = 'provider-reported'; cost.complete = true;
     if (Number.isFinite(raw.cost_details?.upstream_inference_cost)) cost.upstreamInferenceCost = raw.cost_details.upstream_inference_cost;
@@ -503,6 +507,7 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
     for await (const event of openaiStream) {
         if (event.type === "response.created") {
             output.responseId = event.response.id;
+            createdAt ??= providerCreatedMs(event.response.created_at);
         }
         else if (event.type === "response.output_item.added") {
             createSlot(event.output_index, event.item);
@@ -667,6 +672,7 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
             throw new Error(`Error Code ${event.code}: ${event.message}` || "Unknown error");
         }
         else if (event.type === "response.failed") {
+            if (event.response?.usage) finalizeResponse(event.response);
             sawTerminalResponseEvent = true;
             output.rawStopReason = event.response?.status;
             const error = event.response?.error;

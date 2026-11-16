@@ -155,6 +155,23 @@ test('compactions and non-delegation tools count once; delegated tool totals are
  close(collect([...entries,entries[0]]).auxiliary.reported,.3);
 });
 
+test('native linked summary receipts replace the legacy aggregate across child replay and incomplete copies',()=>{
+ const first={...auxiliary('summary-1','completed',usage(.2),{owner:'compaction'}),accountingOnly:true};
+ const second={...auxiliary('summary-2','completed',usage(.1),{owner:'compaction'}),accountingOnly:true};
+ const checkpoint={type:'compaction',usage:{...usage(.3),summaryReceiptIds:['summary-1','summary-2']}};
+ for(const entries of [[first,second,checkpoint],[first,checkpoint],[checkpoint]]) {
+   close(collect(entries).auxiliary.reported,.3);
+   const target=empty();
+   for(const entry of entries) addAuxiliaryUsage(target, entry.type==='compaction'
+     ? {type:'compaction_end',result:checkpoint} : {type:'entry_appended',entry});
+   addAuxiliaryUsage(target,{type:'compaction_end',result:checkpoint});
+   const result=snapshotChildUsage(target);
+   close(result.cost,.3);
+   assert.equal(result.costDetails.unknown,false);
+   assert.equal(result.input, entries.length===3 ? 200 : 100);
+ }
+});
+
 test('child hosted receipts reconcile in live snapshots and roll up once in the nested parent ledger',()=>{
  const target=empty();
  addUsageCost(target,usage(.1));

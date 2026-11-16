@@ -10,6 +10,7 @@ import { DefaultResourceLoader } from "../core/coding-agent/src/core/resource-lo
 import { createAgentSession } from "../core/coding-agent/src/core/sdk.js";
 import { SessionManager } from "../core/coding-agent/src/core/session-manager.js";
 import { collectSessionCost } from "../core/coding-agent/src/core/session-accounting.js";
+import { exportSessionToJsonl } from "../core/coding-agent/src/core/session-export.js";
 import { SettingsManager } from "../core/coding-agent/src/core/settings-manager.js";
 import registerGate from "../agent/extensions/provider-gate.ts";
 import * as health from "../agent/extensions/pi-subagents/src/runs/shared/provider-health.ts";
@@ -25,7 +26,7 @@ const emptyUsage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalToke
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 const context = text => ({ messages: [{ role: "user", content: [{ type: "text", text }], timestamp: Date.now() }] });
 
-async function fixture(t, dispatch = async () => undefined, sharedRuntime) {
+async function fixture(t, dispatch = async () => undefined, sharedRuntime, persist = false) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-aux-gate-"));
   if (!sharedRuntime) process.env.PI_PROVIDER_STATE_FILE = path.join(cwd, "health.json");
   delete process.env.PI_PROVIDER_GATE;
@@ -83,7 +84,7 @@ async function fixture(t, dispatch = async () => undefined, sharedRuntime) {
   await loader.reload();
   const { session } = await createAgentSession({
     cwd, agentDir: cwd, resourceLoader: loader, settingsManager, modelRuntime: runtime, model,
-    sessionManager: SessionManager.inMemory(cwd), noTools: "all",
+    sessionManager: persist ? SessionManager.create(cwd, cwd) : SessionManager.inMemory(cwd), noTools: "all",
   });
   t.after(() => { session.dispose(); fs.rmSync(cwd, { recursive: true, force: true }); });
   return { session, runtime, registry: session.extensionRunner.createContext().modelRegistry, attempts, outcomes,
@@ -283,7 +284,8 @@ test("manual compaction and branch summarization use auxiliary admission without
   assert.equal(costs().auxiliary.reported, failedCharge);
   assert.ok(Math.abs(costs().auxiliary.estimated - usage.cost.total * 2) < 1e-12, "the split successes are counted once");
   assert.equal(costs().unknown, false);
-  assert.equal(entries().filter(entry => entry.customType === "auxiliary-model-usage-v1").length, 1);
+  assert.deepEqual(entries().filter(entry => entry.accountingOnly).map(entry => entry.data.status),
+    ["pending", "failed", "pending", "completed", "pending", "completed"]);
   const oldLeafId = f.session.sessionManager.getLeafId();
   const result = await f.session.navigateTree(firstUser, { summarize: true });
   assert.equal(result.cancelled, false);
@@ -314,9 +316,60 @@ test("failed split compaction preserves usage from both calls and keeps the prev
   const entries = f.session.sessionManager.getEntries();
   assert.equal(entries.some(entry => entry.type === "compaction"), false);
   assert.deepEqual(f.session.sessionManager.buildSessionContext().messages, contextBefore);
-  assert.deepEqual(events.map(event => event.type), ["entry_appended", "entry_appended", "compaction_end"]);
-  assert.deepEqual(events.slice(0, 2).map(event => event.entry.data.status), ["completed", "failed"]);
+  assert.equal(events.at(-1).type, "compaction_end");
+  assert.deepEqual(events.slice(0, -1).map(event => [event.type, event.entry.data.status]),
+    ["pending", "completed", "pending", "failed"].map(status => ["entry_appended", status]));
   const cost = collectSessionCost(entries);
   assert.ok(Math.abs(cost.auxiliary.estimated - usage.cost.total * 2) < 1e-12);
   assert.equal(cost.unknown, false);
+});
+
+test("split usage survives reopening while the second request is outstanding", { timeout: 10_000 }, async t => {
+  let armed = false, requests = 0;
+  const second = Promise.withResolvers(), release = Promise.withResolvers();
+  const f = await fixture(t, async () => {
+    if (!armed) return;
+    if (++requests === 2) { second.resolve(); await release.promise; }
+    return { usage: { ...usage, cost: { ...usage.cost, total: requests * .02, source: "provider-reported" } } };
+  }, undefined, true);
+  await f.session.prompt("Keep the first constraint.");
+  await f.session.prompt("The second constraint changed.");
+  const manager = f.session.sessionManager;
+  const before = manager.getLeafId();
+  const reopen = () => SessionManager.open(manager.getSessionFile(), manager.getSessionDir());
+  armed = true;
+  const compaction = f.session.compact();
+  try {
+    await second.promise;
+    const snapshot = reopen();
+    assert.equal(snapshot.getLeafId(), before);
+    assert.equal(snapshot.getEntries().some(entry => entry.type === "compaction"), false);
+    const cost = collectSessionCost(snapshot.getEntries());
+    assert.equal(cost.auxiliary.reported, .02);
+    assert.equal(cost.pending, 1);
+    assert.equal(cost.unknown, true);
+  } finally {
+    release.resolve();
+    await compaction;
+  }
+  const after = reopen();
+  const cost = collectSessionCost(after.getEntries());
+  assert.equal(cost.auxiliary.reported, .06);
+  assert.equal(cost.pending, 0);
+  assert.equal(cost.unknown, false);
+
+  const firstUser = manager.getBranch().find(entry => entry.message?.role === "user").id;
+  const from = manager.getLeafId();
+  const { summaryEntry } = await f.session.navigateTree(firstUser, { summarize: true });
+  assert.equal(summaryEntry.fromId, from);
+  const forkFile = after.getSessionFile();
+  const forkSource = SessionManager.open(forkFile, manager.getSessionDir());
+  const fork = SessionManager.open(forkSource.createBranchedSession(summaryEntry.id), manager.getSessionDir());
+  assert.equal(fork.getLeafId(), summaryEntry.id);
+  assert.equal(collectSessionCost(fork.getEntries()).auxiliary.reported, .06);
+  const exported = exportSessionToJsonl(fork, path.join(manager.getSessionDir(), "redacted-copy.jsonl"));
+  const text = fs.readFileSync(exported, "utf8");
+  assert.ok(!text.includes("Synthetic provider result"), "summary text remains private in the branch export");
+  const exportedCost = collectSessionCost(text.trim().split("\n").map(line => JSON.parse(line)));
+  assert.equal(exportedCost.auxiliary.reported, .06);
 });

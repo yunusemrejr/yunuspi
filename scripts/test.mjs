@@ -3,11 +3,12 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createDistributionTempRoot } from '../agent/scripts/publish-public.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
+const runDeadlineMs = 15 * 60_000;
 export const QUICK_TESTS = [
   'command-dispatch', 'core-robustness', 'preflight-stop-cancellation', 'provider-gate', 'provider-health-admission', 'provider-health-stall',
   'quality-review', 'project-vector-memory', 'memory-embedding-coverage', 'jev-client',
@@ -46,19 +47,48 @@ export function testConcurrency(value, cores = os.availableParallelism(), ci = B
   return Number(value);
 }
 
-/** Files that dominate a run (measured standalone, 2026-10-19) start first so the pool never ends waiting on one
- *  of them; everything else follows largest first, the same size proxy the shards use. */
-export const SLOW_FIRST = [
-  'shared-skill-boundary', 'self-mutation', 'subagent-executor-routing', 'creative-delivery',
-  'isolated-child-catalog', 'video-production', 'needle-runtime',
-].map(name => `tests/${name}.test.mjs`);
-export function orderForRun(selected, sizeOf = file => fs.statSync(path.join(root, file)).size) {
-  const rank = new Map(SLOW_FIRST.map((file, index) => [file, index]));
-  return [...selected].sort((a, b) => (rank.get(a) ?? SLOW_FIRST.length) - (rank.get(b) ?? SLOW_FIRST.length)
-    || sizeOf(b) - sizeOf(a) || a.localeCompare(b));
+function runNativeTests(args, env) {
+  return new Promise((resolve, reject) => {
+    const group = process.platform !== 'win32';
+    const child = spawn(process.execPath, args, { cwd: root, stdio: 'inherit', env, detached: group });
+    let interrupted, timedOut = false, spawnError, escalation;
+    const signalRun = signal => {
+      if (!child.pid) return;
+      try {
+        if (group) process.kill(-child.pid, signal);
+        else child.kill(signal);
+      } catch (error) {
+        if (error.code !== 'ESRCH') throw error;
+      }
+    };
+    const interrupt = signal => {
+      if (interrupted) { signalRun('SIGKILL'); return; }
+      interrupted = signal;
+      signalRun(signal);
+      escalation = setTimeout(() => signalRun('SIGKILL'), 1000);
+    };
+    const signals = ['SIGINT', 'SIGTERM', 'SIGHUP'];
+    for (const signal of signals) process.on(signal, interrupt);
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      signalRun('SIGKILL');
+    }, runDeadlineMs);
+    child.once('error', error => { spawnError = error; });
+    child.once('close', (status, signal) => {
+      clearTimeout(deadline);
+      clearTimeout(escalation);
+      // The native runner can exit while a test's subprocess still runs.
+      if (group) signalRun('SIGKILL');
+      for (const name of signals) process.removeListener(name, interrupt);
+      const exitSignal = interrupted ?? signal;
+      if (spawnError) reject(spawnError);
+      else if (timedOut) reject(new Error(`Test run timed out after ${runDeadlineMs}ms.`));
+      else resolve(exitSignal ? 128 + os.constants.signals[exitSignal] : status ?? 1);
+    });
+  });
 }
 
-function main(args) {
+async function main(args) {
   let quick = false, list = false, base, shard;
   const explicit = [], native = [];
   for (let i = 0; i < args.length; i++) {
@@ -100,20 +130,18 @@ function main(args) {
     // Real LibreOffice conversions take 10-20 s each and CI never installs it, so they are opt-in here
     // (PI_TEST_OFFICE=1). The compile cache lets the several hundred test processes share compiled modules.
     const compileCache = process.env.NODE_COMPILE_CACHE ?? (fs.existsSync(path.join(root, 'node_modules')) ? path.join(root, 'node_modules', '.cache', 'yunuspi-tests') : undefined);
-    const run = spawnSync(process.execPath, ['--test', '--test-timeout=120000', `--test-concurrency=${concurrency}`, ...reporters, ...native, ...orderForRun(plan.selected)], {
-      cwd: root, stdio: 'inherit', timeout: 15 * 60_000,
-      env: {
+    process.exitCode = await runNativeTests(
+      ['--test', '--test-timeout=120000', `--test-concurrency=${concurrency}`, ...reporters, ...native, ...plan.selected],
+      {
         ...process.env, NODE_TEST_CONTEXT: undefined, PI_NEEDLE_DISK_CACHE: 'off', TMPDIR: tempRoot, TMP: tempRoot, TEMP: tempRoot,
         ...(process.env.PI_TEST_OFFICE === '1' ? {} : { YUNUSPI_SKIP_OFFICE_RENDER: process.env.YUNUSPI_SKIP_OFFICE_RENDER ?? '1' }),
         ...(compileCache ? { NODE_COMPILE_CACHE: compileCache } : {}),
       },
-    });
-    if (run.error) throw run.error;
-    process.exitCode = run.status ?? 1;
+    );
   } finally { fs.rmSync(tempRoot, { recursive: true, force: true }); }
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
-  try { main(process.argv.slice(2)); }
+  try { await main(process.argv.slice(2)); }
   catch (error) { console.error(error.message); process.exitCode = 1; }
 }

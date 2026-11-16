@@ -65,8 +65,10 @@ export function collectAuxiliaryModelUsage(entries) {
   const identity = (value, limit) => typeof value === 'string' && value.length > 0 && value.length <= limit && /^[a-zA-Z0-9_.:-]+$/.test(value);
   const routePart = (value, limit) => typeof value === 'string' && value.length > 0 && value.length <= limit && !/[\s\x00-\x1f\x7f]/.test(value);
   const valid = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+  const summaries = [];
   let truncated = false;
   for (const entry of Array.isArray(entries) ? entries : []) {
+    if ((entry?.type === 'compaction' || entry?.type === 'branch_summary') && !entry.fromHook && Array.isArray(entry.usage?.summaryReceiptIds)) summaries.push(entry);
     if (entry?.type !== 'custom' || entry.customType !== 'auxiliary-model-usage-v1') continue;
     const data = entry.data;
     if (!data || !identity(data.id,160) || !identity(data.owner,64) || !routePart(data.provider,128) || !routePart(data.model,256) || !statuses.has(data.status)) { truncated = true; continue; }
@@ -81,7 +83,8 @@ export function collectAuxiliaryModelUsage(entries) {
     usage.costDetails = evidence;
     const usageRecorded = hasRecordedTokenUsage(usage);
     const tokens = fields.filter(k => k !== 'reasoning').reduce((sum,k) => sum + (usage[k] ?? 0),0);
-    const next = {id:data.id, owner:data.owner, route, status:data.status, usage, usageRecorded, tokens, evidence};
+    const next = {id:data.id, owner:data.owner, route, status:data.status, usage, usageRecorded, tokens, evidence,
+      accountingOnly:entry.accountingOnly === true || old?.accountingOnly === true, hasUsage:!!data.usage || old?.hasUsage === true};
     if (old) {
       // Provider billing may correct an earlier estimate down to zero. Missing
       // or replayed estimate receipts cannot erase already measured usage.
@@ -94,10 +97,29 @@ export function collectAuxiliaryModelUsage(entries) {
     }
     rows.set(key,next);
   }
-  return {rows:[...rows.values()], truncated};
+  const coveredSummaries = new Set(), coveredReceipts = new Set(), legacyReceipts = new Set();
+  for (const entry of summaries) {
+    const ids = entry.usage.summaryReceiptIds;
+    if (ids.length === 0 || ids.length > 2 || new Set(ids).size !== ids.length || ids.some(id => !identity(id, 160))) continue;
+    const owner = entry.type === 'compaction' ? 'compaction' : 'branch-summary';
+    const keys = ids.map(id => JSON.stringify([owner,id]));
+    if (keys.every(key => {
+      const row = rows.get(key);
+      return row?.accountingOnly && row.hasUsage && row.status !== 'pending';
+    })) {
+      coveredSummaries.add(entry);
+      for (const key of keys) coveredReceipts.add(key);
+    } else {
+      // A legacy aggregate still covers the whole summary if its linked
+      // receipts are missing from an imported or interrupted transcript.
+      for (const key of keys) if (rows.get(key)?.accountingOnly) legacyReceipts.add(key);
+    }
+  }
+  for (const key of legacyReceipts) if (!coveredReceipts.has(key)) rows.delete(key);
+  return {rows:[...rows.values()], truncated, coveredSummaries};
 }
 
-export function collectSessionCost(entries, subscription = false) {
+export function collectSessionCost(entries, subscription = false, auxiliaryRequests = collectAuxiliaryModelUsage(entries)) {
   entries = Array.isArray(entries) ? entries.filter(entry => entry && typeof entry === "object") : [];
   const empty = () => ({reported:0, estimated:0, unknown:false, subscription:false, seen:false});
   const valid = n => typeof n === 'number' && Number.isFinite(n) && n >= 0;
@@ -226,7 +248,7 @@ export function collectSessionCost(entries, subscription = false) {
     }
     const isMain = m?.role === 'assistant';
     const isAuxiliary = m?.role === 'toolResult' && !['subagent','bg_wait'].includes(m.toolName) && m.usage || ['compaction','branch_summary'].includes(entry.type);
-    if (!isMain && !isAuxiliary) continue;
+    if ((!isMain && !isAuxiliary) || auxiliaryRequests.coveredSummaries.has(entry)) continue;
     const usage = m ? m.usage : entry.usage;
     const provider = m?.provider ?? usage?.cost?.provider;
     const model = m?.model ?? usage?.cost?.model;
@@ -246,7 +268,6 @@ export function collectSessionCost(entries, subscription = false) {
     addDirect(scope,route,evidence);
   }
   for (const {scope,route,evidence} of responses.values()) addDirect(scope,route,evidence);
-  const auxiliaryRequests = collectAuxiliaryModelUsage(entries);
   truncated ||= auxiliaryRequests.truncated;
   for (const row of auxiliaryRequests.rows) {
     auxiliary = mergeCostEvidence(auxiliary, row.evidence);
@@ -305,10 +326,11 @@ export function collectSessionCost(entries, subscription = false) {
 export function collectSessionStats(entries, subscription = false) {
   const counts = {userMessages:0, assistantMessages:0, toolCalls:0, toolResults:0, totalMessages:0};
   const usageTotals = createUsageTotals();
+  const auxiliaryRequests = collectAuxiliaryModelUsage(entries);
   for (const entry of entries) {
     if (!entry) continue;
     let usage;
-    if (entry.type === 'compaction' || entry.type === 'branch_summary') usage = entry.usage;
+    if ((entry.type === 'compaction' || entry.type === 'branch_summary') && !auxiliaryRequests.coveredSummaries.has(entry)) usage = entry.usage;
     if (entry.type === 'message' && entry.message) {
       counts.totalMessages++;
       const message = entry.message;
@@ -327,7 +349,8 @@ export function collectSessionStats(entries, subscription = false) {
     }
     if (usage) addUsageToTotals(usageTotals, usage);
   }
-  const accounting = collectSessionCost(entries, subscription);
+  for (const row of auxiliaryRequests.rows) if (row.accountingOnly) addUsageToTotals(usageTotals, row.usage);
+  const accounting = collectSessionCost(entries, subscription, auxiliaryRequests);
   const spent = row => row.reported + row.estimated;
   const byRoute = new Map();
   for (const row of accounting.rows) byRoute.set(row.route, (byRoute.get(row.route) ?? 0) + spent(row));
@@ -345,6 +368,7 @@ export function collectSessionStats(entries, subscription = false) {
 /** Pure, transcript-backed accounting shared by the terminal and report views.
  * Cumulative snapshots are replaced by segment ID, never added twice. */
 export function collectSessionMetrics(entries, live) {
+ const auxiliaryRequests=collectAuxiliaryModelUsage(entries);
  entries=Array.isArray(entries)?entries.filter(e=>e&&typeof e==='object'):[];
  const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:Object.create(null),skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:Object.create(null),hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,confirmDialogs:0,confirmWaitMs:0,trimmedChars:0,addedChars:0,telemetry:false,rawReturnedChars:0,uncachedInput:0,cachedReuse:0,noCacheTurns:0,noCacheInput:0,invalidationTurns:0,invalidationExcessTokens:0,abortedTelemetry:0,assistantTurns:0,perModel:Object.create(null),jev:{hits:0,cached:0,tokens:0,costUsd:0,bySite:Object.create(null)},span:{hits:0,cached:0,tokens:0,costUsd:0,shadow:0,present:0}};
  const calls=new Set(), results=new Set(), agents=new Map(), workflows=new Map(), segments=new Map(), activities=new Map(), read=new Set(), partial=new Set(), routed=new Set(), callInputs=new Map(), aliases=new Map(), groups=[],nativeGroups=new Set(),legacyFusions=[];
@@ -512,8 +536,8 @@ export function collectSessionMetrics(entries, live) {
    }
   }
   if(msg?.role==='user')pendingChars+=visibleChars(msg.content);
-  if(e.type==='compaction'){m.compactions++;usage(e.usage);noteAssistant(e.usage,undefined,false,true);pendingChars=0;}
-  if(e.type==='branch_summary'){usage(e.usage);noteAssistant(e.usage,undefined,false,true);}
+  if(e.type==='compaction'){m.compactions++;pendingChars=0;}
+  if((e.type==='compaction'||e.type==='branch_summary')&&!auxiliaryRequests.coveredSummaries.has(e)){usage(e.usage);noteAssistant(e.usage,undefined,false,true);}
   // A harness helper's native lifecycle duplicates its wrapper's own record
   // (scope council, review, skill discovery) until they link at completion;
   // counting both showed "Agents 14 (7 active)" for one review round.
@@ -549,7 +573,6 @@ export function collectSessionMetrics(entries, live) {
  }
  // Direct SDK helpers have separate accounting: no fabricated child runs,
  // parent responses, cache-invalidation turns, JEV judgments, or tool calls.
- const auxiliaryRequests=collectAuxiliaryModelUsage(entries);
  m.auxiliary={calls:auxiliaryRequests.rows.length,pending:0,usageRecorded:0,unknownUsage:0,truncated:auxiliaryRequests.truncated,input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,tokens:0};
  const auxiliaryModels=new Map();
  for(const row of auxiliaryRequests.rows){

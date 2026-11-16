@@ -1,5 +1,5 @@
 import type { ImageContent, Message, SimpleStreamOptions, ThinkingBudgets, Transport } from "@yunuspi/ai";
-import type { AfterToolCallContext, AfterToolCallResult, AgentEvent, AgentLoopTurnUpdate, AgentMessage, AgentState, BeforeToolCallContext, BeforeToolCallResult, PrepareNextTurnContext, QueueMode, ShouldStopAfterTurnContext, StreamFn, ToolExecutionMode } from "./types.ts";
+import type { AfterToolCallContext, AfterToolCallResult, AgentEvent, AgentLoopTurnUpdate, AgentMessage, AgentPayloadHook, AgentProviderRequest, AgentState, BeforeToolCallContext, BeforeToolCallResult, PrepareNextTurnContext, QueueMode, ShouldStopAfterTurnContext, StreamFn, ToolExecutionMode } from "./types.ts";
 export type { QueueMode } from "./types.ts";
 /** Options for constructing an {@link Agent}. */
 export interface AgentOptions {
@@ -10,7 +10,7 @@ export interface AgentOptions {
     /** Select the stream timeout when starting or continuing a run. */
     getStreamTimeoutMs?: () => number | undefined;
     getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
-    onPayload?: SimpleStreamOptions["onPayload"];
+    onPayload?: AgentPayloadHook;
     onResponse?: SimpleStreamOptions["onResponse"];
     beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>;
     afterToolCall?: (context: AfterToolCallContext, signal?: AbortSignal) => Promise<AfterToolCallResult | undefined>;
@@ -41,7 +41,7 @@ export declare class Agent {
     streamFunction: StreamFn;
     private readonly getStreamTimeoutMs?;
     getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
-    onPayload?: SimpleStreamOptions["onPayload"];
+    onPayload?: AgentPayloadHook;
     onResponse?: SimpleStreamOptions["onResponse"];
     beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promise<BeforeToolCallResult | undefined>;
     afterToolCall?: (context: AfterToolCallContext, signal?: AbortSignal) => Promise<AfterToolCallResult | undefined>;
@@ -111,7 +111,7 @@ export declare class Agent {
     prompt(message: AgentMessage | AgentMessage[]): Promise<void>;
     prompt(input: string, images?: ImageContent[]): Promise<void>;
     /** Continue from the current transcript. The last message must be a user or tool-result message. */
-    continue(): Promise<void>;
+    continue(providerRequest?: AgentProviderRequest): Promise<void>;
     private normalizePromptInput;
     private runPromptMessages;
     private runContinuation;

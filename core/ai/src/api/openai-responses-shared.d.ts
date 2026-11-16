@@ -2,6 +2,7 @@ import type { Tool as OpenAITool, ResponseCreateParamsStreaming, ResponseInput, 
 import type { Api, AssistantMessage, Context, Model, Tool, Usage } from "../types.ts";
 import type { AssistantMessageEventStream } from "../utils/event-stream.ts";
 export interface OpenAIResponsesStreamOptions {
+    dispatchedAt?: number;
     serviceTier?: ResponseCreateParamsStreaming["service_tier"];
     grammarToolInputProperties?: ReadonlyMap<string, string>;
     resolveServiceTier?: (responseServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined, requestServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined) => ResponseCreateParamsStreaming["service_tier"] | undefined;

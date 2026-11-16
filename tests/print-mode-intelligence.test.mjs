@@ -9,16 +9,18 @@ import { DefaultResourceLoader } from "../core/coding-agent/src/core/resource-lo
 import { SessionManager } from "../core/coding-agent/src/core/session-manager.js";
 import { SettingsManager } from "../core/coding-agent/src/core/settings-manager.js";
 import { runPrintMode } from "../core/coding-agent/src/modes/print-mode.js";
+import { collectSessionCost } from "../core/coding-agent/src/core/session-accounting.js";
 
 // Exercise actual print mode, SDK, AgentSession, extension delivery, and runtime
 // disposal. Only the external provider transport is simulated.
 async function fixture(t, { stopReason = "stop", history = false } = {}) {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "print-intelligence-"));
   t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
-  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } });
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false, keepRecentTokens: 0 }, retry: { enabled: false } });
   const loader = new DefaultResourceLoader({ cwd, agentDir: cwd, settingsManager, noExtensions: true,
     noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
     extensionFactories: [api => {
+      api.registerCommand("fixture-compact", { handler: () => session.compact() });
       api.on("agent_end", () => api.sendMessage({ customType: "prompt-analysis", content: "Advisory analysis finished.",
         display: true, excludeFromContext: true }, { triggerTurn: false }));
       api.on("session_shutdown", () => {
@@ -135,4 +137,19 @@ test("JSON print mode forwards persisted billing receipts from session shutdown"
   const events = result.stdout.trim().split("\n").map(line => JSON.parse(line));
   assert.deepEqual(events.filter(event => event.type === "entry_appended").map(event => event.entry), receipts);
   assert.ok(events.findIndex(event => event.type === "entry_appended") > events.findIndex(event => event.type === "agent_end"));
+});
+
+test("JSON print mode exposes durable attempt receipts and a linked compaction checkpoint", async t => {
+  const f = await fixture(t);
+  await f.session.prompt("First short turn");
+  await f.session.prompt("Second short turn");
+  const result = await captureOutput(() => runPrintMode(f.runtime, { mode: "json", initialMessage: "/fixture-compact" }));
+  assert.equal(result.code, 0, result.stderr);
+  const events = result.stdout.trim().split("\n").map(line => JSON.parse(line));
+  const receipts = events.filter(event => event.type === "entry_appended" && event.entry.accountingOnly).map(event => event.entry);
+  const checkpoint = events.find(event => event.type === "compaction_end")?.result;
+  assert.deepEqual(receipts.map(entry => entry.data.status), ["pending", "completed", "pending", "completed"]);
+  assert.deepEqual(checkpoint.usage.summaryReceiptIds, receipts.filter(entry => entry.data.status === "completed").map(entry => entry.data.id));
+  const entries = [...receipts, { type: "compaction", usage: checkpoint.usage }];
+  assert.equal(collectSessionCost(entries).pending, 0);
 });

@@ -536,7 +536,7 @@ export class ExtensionRunner {
      * Create an ExtensionContext for use in event handlers and tool execution.
      * Context values are resolved at call time, so changes via bindCore/bindUI are reflected.
      */
-    createContext() {
+    createContext(requestModel) {
         const runner = this;
         const getModel = this.getModel;
         const getScopedModels = this.getScopedModels;
@@ -567,7 +567,7 @@ export class ExtensionRunner {
             },
             get model() {
                 runner.assertActive();
-                return getModel();
+                return requestModel ?? getModel();
             },
             get scopedModels() {
                 runner.assertActive();
@@ -894,11 +894,12 @@ export class ExtensionRunner {
         }
         return currentMessages;
     }
-    async emitBeforeProviderRequest(payload, { model, signal } = {}) {
-        const ctx = this.createContext();
+    async emitBeforeProviderRequest(payload, { model, signal, onOutcome } = {}) {
+        const ctx = this.createContext(onOutcome ? model : undefined);
         /* PI_REQUEST_HOOK_SIGNAL_V1 */ const requestSignal = signal ?? ctx.signal;
         requestSignal?.throwIfAborted();
-        const route = model && Object.freeze({ provider: model.provider, id: model.id, baseUrl: model.baseUrl });
+        const route = model && Object.freeze({ provider: model.provider, id: model.id, baseUrl: model.baseUrl,
+            api: model.api, cost: model.cost, compat: model.compat });
         let currentPayload = payload;
         for (const ext of this.extensions) {
             const handlers = ext.handlers.get("before_provider_request");
@@ -906,11 +907,21 @@ export class ExtensionRunner {
                 continue;
             for (const handler of handlers) {
                 try {
+                    const observeOutcome = onOutcome && (observer => onOutcome(async response => {
+                        try {
+                            await observer(response);
+                        }
+                        catch (error) {
+                            this.emitError({ extensionPath: ext.path, event: "before_provider_request",
+                                error: error instanceof Error ? error.message : String(error) });
+                        }
+                    }));
                     const event = {
                         type: "before_provider_request",
                         payload: currentPayload,
                         model: route,
                         signal: requestSignal,
+                        ...(observeOutcome ? { onOutcome: observeOutcome } : {}),
                     };
                     const handlerResult = await handler(event, ctx);
                     requestSignal?.throwIfAborted();

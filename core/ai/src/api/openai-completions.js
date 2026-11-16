@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { calculateCost, clampThinkingLevel } from "../models.js";
+import { applyDeepSeekPricing, isDirectDeepSeek, providerCreatedMs } from "../utils/deepseek-pricing.js";
 import { formatProviderError, normalizeProviderError } from "../utils/error-body.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { shortHash } from "../utils/hash.js";
@@ -9,6 +10,7 @@ import { getPiUserAgent } from "../utils/pi-user-agent.js";
 import { getProviderEnvValue } from "../utils/provider-env.js";
 import { captureProviderRetryAdvice, retryProviderRequest } from "../utils/provider-retry.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { iterateSseMessages } from "../utils/sse.js";
 import { appendGrammarToolInputJsonDelta, createGrammarToolInputProperties, getGrammarToolInput, getJsonSchemaToolParameters, resolveGrammarConstrainedSampling, resolveJsonSchemaStrictSampling, } from "./constrained-sampling.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { clampOpenAIPromptCacheKey, isOpenAIEndpoint } from "./openai-prompt-cache.js";
@@ -165,6 +167,14 @@ function resolveCacheRetention(cacheRetention, env) {
     }
     return "short";
 }
+async function* iterateDeepSeekChunks(response, signal) {
+    if (!response.body) throw new Error("DeepSeek returned no stream body");
+    for await (const frame of iterateSseMessages(response.body, signal)) {
+        if (frame.data.trim() === "[DONE]") return;
+        if (frame.data) yield JSON.parse(frame.data);
+    }
+}
+
 export const stream = (model, context, options) => {
     const stream = new AssistantMessageEventStream();
     (async () => {
@@ -210,7 +220,17 @@ export const stream = (model, context, options) => {
                 ...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
                 maxRetries: 0,
             };
-            const { data: openaiStream, response } = await retryProviderRequest(() => client.chat.completions.create(params, requestOptions).withResponse(), {
+            const directDeepSeek = isDirectDeepSeek(model);
+            let dispatchedAt;
+            const { data: openaiStream, response } = await retryProviderRequest(async () => {
+                if (directDeepSeek) {
+                    dispatchedAt = Date.now();
+                    const response = await client.chat.completions.create(params, requestOptions).asResponse();
+                    // The SDK turns inline SSE errors into exceptions before exposing raw usage.
+                    return { data: iterateDeepSeekChunks(response, options?.signal), response };
+                }
+                return client.chat.completions.create(params, requestOptions).withResponse();
+            }, {
                 maxRetries: options?.maxRetries,
                 retryOwner: options?.retryOwner,
                 maxRetryDelayMs: options?.maxRetryDelayMs,
@@ -221,6 +241,7 @@ export const stream = (model, context, options) => {
             let textBlock = null;
             let thinkingBlock = null;
             let hasFinishReason = false;
+            let createdAt;
             const toolCallBlocksByIndex = new Map();
             const toolCallBlocksById = new Map();
             const blocks = output.content;
@@ -373,19 +394,21 @@ export const stream = (model, context, options) => {
                 // OpenAI documents ChatCompletionChunk.id as the unique chat completion identifier,
                 // and each chunk in a streamed completion carries the same id.
                 output.responseId ||= chunk.id;
+                if (directDeepSeek) createdAt ??= providerCreatedMs(chunk.created);
                 if (typeof chunk.model === "string" && chunk.model.length > 0 && chunk.model !== model.id) {
                     output.responseModel ||= chunk.model;
                 }
                 if (chunk.usage) {
-                    output.usage = parseChunkUsage(chunk.usage, model, chunk.service_tier ?? options?.samplingParams?.service_tier);
+                    output.usage = parseChunkUsage(chunk.usage, model, chunk.service_tier ?? options?.samplingParams?.service_tier, createdAt ?? dispatchedAt);
                 }
+                if (directDeepSeek && chunk.error) throw new Error(chunk.error.message || "DeepSeek stream returned an error");
                 const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined;
                 if (!choice)
                     continue;
                 // Fallback: some providers (e.g., Moonshot) return usage
                 // in choice.usage instead of the standard chunk.usage
                 if (!chunk.usage && choice.usage) {
-                    output.usage = parseChunkUsage(choice.usage, model, chunk.service_tier ?? options?.samplingParams?.service_tier);
+                    output.usage = parseChunkUsage(choice.usage, model, chunk.service_tier ?? options?.samplingParams?.service_tier, createdAt ?? dispatchedAt);
                 }
                 if (choice.finish_reason) {
                     output.rawStopReason = choice.finish_reason;
@@ -1195,7 +1218,7 @@ function convertTools(tools, compat) {
         };
     });
 }
-function parseChunkUsage(rawUsage, model, serviceTier) {
+function parseChunkUsage(rawUsage, model, serviceTier, createdAt) {
     const promptTokens = rawUsage.prompt_tokens || 0;
     const cacheReadTokens = rawUsage.prompt_tokens_details?.cached_tokens ?? rawUsage.prompt_cache_hit_tokens ?? rawUsage.cached_tokens ?? 0;
     // Alibaba's explicit Qwen cache reports creation separately from hits.
@@ -1247,17 +1270,8 @@ usage.cost.source = 'estimate';
       usage.cost.total = rawUsage.estimated_cost;
       usage.cost.source = 'provider-estimate'; usage.cost.complete = true;
     }
-    // Published direct-API peak rates, verified 2026-09-10 and re-read 2026-11-10. Exact IDs only.
-    // Recognize the catalog snapshot so explicit custom rates still take precedence.
-    const peak = model.id === 'deepseek-v4-pro' ? (Date.now() >= Date.parse('2026-09-14T04:00:00Z') && Date.now() < Date.parse('2026-11-10T00:00:00Z') ? [0.3, 1.2, 0.006] : [1.32, 3.96, 0.044]) :
-      ['deepseek-flash','deepseek-v4-flash','deepseek-v4-flash-vision-exp'].includes(model.id) ? [0.3, 1.2, 0.006] : undefined;
-    if (model.provider === 'deepseek' && billingHost === 'api.deepseek.com' && peak &&
-        model.cost.input === peak[0] && model.cost.output === peak[1] && model.cost.cacheRead === peak[2] && model.cost.cacheWrite === 0 && !model.cost.tiers?.length) {
-      const now = new Date(), day = now.getUTCDay(), hour = now.getUTCHours();
-      const atPeak = day >= 1 && day <= 5 && (hour >= 1 && hour < 4 || hour >= 6 && hour < 10);
-      if (!atPeak) for (const key of ['input','output','cacheRead','cacheWrite','total']) usage.cost[key] *= 0.5;
-      usage.cost.priceBasis = atPeak ? 'deepseek-peak-2026-09-10' : 'deepseek-off-peak-2026-09-10';
-    }
+    applyDeepSeekPricing(model, usage, rawUsage, createdAt,
+        ![rawUsage.prompt_tokens, rawUsage.completion_tokens].every(value => Number.isSafeInteger(value) && value >= 0) || !usage.cacheReadReported);
     if (!['provider-reported','provider-estimate'].includes(usage.cost.source) &&
         [rawUsage.prompt_tokens_details?.audio_tokens, rawUsage.completion_tokens_details?.audio_tokens].some(n => Number.isFinite(n) && n > 0)) usage.cost.complete = false;
     if (usage.cost.source === 'provider-reported' && Number.isFinite(rawUsage.cost_details?.upstream_inference_cost))

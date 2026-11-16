@@ -383,8 +383,8 @@ function recoveryHandler(routes, { available } = {}) {
   extension.default(pi);
   process.env.PI_SUBAGENT_CHILD = '0';
   const ctx = { modelRegistry: { find: (provider, id) => ({ provider, id }) } };
-  const recover = async (message) => {
-    const event = { type: 'pi_provider_recovery', message, decision: undefined };
+  const recover = async (message, requestedModel) => {
+    const event = { type: 'pi_provider_recovery', message, requestedModel, decision: undefined };
     await handlers.get('pi_provider_recovery')(event, ctx);
     return event.decision;
   };
@@ -400,7 +400,8 @@ test('a free model\'s rate limit moves the child to the next route that is not r
   assert.equal(await recover(failed('a/one:free', '429 Rate limit exceeded: free-models-per-day')), 'retry');
   assert.deepEqual(switched, [ROUTES[2]], 'b rests, so the child goes to c');
   assert.ok(free.isCoolingDown(ROUTES[0]), 'a is resting now');
-  assert.equal(await recover(failed('c/three:free', 'Provider returned error: upstream unavailable (503)')), 'retry');
+  assert.equal(await recover(failed('served/version', 'Provider returned error: upstream unavailable (503)'),
+    { provider: 'openrouter', id: 'c/three:free' }), 'retry');
   assert.deepEqual(switched, [ROUTES[2], 'openai/gpt-x'], 'the role\'s own model comes last');
 });
 

@@ -284,7 +284,7 @@ export async function createAgentSession(options = {}) {
                 },
             });
         },
-        onPayload: async (payload, _model, signal) => {
+        onPayload: async (payload, _model, signal, onOutcome) => {
             // PI_BODY_GATE (local patch; re-applied by verify-harness.mjs): enforce the
             // provider's hard ENCODED-request-body cap before the HTTP call. Token
             // compaction cannot bound request BYTES: a base64 image is ~1.3x its
@@ -296,7 +296,7 @@ export async function createAgentSession(options = {}) {
             // that can actually block.
             const runner = extensionRunnerRef.current;
             let gatePayload = runner?.hasHandlers("before_provider_request")
-                ? await runner.emitBeforeProviderRequest(payload, { model: _model, signal })
+                ? await runner.emitBeforeProviderRequest(payload, { model: _model, signal, onOutcome })
                 : payload;
             /*PI_BODY_GATE_SCOPE*/if(_model?.provider&&!["openrouter","runinfra","friendli"].includes(_model.provider))return gatePayload;
             let __piSerialized;

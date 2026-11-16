@@ -1,3 +1,5 @@
+import { iterateSseMessages } from "../utils/sse.js";
+import { applyDeepSeekPricing, isDirectDeepSeek, providerCreatedMs } from "../utils/deepseek-pricing.js";
 import Anthropic from "@anthropic-ai/sdk";
 import { calculateCost, clampThinkingLevel } from "../models.js";
 import { splitDeferredTools } from "../utils/deferred-tools.js";
@@ -184,118 +186,7 @@ const ANTHROPIC_MESSAGE_EVENTS = new Set([
     "content_block_delta",
     "content_block_stop",
 ]);
-function flushSseEvent(state) {
-    if (!state.event && state.data.length === 0) {
-        return null;
-    }
-    const event = {
-        event: state.event,
-        data: state.data.join("\n"),
-        raw: [...state.raw],
-    };
-    state.event = null;
-    state.data = [];
-    state.raw = [];
-    return event;
-}
-function decodeSseLine(line, state) {
-    if (line === "") {
-        return flushSseEvent(state);
-    }
-    state.raw.push(line);
-    if (line.startsWith(":")) {
-        return null;
-    }
-    const delimiterIndex = line.indexOf(":");
-    const fieldName = delimiterIndex === -1 ? line : line.slice(0, delimiterIndex);
-    let value = delimiterIndex === -1 ? "" : line.slice(delimiterIndex + 1);
-    if (value.startsWith(" ")) {
-        value = value.slice(1);
-    }
-    if (fieldName === "event") {
-        state.event = value;
-    }
-    else if (fieldName === "data") {
-        state.data.push(value);
-    }
-    return null;
-}
-function nextLineBreakIndex(text) {
-    const carriageReturnIndex = text.indexOf("\r");
-    const newlineIndex = text.indexOf("\n");
-    if (carriageReturnIndex === -1) {
-        return newlineIndex;
-    }
-    if (newlineIndex === -1) {
-        return carriageReturnIndex;
-    }
-    return Math.min(carriageReturnIndex, newlineIndex);
-}
-function consumeLine(text) {
-    const lineBreakIndex = nextLineBreakIndex(text);
-    if (lineBreakIndex === -1) {
-        return null;
-    }
-    let nextIndex = lineBreakIndex + 1;
-    if (text[lineBreakIndex] === "\r" && text[nextIndex] === "\n") {
-        nextIndex += 1;
-    }
-    return {
-        line: text.slice(0, lineBreakIndex),
-        rest: text.slice(nextIndex),
-    };
-}
-async function* iterateSseMessages(body, signal) {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    const state = { event: null, data: [], raw: [] };
-    let buffer = "";
-    try {
-        while (true) {
-            if (signal?.aborted) {
-                throw new Error("Request was aborted");
-            }
-            const { value, done } = await reader.read();
-            if (done) {
-                break;
-            }
-            buffer += decoder.decode(value, { stream: true });
-            let consumed = consumeLine(buffer);
-            while (consumed) {
-                buffer = consumed.rest;
-                const event = decodeSseLine(consumed.line, state);
-                if (event) {
-                    yield event;
-                }
-                consumed = consumeLine(buffer);
-            }
-        }
-        buffer += decoder.decode();
-        let consumed = consumeLine(buffer);
-        while (consumed) {
-            buffer = consumed.rest;
-            const event = decodeSseLine(consumed.line, state);
-            if (event) {
-                yield event;
-            }
-            consumed = consumeLine(buffer);
-        }
-        if (buffer.length > 0) {
-            const event = decodeSseLine(buffer, state);
-            if (event) {
-                yield event;
-            }
-        }
-        const trailingEvent = flushSseEvent(state);
-        if (trailingEvent) {
-            yield trailingEvent;
-        }
-    }
-    finally {
-        reader.releaseLock();
-    }
-}
-async function* iterateAnthropicEvents(response, signal) {
+async function* iterateAnthropicEvents(response, signal, retainBilledFailure) {
     if (!response.body) {
         throw new Error("Attempted to iterate over an Anthropic response with no body");
     }
@@ -303,6 +194,12 @@ async function* iterateAnthropicEvents(response, signal) {
     let sawMessageEnd = false;
     for await (const sse of iterateSseMessages(response.body, signal)) {
         if (sse.event === "error") {
+            if (retainBilledFailure) {
+                let usage;
+                try { usage = JSON.parse(sse.data)?.usage; }
+                catch { /* Some terminal errors carry only a diagnostic. */ }
+                if (usage && typeof usage === "object") yield { type: "message_delta", delta: {}, usage };
+            }
             throw new Error(sse.data);
         }
         if (!ANTHROPIC_MESSAGE_EVENTS.has(sse.event ?? "")) {
@@ -385,7 +282,12 @@ export const stream = (model, context, options) => {
                 ...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
                 maxRetries: 0,
             };
-            const response = await retryProviderRequest(() => client.beta.messages.create(params, requestOptions).asResponse(), {
+            const directDeepSeek = isDirectDeepSeek(model);
+            let dispatchedAt, createdAt;
+            const response = await retryProviderRequest(() => {
+                if (directDeepSeek) dispatchedAt = Date.now();
+                return client.beta.messages.create(params, requestOptions).asResponse();
+            }, {
                 maxRetries: options?.maxRetries,
                 retryOwner: options?.retryOwner,
                 maxRetryDelayMs: options?.maxRetryDelayMs,
@@ -394,9 +296,10 @@ export const stream = (model, context, options) => {
             await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
             stream.push({ type: "start", partial: output });
             const blocks = output.content;
-            for await (const event of iterateAnthropicEvents(response, options?.signal)) {
+            for await (const event of iterateAnthropicEvents(response, options?.signal, directDeepSeek)) {
                 if (event.type === "message_start") {
                     output.responseId = event.message.id;
+                    if (directDeepSeek) createdAt = providerCreatedMs(event.message.created_at);
                     const transformations = event.message.input_transformations;
                     if (Array.isArray(transformations))
                         inputTransformations = transformations;
@@ -418,6 +321,7 @@ export const stream = (model, context, options) => {
                     output.usage.totalTokens =
                         output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
                     calculateCost(usageModel, output.usage);
+                    applyDeepSeekPricing(usageModel, output.usage, event.message.usage, createdAt ?? dispatchedAt, true);
                 }
                 else if (event.type === "content_block_start") {
                     if (event.content_block.type === "fallback") {
@@ -590,10 +494,15 @@ export const stream = (model, context, options) => {
                             output.usage.reasoning = thinkingTokens;
                         }
                     }
-                    // Anthropic doesn't provide total_tokens, compute from components
-                    output.usage.totalTokens =
-                        output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
-                    calculateCost(usageModel, output.usage);
+                    if (!directDeepSeek || event.usage) {
+                        // Anthropic doesn't provide total_tokens, compute from components.
+                        output.usage.totalTokens =
+                            output.usage.input + output.usage.output + output.usage.cacheRead + output.usage.cacheWrite;
+                        calculateCost(usageModel, output.usage);
+                        applyDeepSeekPricing(usageModel, output.usage, event.usage, createdAt ?? dispatchedAt,
+                            ![event.usage?.input_tokens, event.usage?.output_tokens, event.usage?.cache_read_input_tokens]
+                                .every(value => Number.isSafeInteger(value) && value >= 0));
+                    }
                 }
             }
             if (options?.signal?.aborted) {

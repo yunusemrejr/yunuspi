@@ -167,7 +167,7 @@ test("retry without extension hooks uses the built-in retry policy", async () =>
 		_retryAttempt: 0,
 		_emit() {},
 	};
-	assert.equal(await AgentSession.prototype._prepareRetry.call(session, message), true);
+	assert.deepEqual(await AgentSession.prototype._prepareRetry.call(session, message), {});
 	assert.equal(session._retryAttempt, 1);
 	assert.equal(session._retryAbortController, undefined);
 });

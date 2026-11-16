@@ -52,6 +52,8 @@ function getMessageFromEntryForCompaction(entry) {
 }
 function combineUsage(first, second, model) {
     return {
+        ...(first.summaryReceiptIds && second.summaryReceiptIds
+            ? { summaryReceiptIds: [...first.summaryReceiptIds, ...second.summaryReceiptIds] } : {}),
         input: first.input + second.input,
         output: first.output + second.output,
         cacheRead: first.cacheRead + second.cacheRead,

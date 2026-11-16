@@ -120,7 +120,11 @@ export const stream = (model, context, options) => {
                 ...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
                 maxRetries: 0,
             };
-            const { data: openaiStream, response } = await retryProviderRequest(() => client.responses.create(params, requestOptions).withResponse(), {
+            let dispatchedAt;
+            const { data: openaiStream, response } = await retryProviderRequest(() => {
+                dispatchedAt = Date.now();
+                return client.responses.create(params, requestOptions).withResponse();
+            }, {
                 maxRetries: options?.maxRetries,
                 retryOwner: options?.retryOwner,
                 maxRetryDelayMs: options?.maxRetryDelayMs,
@@ -129,6 +133,7 @@ export const stream = (model, context, options) => {
             await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
             stream.push({ type: "start", partial: output });
             await processResponsesStream(openaiStream, output, stream, model, {
+                dispatchedAt,
                 serviceTier: options?.serviceTier,
                 grammarToolInputProperties,
                 applyServiceTierPricing: (usage, serviceTier) => applyServiceTierPricing(usage, serviceTier, model),

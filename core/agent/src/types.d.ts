@@ -119,8 +119,17 @@ export interface AgentLoopTurnUpdate {
 }
 export interface PrepareNextTurnContext extends ShouldStopAfterTurnContext {
 }
+/** Route and reasoning used for a single assistant response. */
+export interface AgentProviderRequest {
+    readonly model: Model<Api>;
+    readonly reasoning?: SimpleStreamOptions["reasoning"];
+}
+export type ProviderRequestOutcomeObserver = (message: AssistantMessage) => void | Promise<void>;
+export type AgentPayloadHook = (payload: unknown, model: Model<Api>, signal?: AbortSignal,
+    onOutcome?: (observer: ProviderRequestOutcomeObserver) => void) => ReturnType<NonNullable<SimpleStreamOptions["onPayload"]>>;
 export interface AgentLoopConfig extends SimpleStreamOptions {
     model: Model<any>;
+    onPayload?: AgentPayloadHook;
     /**
      * Converts AgentMessage[] to LLM-compatible Message[] before each LLM call.
      *
@@ -407,6 +416,8 @@ export type AgentEvent = {
 } | {
     type: "message_end";
     message: AgentMessage;
+    /** In-memory metadata for a response produced by the provider stream. */
+    providerRequest?: AgentProviderRequest;
 } | {
     type: "tool_execution_start";
     toolCallId: string;

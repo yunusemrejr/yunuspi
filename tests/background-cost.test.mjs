@@ -15,7 +15,7 @@ const billed = total => ({input:2, output:1, cacheRead:0, cacheWrite:0, totalTok
 test('real managed subprocess carries observed Pi spend into a detached parent once', {timeout:15_000}, async t => {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-background-cost-'));
   const child = path.join(cwd, 'child-fixture.cjs');
-  const wrap = (customType, data) => ({type:'entry_appended', entry:{type:'custom', customType, data}});
+  const wrap = (customType, data, fields) => ({type:'entry_appended', entry:{type:'custom', customType, data, ...fields}});
   const toolResult = {role:'toolResult', toolName:'metered-tool', toolCallId:'tool-1', usage:billed(.02)};
   const launchEvents = [
     {type:'session', id:'fixture-child'},
@@ -23,7 +23,10 @@ test('real managed subprocess carries observed Pi spend into a detached parent o
     {type:'tool_result_end', message:toolResult},
     {type:'message_end', message:toolResult},
     wrap('auxiliary-model-usage-v1',{id:'search-1',provider:'fixture',model:'search',owner:'web_search',status:'pending'}),
-    wrap('auxiliary-model-usage-v1',{id:'search-1',provider:'fixture',model:'search',owner:'web_search',status:'completed',usage:billed(.03)}),
+    wrap('auxiliary-model-usage-v1',{id:'search-1',provider:'fixture',model:'search',owner:'web_search',status:'completed',usage:billed(.01)}),
+    wrap('auxiliary-model-usage-v1',{id:'summary-1',provider:'fixture',model:'test',owner:'compaction',status:'completed',usage:billed(.02)},{accountingOnly:true}),
+    {type:'compaction_end',result:{usage:{...billed(.02),summaryReceiptIds:['summary-1']}}},
+    {type:'compaction_end',result:{usage:{...billed(.02),summaryReceiptIds:['summary-1']}}},
     wrap('subagent-cost-v1',{runId:'native-1',results:[{runId:'child-native-1',usage:billed(.01)}]}),
     {type:'message_end', message:{role:'toolResult', toolName:'bg_wait', usage:billed(70)}},
   ];

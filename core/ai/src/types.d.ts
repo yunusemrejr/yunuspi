@@ -266,6 +266,8 @@ export interface ToolCall {
     namespace?: string;
 }
 export interface Usage {
+    /** Individual native summary attempts whose receipts cover this aggregate. */
+    summaryReceiptIds?: string[];
     /** The local runtime proved that no inference request could dispatch. */
     dispatchOutcome?: "not-dispatched";
     /** Cost evidence for a result that combines multiple provider responses. */
@@ -296,6 +298,9 @@ export interface Usage {
         cacheRead: number;
         cacheWrite: number;
         total: number;
+        priceBasis?: string;
+        serverToolCost?: number;
+        serverToolUse?: Partial<Record<"tool_search" | "tool_fetch" | "tool_image_search", number>>;
     };
 }
 export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred";
