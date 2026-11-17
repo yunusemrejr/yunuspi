@@ -287,6 +287,48 @@ finally: os.chmod(locked,0o700)
   f.close();
  }
 });
+test("sharded hard-link inventory checks the whole protected union and rejects changed partitions", () => {
+ const f = fixture();
+ try {
+  const script = `import importlib.util, os, sys
+from unittest.mock import patch
+spec=importlib.util.spec_from_file_location('guard',sys.argv[1])
+guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
+root=sys.argv[2]
+for i in range(16): os.mkdir(os.path.join(root,'branch-%02d'%i))
+inside=os.path.join(root,'branch-00','linked'+chr(10)+'file')
+other=os.path.join(root,'branch-01','same inode')
+with open(inside,'w') as stream: stream.write('protected')
+os.link(inside,other)
+paths, partitions=guard.inventory_paths({root},4)
+assert root in partitions and len(paths)==17
+assert paths.index(os.path.dirname(inside))%4 != paths.index(os.path.dirname(other))%4
+with patch.object(guard.os,'sched_getaffinity',return_value={0,1,2,3}):
+ guard.check_hardlinks(root)
+ outside=os.path.join(sys.argv[3],'outside')
+ os.link(inside,outside)
+ try: guard.check_hardlinks(root)
+ except RuntimeError as error: assert 'hard-linked' in str(error)
+ else: raise AssertionError('outside alias was accepted')
+ os.unlink(outside)
+ scan=guard.scan_linked_files
+ def change_partition(paths,workers):
+  result=scan(paths,workers)
+  os.rename(os.path.join(root,'branch-15'),os.path.join(root,'renamed'))
+  return result
+ with patch.object(guard,'scan_linked_files',side_effect=change_partition):
+  try: guard.check_hardlinks(root)
+  except RuntimeError as error: assert 'inventory failed' in str(error)
+  else: raise AssertionError('changed directory listing was certified')
+`;
+  const result = spawnSync("python3", ["-B", "-c", script, wrapper, f.protectedDir, f.project],
+   { encoding: "utf8", timeout: 15_000 });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+ } finally {
+  f.close();
+ }
+});
 test("a passing hard-link inventory is reused briefly, never a failure, and never an untrusted marker", () => {
  const script = `import importlib.util, os, shutil, stat, sys, tempfile
 from unittest.mock import patch

@@ -1,3 +1,7 @@
+## 0.56.29 — Faster cold shell admission
+
+- Scan large protected trees in parallel during cold sandbox admission. Merge all hard-link evidence before allowing a command, and reject an inventory if a partition changed during the scan.
+
 ## 0.56.28 — Cancellable file work, sandbox readiness, and image billing
 
 - Cancel queued file mutations and path lookups promptly while keeping admitted writes ordered until they settle.

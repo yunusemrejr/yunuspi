@@ -9,6 +9,7 @@ import glob
 import hashlib
 import json
 import platform
+import selectors
 import stat
 import subprocess
 import sys
@@ -21,6 +22,12 @@ import time
 INVENTORY_TTL_S = 120
 INVENTORY_MARKER = 'hardlink-inventory.json'
 GUARD_READY_FD = 3
+INVENTORY_WORKERS = 4
+INVENTORY_MIN_CHILDREN = 12
+INVENTORY_MAX_CHILDREN = 256
+INVENTORY_ERROR = ('protected hard-link inventory failed; check unreadable or changing '
+                   'protected paths (files changing during the scan are transient: '
+                   'run the same command once more before changing approach)')
 
 
 def ssh_config_mounts():
@@ -92,56 +99,97 @@ def check_hardlinks(protected):
     return check_protected_hardlinks([protected])
 
 
-def check_protected_hardlinks(protected_roots):
-    """Only aliases outside the union of read-only roots are unsafe.
+def inventory_stamp(info):
+    return (info.st_dev, info.st_ino, info.st_mtime_ns, info.st_ctime_ns)
 
-    Count directory entries once, including explicit file roots. Reject any
-    linked inode whose filesystem link count exceeds the protected inventory.
-    """
+
+def inventory_paths(roots, workers):
+    """Split only bounded directory listings; large or small roots still use find."""
+    paths, split = [], {}
+    for root in sorted(roots):
+        try:
+            info = os.lstat(root)
+        except FileNotFoundError:
+            continue
+        if workers > 1 and stat.S_ISDIR(info.st_mode):
+            try:
+                with os.scandir(root) as entries:
+                    children = []
+                    for entry in entries:
+                        children.append(entry.path)
+                        if len(children) > INVENTORY_MAX_CHILDREN:
+                            break
+            except OSError as error:
+                raise RuntimeError(INVENTORY_ERROR) from error
+            if INVENTORY_MIN_CHILDREN <= len(children) <= INVENTORY_MAX_CHILDREN:
+                paths.extend(sorted(children))
+                split[root] = inventory_stamp(info)
+                continue
+        paths.append(root)
+    return paths, split
+
+
+def scan_linked_files(paths, workers):
+    """Merge all find streams before deciding whether any link leaves the union."""
+    linked, scans = {}, []
+    count = min(workers, len(paths))
+    with selectors.DefaultSelector() as streams:
+        try:
+            for index in range(count):
+                shard = paths[index::count]
+                command = ['/usr/bin/find', '-P', *shard, '-ignore_readdir_race',
+                           '-type', 'f', '-links', '+1', '-printf', r'%D %i %n %p\0']
+                scan = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                        stderr=subprocess.DEVNULL)
+                scans.append(scan)
+                streams.register(scan.stdout, selectors.EVENT_READ, scan)
+            pending = {}
+            while streams.get_map():
+                for key, _ in streams.select():
+                    chunk = os.read(key.fd, 65536)
+                    previous = pending.pop(key.fd, b'')
+                    if not chunk:
+                        streams.unregister(key.fileobj)
+                        if previous or key.data.wait() != 0:
+                            raise RuntimeError(INVENTORY_ERROR)
+                        continue
+                    records = (previous + chunk).split(b'\0')
+                    pending[key.fd] = records.pop()
+                    for record in records:
+                        device, inode, links, candidate = record.split(b' ', 3)
+                        identifier = (int(device), int(inode))
+                        entry = linked.setdefault(identifier, {'links': 0, 'paths': set()})
+                        entry['links'] = max(entry['links'], int(links))
+                        entry['paths'].add(candidate)
+        finally:
+            for scan in scans:
+                if scan.poll() is None:
+                    scan.kill()
+            for scan in scans:
+                scan.wait()
+                scan.stdout.close()
+    return linked
+
+
+def check_protected_hardlinks(protected_roots):
+    """Reject multiply-linked files with names outside the read-only union."""
     roots = set(protected_roots)
     roots = {root for root in roots if not any(
         parent != root and os.path.commonpath([parent, root]) == parent
         for parent in roots)}
-    existing = []
-    for root in sorted(roots):
-        try:
-            os.lstat(root)
-            existing.append(root)
-        except FileNotFoundError:
-            continue
-    if not existing:
-        return
-    # GNU find performs the same fresh lstat traversal in native code. Emit
-    # only multiply-linked regular files; Python need not materialize metadata
-    # for hundreds of thousands of ordinary dependencies on every shell call.
-    # -P never follows symlinks. Vanishing directory entries are benign, but
-    # permission/traversal errors must still fail the complete inventory.
-    command = ['/usr/bin/find', '-P', *existing, '-ignore_readdir_race',
-               '-type', 'f', '-links', '+1', '-printf', r'%D %i %n %p\0']
-    linked = {}
-    with subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                          stderr=subprocess.DEVNULL) as scan:
-        try:
-            pending = b''
-            while True:
-                chunk = scan.stdout.read(65536)
-                if not chunk:
-                    break
-                records = (pending + chunk).split(b'\0')
-                pending = records.pop()
-                for record in records:
-                    device, inode, links, candidate = record.split(b' ', 3)
-                    key = (int(device), int(inode))
-                    entry = linked.setdefault(key, {'links': int(links), 'paths': set()})
-                    entry['links'] = max(entry['links'], int(links))
-                    entry['paths'].add(candidate)
-            if pending or scan.wait() != 0:
-                raise RuntimeError('protected hard-link inventory failed; check unreadable or changing protected paths (files changing during the scan are transient: run the same command once more before changing approach)')
-        finally:
-            if scan.poll() is None:
-                scan.kill()
-                scan.wait()
-
+    try:
+        workers = min(INVENTORY_WORKERS, len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        workers = 1
+    paths, split = inventory_paths(roots, workers)
+    linked = scan_linked_files(paths, workers if split else 1)
+    # Splitting uses one directory listing to divide work. If it changed, that
+    # inventory cannot certify the files currently reachable from the root.
+    try:
+        if any(inventory_stamp(os.lstat(root)) != before for root, before in split.items()):
+            raise RuntimeError(INVENTORY_ERROR)
+    except OSError as error:
+        raise RuntimeError(INVENTORY_ERROR) from error
     if any(len(entry['paths']) < entry['links'] for entry in linked.values()):
         raise RuntimeError('harness has hard-linked files with aliases outside protected roots; a maintenance session must replace them with independent copies before guarded execution')
 
