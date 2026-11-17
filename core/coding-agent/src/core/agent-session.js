@@ -168,6 +168,7 @@ export class AgentSession {
      * Turns the harness triggers itself (follow-ups, wakes) skip before_agent_start; carrying
      * this keeps their system prompt byte-identical so the provider's prefix cache still hits. */
     _carriedSystemPrompt;
+    _unsubscribeExternalAccounting;
     constructor(config) {
         this.agent = config.agent;
         const previousDeliveryCheck = this.agent.canDeliverMessage;
@@ -181,6 +182,7 @@ export class AgentSession {
             return false;
         };
         this.sessionManager = config.sessionManager;
+        this._unsubscribeExternalAccounting = this.sessionManager.subscribeExternalAccountingReceipts(entry => this._emit({ type: "entry_appended", entry }));
         this.settingsManager = config.settingsManager;
         this._scopedModels = config.scopedModels ?? [];
         this._resourceLoader = config.resourceLoader;
@@ -773,6 +775,8 @@ export class AgentSession {
         this._guardianPeerUnsubscribe = undefined;
         this._guardian?.dispose();
         this._disconnectFromAgent();
+        this._unsubscribeExternalAccounting?.();
+        this._unsubscribeExternalAccounting = undefined;
         this._eventListeners = [];
         cleanupSessionResources(this.sessionId);
     }

@@ -1,3 +1,7 @@
+## 0.56.30 — Live billing after reopening a session
+
+- Refresh a reopened session in the same process when a pending request commits its billing receipt. Keep the existing transcript order and selected branch position while counting the receipt once.
+
 ## 0.56.29 — Faster cold shell admission
 
 - Scan large protected trees in parallel during cold sandbox admission. Merge all hard-link evidence before allowing a command, and reject an inventory if a partition changed during the scan.

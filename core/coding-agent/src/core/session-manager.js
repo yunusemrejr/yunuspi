@@ -123,6 +123,19 @@ function buildEntryIndex(entries, byId) {
     return index;
 }
 const accountingReceiptTypes = new Set(["auxiliary-model-usage-v1", "subagent-cost-v1", "subagent-lifecycle-v1"]);
+// Open views can share a transcript with a retired runtime that still owns a
+// billable request. Observe only the exact file generation and session ID.
+const accountingViews = new Map();
+function accountingViewKey(file, sessionId, identity) {
+    return `${file}\0${sessionId}\0${identity.dev}:${identity.ino}`;
+}
+function releaseAccountingView({ key, ref }) {
+    const views = accountingViews.get(key);
+    if (!views) return;
+    views.delete(ref);
+    if (!views.size) accountingViews.delete(key);
+}
+const accountingViewFinalizer = new FinalizationRegistry(releaseAccountingView);
 const originalSessionPendingReceipts = new Set([
     "jev", "span", "project-memory", "project-memory-rerank", "web_search", "source_check", "fetch_content", "web_research",
     "audio_generate", "narration_tts", "image-understand", "image-generate",
@@ -675,6 +688,8 @@ export class SessionManager {
     persistenceError;
     fileEntries = [];
     entriesRevision = 0;
+    accountingView;
+    externalAccountingListeners = new Set();
     byId = new Map();
     labelsById = new Map();
     labelTimestampsById = new Map();
@@ -701,9 +716,11 @@ export class SessionManager {
         this._setSessionFile(sessionFile);
     }
     _setSessionFile(sessionFile, preloadedFileEntries) {
+        this._releaseAccountingView();
         this.sessionFile = resolvePath(sessionFile);
         return withSessionWriteLock(this.sessionFile, () => {
             if (existsSync(this.sessionFile)) {
+                const identity = lstatSync(this.sessionFile, { bigint: true, throwIfNoEntry: false });
                 // Discovery's preload may be stale. Read, migrate, and initialize
                 // under one ownership interval so no accepted tail is overwritten.
                 const entries = loadEntriesUnlocked(this.sessionFile);
@@ -722,6 +739,9 @@ export class SessionManager {
                 }
                 this._loadEntries(entries, undefined, true);
                 this.flushed = true;
+                if (identity?.isFile() && matchesAccountingOwner(lstatSync(this.sessionFile, { bigint: true, throwIfNoEntry: false }), identity)) {
+                    this._trackAccountingView(identity);
+                }
             }
             else {
                 const explicitPath = this.sessionFile;
@@ -731,6 +751,7 @@ export class SessionManager {
         });
     }
     newSession(options) {
+        this._releaseAccountingView();
         this.persistenceError = undefined;
         if (options?.id !== undefined) {
             assertValidSessionId(options.id);
@@ -777,6 +798,27 @@ export class SessionManager {
     _replaceEntries(entries) {
         this.fileEntries = entries;
         this.entriesRevision++;
+    }
+    _trackAccountingView(identity) {
+        if (!this.persist || !this.sessionFile) return;
+        const key = accountingViewKey(this.sessionFile, this.sessionId, identity);
+        const ref = new WeakRef(this);
+        let views = accountingViews.get(key);
+        if (!views) accountingViews.set(key, views = new Set());
+        views.add(ref);
+        this.accountingView = { key, ref };
+        accountingViewFinalizer.register(this, this.accountingView, this);
+    }
+    _releaseAccountingView() {
+        if (!this.accountingView) return;
+        releaseAccountingView(this.accountingView);
+        accountingViewFinalizer.unregister(this);
+        this.accountingView = undefined;
+    }
+    /** Observe durably committed receipts from another open view of this file. */
+    subscribeExternalAccountingReceipts(listener) {
+        this.externalAccountingListeners.add(listener);
+        return () => { this.externalAccountingListeners.delete(listener); };
     }
     _buildIndex() {
         this.byId.clear();
@@ -858,14 +900,15 @@ export class SessionManager {
                     }
                 }
                 else fd = openSync(this.sessionFile, "a", 0o600);
-                let size;
+                let size, line;
                 try {
                     if (accountingOwner && (!matchesAccountingOwner(fstatSync(fd, { bigint: true }), accountingOwner) ||
                         readSessionHeaderFromFile(fd, this.sessionFile)?.id !== this.sessionId)) {
                         throw new AccountingOwnerChanged();
                     }
                     size = fstatSync(fd).size;
-                    writeFileSync(fd, `${JSON.stringify(entry)}\n`);
+                    line = `${JSON.stringify(entry)}\n`;
+                    writeFileSync(fd, line);
                     if (durable) fsyncSync(fd);
                     if (accountingOwner) verifyOwner();
                 }
@@ -882,6 +925,7 @@ export class SessionManager {
                     try { closeSync(fd); }
                     catch (error) { console.warn(`Session file close failed: ${error.message}`); }
                 }
+                return accountingOwner ? line : undefined;
             });
         }
         const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
@@ -923,7 +967,8 @@ export class SessionManager {
         this.fileEntries.push(entry);
         this.byId.set(entry.id, entry);
         if (!isAccountingOnlySessionEntry(entry)) this.leafId = entry.id;
-        try { this._persist(entry, durable, accountingOwner); }
+        let committedLine;
+        try { committedLine = this._persist(entry, durable, accountingOwner); }
         catch (error) {
             this.fileEntries.pop();
             this.byId.delete(entry.id);
@@ -931,6 +976,7 @@ export class SessionManager {
             throw error;
         }
         this.entriesRevision++;
+        return committedLine;
     }
     /** Append a message as child of current leaf, then advance leaf. Returns entry id.
      * Does not allow writing CompactionSummaryMessage and BranchSummaryMessage directly.
@@ -1018,9 +1064,28 @@ export class SessionManager {
         this.flush();
         const entry = {
             type: "custom", customType, accountingOnly: true,
-            id: generateId(this.byId), parentId, timestamp: new Date().toISOString(), data,
+            id: accountingOwner ? randomUUID() : generateId(this.byId), parentId, timestamp: new Date().toISOString(), data,
         };
-        this._appendEntry(entry, true, accountingOwner);
+        const committedLine = this._appendEntry(entry, true, accountingOwner);
+        if (committedLine) {
+            const views = accountingViews.get(accountingViewKey(this.sessionFile, this.sessionId, accountingOwner));
+            const adopted = [];
+            for (const ref of views ?? []) {
+                const view = ref.deref();
+                if (!view || view === this || view.sessionFile !== this.sessionFile || view.sessionId !== this.sessionId || view.byId.has(entry.id)) continue;
+                const recorded = JSON.parse(committedLine);
+                view.fileEntries.push(recorded);
+                view.byId.set(recorded.id, recorded);
+                view.entriesRevision++;
+                adopted.push({ view, recorded });
+            }
+            // Stage the append in all views before notifying reentrant listeners.
+            for (const { view, recorded } of adopted) {
+                for (const listener of view.externalAccountingListeners) {
+                    try { listener(recorded); } catch { /* The receipt is already durable. */ }
+                }
+            }
+        }
         return entry;
     }
     /** Capture an accounting owner before the request can outlive this runtime. */
@@ -1381,6 +1446,7 @@ export class SessionManager {
                 labelEntries.push(labelEntry);
                 parentId = labelEntry.id;
             }
+            this._releaseAccountingView();
             this._replaceEntries([header, ...pathWithoutLabels, ...labelEntries, ...accountingEntries]);
             this.sessionId = newSessionId;
             this.sessionFile = newSessionFile;

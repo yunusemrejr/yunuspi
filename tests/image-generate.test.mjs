@@ -80,7 +80,7 @@ async function picture(format = 'png') {
   return encodeImage({ width: 8, height: 8, data: new Uint8Array(8 * 8 * 4).fill(255) }, format);
 }
 
-for (const [action, reported] of [['fork',.01], ['switch',.01], ['switch',undefined], ['stop',.01]]) {
+for (const [action, reported] of [['fork',.01], ['switch',.01], ['switch',undefined], ['stop',.01], ['reopen',.01]]) {
   test(`${reported === undefined ? 'an unpriced' : 'a paid'} image request retains its source receipt after ${action}`, {timeout:15_000}, async t => {
     const { AgentSessionRuntime, DefaultResourceLoader, SessionManager, SettingsManager, createAgentSession } =
       await import('../core/coding-agent/src/index.js');
@@ -142,12 +142,16 @@ for (const [action, reported] of [['fork',.01], ['switch',.01], ['switch',undefi
       stop.signal, undefined, original.context).then(result => ({result}), error => ({error}));
     const readSource = () => SessionManager.open(sourceFile, cwd).getEntries();
     const targetEvents = [];
-    let pendingTarget;
+    let pendingTarget, targetLeaf;
     try {
       await Promise.race([submitted.promise, invoke.then(outcome => assert.fail(outcome.error ?? 'tool ended before dispatch'))]);
       assert.equal(collectSessionCost(readSource()).pending, 1);
       if (action === 'fork') assert.equal((await host.fork(manager.getLeafId(), {position:'at'})).cancelled, false);
-      if (action === 'switch') assert.equal((await host.switchSession(sessionFile().getSessionFile())).cancelled, false);
+      if (action === 'switch' || action === 'reopen') assert.equal((await host.switchSession(sessionFile().getSessionFile())).cancelled, false);
+      if (action === 'reopen') {
+        assert.equal((await host.switchSession(sourceFile)).cancelled, false);
+        targetLeaf = host.session.sessionManager.appendSessionInfo('Reopened fixture');
+      }
       if (action !== 'stop') {
         host.session.subscribe(event => targetEvents.push(event.type));
         pendingTarget = collectSessionCost(host.session.sessionManager.getEntries()).pending;
@@ -163,12 +167,25 @@ for (const [action, reported] of [['fork',.01], ['switch',.01], ['switch',undefi
     const target = collectSessionCost(host.session.sessionManager.getEntries());
     assert.equal(outbound.mock.callCount(), 1);
     assert.deepEqual({reported:source.reported, pending:source.pending, unknown:source.unknown, pendingTarget},
-      {reported:reported ?? 0, pending:0, unknown:reported === undefined, pendingTarget:action === 'stop' ? undefined : 0});
+      {reported:reported ?? 0, pending:0, unknown:reported === undefined, pendingTarget:action === 'stop' ? undefined : action === 'reopen' ? 1 : 0});
     assert.deepEqual(receipts.map(entry => [entry.parentId, entry.accountingOnly, entry.data.status]),
       [[sourceLeaf,true,'pending'], [sourceLeaf,true,'completed']]);
     assert.equal(receipts[0].data.id, receipts[1].data.id);
     assert.equal(collectSessionCost([...entries,...entries]).reported, reported ?? 0);
     if (action === 'stop') assert.match((await invoke).error?.message ?? '', /Fixture stop after image receipt/);
+    else if (action === 'reopen') {
+      const { closeHistoryReaders, readHistory } = await import('../desktop/history-reader.mjs');
+      t.after(closeHistoryReaders);
+      const active = host.session.sessionManager;
+      const coreRoot = process.env.YUNUSPI_HISTORY_TEST_CORE_ROOT || path.join(root, 'core/coding-agent');
+      const { stats } = await readHistory({ coreRoot, directory:cwd, cwd, sessionId:active.getSessionId(), statsOnly:true });
+      assert.equal(stats.costLabel, '$0.010000');
+      assert.equal(host.session.getSessionStats().costLabel, stats.costLabel);
+      assert.equal(target.pending, 0);
+      assert.equal(active.getLeafId(), targetLeaf);
+      assert.deepEqual(active.getEntries(), entries);
+      assert.deepEqual(targetEvents.filter(type => type === 'entry_appended'), ['entry_appended']);
+    }
     else {
       assert.equal(target.total, 0);
       assert.equal(target.pending, 0);

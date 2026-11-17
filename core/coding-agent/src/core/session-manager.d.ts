@@ -251,6 +251,7 @@ export declare class SessionManager {
     appendSummaryUsageReceipt(data: unknown, parentId?: string | null): CustomEntry;
     /** Bind a durable accounting append to the exact current session and leaf. */
     bindAccountingReceipt(customType: SessionAccountingReceiptType): (data: unknown) => CustomEntry | undefined;
+    subscribeExternalAccountingReceipts(listener: (entry: CustomEntry) => void): () => void;
     /** Append a session info entry (e.g., display name). Returns entry id. */
     appendSessionInfo(name: string): string;
     /** Get the current session name from the latest session_info entry, if any. */
