@@ -764,6 +764,7 @@ function rememberForegroundRun(state: SubagentState, input: { runId: string; mod
 				...foregroundChildActivityFromProgress(result.progress),
 				updatedAt,
 				...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}),
+				...(result.admissionFailure ? { admissionFailure: result.admissionFailure } : {}),
 				...(result.error ? { error: result.error } : {}),
 				...(result.finalOutput ? { finalOutput: result.finalOutput } : {}),
 				...(result.outputState ? { outputState: result.outputState } : {}),
@@ -846,6 +847,7 @@ function updateRememberedForegroundChild(state: SubagentState, input: { runId: s
 		...foregroundChildActivityFromProgress(input.result.progress),
 		updatedAt,
 		...(input.result.exitCode !== undefined ? { exitCode: input.result.exitCode } : {}),
+		admissionFailure: input.result.admissionFailure,
 		...(input.result.error ? { error: input.result.error } : {}),
 		...(input.result.finalOutput ? { finalOutput: input.result.finalOutput } : {}),
 		outputState: input.result.outputState,
@@ -889,6 +891,7 @@ function updateRememberedForegroundChild(state: SubagentState, input: { runId: s
 		...(input.result.interrupted !== undefined ? { interrupted: input.result.interrupted } : {}),
 		...(input.result.stopped !== undefined ? { stopped: input.result.stopped } : {}),
 		...(input.result.processSignal !== undefined ? { processSignal: input.result.processSignal } : {}),
+		...(input.result.admissionFailure ? { admissionFailure: input.result.admissionFailure } : {}),
 		...(input.result.timedOut !== undefined ? { timedOut: input.result.timedOut } : {}),
 		...(input.result.turnBudgetExceeded !== undefined ? { turnBudgetExceeded: input.result.turnBudgetExceeded } : {}),
 		timestamp: updatedAt,
@@ -1630,6 +1633,7 @@ async function resumeExternalJobFollowUp(input: {
 	intercomBridge: IntercomBridgeState;
 	parentSessionFile: string | null;
 	absoluteDeadlineAt?: number;
+	signal?: AbortSignal;
 }): Promise<AgentToolResult<Details>> {
 	if (input.target.kind === "live" || input.target.state === "running" || input.target.state === "queued") {
 		return { content: [{ type: "text", text: `External-job run '${input.target.runId}' is still running. Wait for completion, then use subagent({ action: "resume", id: "${input.target.runId}", message: "..." }).` }], isError: true, details: { mode: "management", results: [] } };
@@ -1682,7 +1686,7 @@ async function resumeExternalJobFollowUp(input: {
 		...input.baseAgentConfig,
 		runner: { type: "external-job", provider: runner.provider, options: runner.options },
 	};
-	const result = executeAsyncSingle(runId, compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
+	const result = await executeAsyncSingle(runId, compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
 		agent: input.target.agent,
 		task: input.followUp,
 		goal: input.followUp,
@@ -1714,6 +1718,7 @@ async function resumeExternalJobFollowUp(input: {
 		childIntercomTarget: input.intercomBridge.active ? (agent, index) => resolveSubagentIntercomTarget(runId, agent, index) : undefined,
 		availableModels: input.ctx.modelRegistry.getAvailable().map(toModelInfo),
 		outputBaseDir: resolveSingleRunOutputBaseDir(input.deps, artifactsDir, runId),
+		launchSignal: input.signal,
 		...(input.absoluteDeadlineAt !== undefined ? { absoluteDeadlineAt: input.absoluteDeadlineAt } : {}),
 		capabilityCeiling: resolveCurrentSubagentCapabilityCeiling(currentSessionId),
 		runFanoutBudget: createRunFanoutBudget(runId, resolveMaxSubagentSpawnsPerRun(input.deps.config.maxSubagentSpawnsPerRun)),
@@ -1873,6 +1878,7 @@ async function resumeAsyncRun(input: {
 			intercomBridge,
 			parentSessionFile,
 			absoluteDeadlineAt: input.absoluteDeadlineAt,
+			...(input.signal ? { signal: input.signal } : {}),
 		});
 	}
 
@@ -1914,8 +1920,9 @@ async function resumeAsyncRun(input: {
 		const chain = wrapChainTasksForFork(attachChain, contextPolicy);
 		const normalized = normalizeSkillInput(input.params.skill);
 		const parentModel = input.parentModel;
-		const result = executeAsyncChain(runId, compactOptional<Parameters<typeof executeAsyncChain>[1]>({
+		const result = await executeAsyncChain(runId, compactOptional<Parameters<typeof executeAsyncChain>[1]>({
 			chain,
+			launchSignal: input.signal,
 			task: workflowTask,
 			goal,
 			attachRoot: {
@@ -2023,8 +2030,9 @@ async function resumeAsyncRun(input: {
 	const availableModels = input.ctx.modelRegistry.getAvailable().map(toModelInfo);
 	const parentModel = input.parentModel;
 	const revivalAsyncDir = path.join(DIRS.async, runId);
-	const result = executeAsyncSingle(runId, compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
+	const result = await executeAsyncSingle(runId, compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
 		agent: target.agent,
+		launchSignal: input.signal,
 		task: buildRevivedAsyncTask(target as Parameters<typeof buildRevivedAsyncTask>[0], effectiveFollowUp),
 		goal: effectiveFollowUp,
 		agentConfig,
@@ -3280,6 +3288,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 		const normalizedSkills = normalizeSkillInput(params.skill);
 		return executeAsyncChain(id, compactOptional<Parameters<typeof executeAsyncChain>[1]>({
 			chain, resultMode: hasTasks ? "parallel" : "chain", goal: resolveAsyncEventGoal(undefined, rawChain),
+			launchSignal: data.signal,
 			agents, unknownAgentDiagnosticContext, ctx: asyncCtx, availableModels, cwd: effectiveCwd,
 			maxOutput: params.maxOutput, artifactsDir: artifactConfig.enabled ? artifactsDir : undefined, artifactConfig, shareEnabled,
 			sessionRoot, sessionFilesByFlatIndex: launches.map((launch, index) => sessionFileForTask(launch.agent, index)),
@@ -3320,6 +3329,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 		const launchThinking = route ? thinkingOverrideForTask(params.agent!, 0, route.maxThinking) : undefined;
 		const launchOptions =compactOptional<Parameters<typeof executeAsyncSingle>[1]>({
 			agent: params.agent!,
+			launchSignal: data.signal,
 			task: shouldForkAgent(contextPolicy, params.agent!) ? wrapForkTask(params.task ?? "") : (params.task ?? ""),
 			goal: params.task ?? "",
 			agentConfig: a,
@@ -3378,7 +3388,7 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			workflowAwaitAsync: params.workflowAwaitAsync,
 		});
 		data.childLaunchAttempted = true;
-		const asyncResult = executeAsyncSingle(id, launchOptions);
+		const asyncResult = await executeAsyncSingle(id, launchOptions);
 		if (!asyncResult.isError) data.childProcessStarted = true;
 		return waitForWorkflowAsyncSingleResult(params, asyncResult, { runId: id, task: params.task ?? "", signal: data.signal, state: deps.state, kill: deps.kill });
 	}

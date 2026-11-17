@@ -33,6 +33,7 @@ export type ChildTerminalCause =
 	| "provider_failure"
 	| "tool_failure"
 	| "startup_failure"
+	| "admission_failure"
 	| "timeout"
 	| "cancelled"
 	| "budget_exhausted"
@@ -61,6 +62,7 @@ export interface ChildTerminalFacts {
 	rejected?: boolean;
 	exitCode?: number | null;
 	error?: string;
+	admissionFailure?: string;
 	turnBudgetExceeded?: boolean;
 	toolBudgetBlocked?: boolean;
 	usageBudgetExceeded?: boolean;
@@ -143,7 +145,7 @@ const EMPTY_OUTPUT_PATTERN = /\b(empty (?:final )?(?:assistant )?(?:response|out
 export function childTerminalCause(facts: ChildTerminalFacts | undefined): ChildTerminalCause {
 	if (!facts || typeof facts !== "object") return "unknown";
 	const declared = lower(facts.terminalCause);
-	if (declared === "completed" || declared === "provider_failure" || declared === "tool_failure" || declared === "startup_failure"
+	if (declared === "completed" || declared === "provider_failure" || declared === "tool_failure" || declared === "startup_failure" || declared === "admission_failure"
 		|| declared === "timeout" || declared === "cancelled" || declared === "budget_exhausted" || declared === "context_overflow"
 		|| declared === "protocol_error" || declared === "process_signal" || declared === "empty_output") return declared;
 	const terminal = classifyChildTerminal(facts);
@@ -151,6 +153,7 @@ export function childTerminalCause(facts: ChildTerminalFacts | undefined): Child
 	if (terminal === "succeeded") return "completed";
 	if (terminal === "timed_out") return "timeout";
 	if (terminal === "cancelled") return "cancelled";
+	if (facts.admissionFailure === "capacity" || facts.admissionFailure === "unavailable") return "admission_failure";
 	if (lower(facts.breakerReason)) {
 		const breaker = lower(facts.breakerReason);
 		if (breaker === "excessive_tool_calls") return "budget_exhausted";

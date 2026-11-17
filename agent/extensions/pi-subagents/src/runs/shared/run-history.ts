@@ -9,6 +9,7 @@ import { isUnexplainedProcessSignal } from "./process-signal.ts";
 import { parseProgressEvidence } from "../../shared/progress-evidence.ts";
 import { classifyFailure, readFailureCause, type FailureCause, type StructuredFailureEvidence } from "./failure-cause.ts";
 import { recordFailure } from "./provider-health.ts";
+import type { ChildAdmissionFailureKind } from "./child-admission.ts";
 import { splitKnownThinkingSuffix } from "../../shared/model-info.ts";
 import { sessionObservability } from "../../../../lib/session-observability.ts";
 
@@ -78,6 +79,15 @@ function structuredEvidenceOf(r: any): StructuredFailureEvidence {
 export function failureOf(result: any): { cause: FailureCause; reason: string | undefined } {
 	if (result?.detached || result?.status === "detached") {
 		return { cause: classifyFailure({ status: "detached" }), reason: undefined };
+	}
+	const admission = result?.admissionFailure;
+	if (admission === "cancelled" || admission === "timed_out" || admission === "capacity" || admission === "unavailable") {
+		const category = admission === "cancelled" ? result.interrupted ? "interrupted" : "stopped"
+			: admission === "timed_out" ? "timeout" : "dependency";
+		return {
+			cause: { stage: "launch", category, retryable: false, deterministicShape: false, outputPresent: false, truncation: "none", acceptance: "none" },
+			reason: admission === "capacity" ? "capacity" : LEGACY_REASON[category],
+		};
 	}
 	const classified = classifyFailure(structuredEvidenceOf(result));
 	const retained = readFailureCause(result?.cause ?? result?.evidence?.cause);
@@ -164,6 +174,7 @@ export function projectRunEvidence(result: any = {}) {
 		...(route(result.model) ? { model: route(result.model) } : {}),
 		...(failure ? { outcomeReason: failure } : {}),
 		...(cause ? { cause } : {}),
+		...(["cancelled", "timed_out", "capacity", "unavailable"].includes(result.admissionFailure) ? { admissionFailure: result.admissionFailure } : {}),
 		...(typeof result.processSignal === "string" && /^SIG[A-Z0-9]{1,12}$/.test(result.processSignal) ? { signal: result.processSignal } : {}),
 		...(count(result.progressSummary?.durationMs) === undefined ? {} : { durationMs: result.progressSummary.durationMs }),
 		output: ["present", "absent"].includes(result.outputState) ? result.outputState : "unknown",
@@ -327,7 +338,7 @@ export function recordRun(
 	task: string,
 	exitCode: number,
 	durationMs: number,
-	terminal: { interrupted?: boolean; processSignal?: string | null; stopped?: boolean; timedOut?: boolean; turnBudgetExceeded?: boolean; model?: string } = {},
+	terminal: { interrupted?: boolean; processSignal?: string | null; stopped?: boolean; timedOut?: boolean; turnBudgetExceeded?: boolean; model?: string; admissionFailure?: ChildAdmissionFailureKind } = {},
 ): void {
 	let outcome: RunOutcome = "failed";
 	try {
@@ -365,7 +376,7 @@ export function recordRun(
 		recordHistoryError("record", error);
 		return;
 	}
-	if (outcome === "timed_out") {
+	if (outcome === "timed_out" && !terminal.admissionFailure) {
 		try {
 			recordTimeoutStall(terminal, durationMs);
 		} catch { /* stall cooling is best-effort */ }

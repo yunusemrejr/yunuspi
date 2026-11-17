@@ -35,6 +35,108 @@ const fixtureSse = (origin, endpoint, frames) => async input => {
     {headers:{"content-type":"text/event-stream"}});
 };
 
+const responsesTokens = {input_tokens:12, output_tokens:3, total_tokens:15, input_tokens_details:{cached_tokens:0}};
+const hostedSearch = {type:"web_search_call", id:"synthetic-web-search", status:"completed", action:{type:"search"}};
+const hostedImage = {type:"image_generation_call", id:"synthetic-image", status:"completed"};
+const reportTool = (item, output_index = 0) => ({type:"response.output_item.done", output_index, item});
+const hostedTerminal = (output, usage = responsesTokens, type = "response.completed", id = "synthetic-hosted-response") => ({type,
+  response:{id, status:type.slice("response.".length), output, usage, ...(type === "response.failed" ? {error:{message:"Fixture failed"}} : {})}});
+
+async function hostedResponse(frames, toolTypes = ["web_search"], origin = "https://api.openai.com", provider = "openai") {
+  const basePath = provider === "openrouter" ? "/api/v1" : "/v1";
+  const selected = model("fixture", provider, "openai-responses", `${origin}${basePath}`);
+  const tools = toolTypes.map(type => ({type}));
+  const respond = fixtureSse(origin, `${basePath}/responses`, frames);
+  return await openAIResponses(selected, prompt, {...session, onPayload:params => ({...params, tools}),
+    fetch:async (input, init) => {
+      assert.deepEqual(JSON.parse(init.body).tools, tools);
+      return respond(input);
+    }}).result();
+}
+
+test("native Responses search prices each actual search and file call once", async () => {
+  const openPage = {...hostedSearch, id:"synthetic-open-page", action:{type:"open_page"}};
+  const findInPage = {...hostedSearch, id:"synthetic-find-page", action:{type:"find_in_page"}};
+  const secondSearch = {...hostedSearch, id:"synthetic-second-search"};
+  const fileSearch = {type:"file_search_call", id:"synthetic-file-search", status:"completed"};
+  const frames = [
+    {type:"response.web_search_call.searching", item_id:hostedSearch.id, output_index:0},
+    {type:"response.web_search_call.completed", item_id:hostedSearch.id, output_index:0},
+    reportTool(hostedSearch), reportTool(secondSearch, 1),
+    hostedTerminal([hostedSearch, secondSearch, openPage, findInPage, fileSearch]),
+  ];
+  const result = await hostedResponse(frames, ["web_search", "file_search"]);
+  assert.equal(result.stopReason, "stop", result.errorMessage);
+  assert.deepEqual(result.content, []);
+  assert.deepEqual(result.usage.cost.serverToolUse, {web_search_call:2, file_search_call:1});
+  assert.equal(result.usage.cost.serverToolCost, .0225);
+  assert.equal(result.usage.cost.serverToolPriceBasis, "openai-api-published-tool-rates");
+  assert.equal(footerLabel(result), "$~0.022515+?");
+
+  const fileOnly = await hostedResponse([hostedTerminal([fileSearch])], ["file_search"]);
+  assert.deepEqual(fileOnly.usage.cost.serverToolUse, {file_search_call:1});
+  assert.equal(footerLabel(fileOnly), "$~0.002515");
+  const navigationOnly = await hostedResponse([hostedTerminal([openPage, findInPage])]);
+  assert.equal(navigationOnly.usage.cost.serverToolCost, undefined);
+  assert.equal(footerLabel(navigationOnly), "$~0.000015");
+});
+
+test("native Responses retains known hosted charges with incomplete or unavailable evidence", async () => {
+  const frames = [reportTool(hostedSearch)];
+  const failures = [
+    {frames:[...frames, hostedTerminal([null, hostedImage], responsesTokens, "response.failed")], stop:"error", label:"$~0.010015+?"},
+    {frames:[...frames, hostedTerminal([], null, "response.failed")], stop:"error", label:"$~0.010000+?"},
+    {frames, stop:"error", label:"$~0.010000+?"},
+  ];
+  for (const fixture of failures) {
+    const result = await hostedResponse(fixture.frames, ["web_search", "image_generation"]);
+    assert.equal(result.stopReason, fixture.stop);
+    assert.equal(result.usage.cost.serverToolUse?.web_search_call, 1);
+    assert.equal(result.usage.cost.serverToolCost, .01);
+    assert.equal(footerLabel(result), fixture.label);
+  }
+  const missingAction = {...hostedSearch, action:undefined};
+  const result = await hostedResponse([reportTool(hostedImage), hostedTerminal([missingAction, hostedImage])]);
+  assert.deepEqual(result.usage.cost.serverToolUse, {image_generation_call:1});
+  assert.equal(result.usage.cost.serverToolCost, undefined);
+  assert.equal(footerLabel(result), "$~0.000015+?");
+
+  const earlyImage = {type:"response.image_generation_call.generating", item_id:hostedImage.id, output_index:0};
+  const unsettled = await hostedResponse([earlyImage, hostedTerminal([])]);
+  assert.equal(footerLabel(unsettled), "$~0.000015+?");
+});
+
+test("native Responses isolates response, route and price provenance", async () => {
+  const response = id => ({type:"response.created", response:{id}});
+  const differentResponse = await hostedResponse([response("other-response"), reportTool(hostedSearch), hostedTerminal([])]);
+  assert.equal(differentResponse.usage.cost.serverToolUse, undefined);
+  assert.equal(footerLabel(differentResponse), "$~0.000015");
+  const foreign = {...reportTool({...hostedSearch, action:{type:"open_page"}}), response_id:"other-response"};
+  const matching = {...reportTool(hostedSearch), response_id:"synthetic-hosted-response"};
+  const byId = await hostedResponse([foreign, matching, hostedTerminal([])]);
+  assert.deepEqual(byId.usage.cost.serverToolUse, {web_search_call:1});
+  assert.equal(footerLabel(byId), "$~0.010015+?");
+  const frames = [hostedTerminal([hostedSearch])];
+  for (const result of [await hostedResponse(frames, ["web_search_preview"]),
+    await hostedResponse(frames, ["web_search"], "https://api.openai.com.example.invalid")]) {
+    assert.deepEqual(result.usage.cost.serverToolUse, {web_search_call:1});
+    assert.equal(result.usage.cost.serverToolCost, undefined);
+    assert.equal(footerLabel(result), "$~0.000015+?");
+  }
+  for (const [cost, label] of [[0,"$0.000"], [.125,"$0.125000"]]) {
+    const reported = await hostedResponse([hostedTerminal([hostedSearch, hostedImage], {...responsesTokens, cost})],
+      ["web_search", "image_generation"], "https://openrouter.ai", "openrouter");
+    assert.deepEqual(reported.usage.cost.serverToolUse, {web_search_call:1, image_generation_call:1});
+    assert.equal(reported.usage.cost.serverToolCost, undefined);
+    assert.equal(footerLabel(reported), label);
+  }
+  const localShell = {type:"shell_call", id:"synthetic-shell", environment:{type:"local"}, status:"completed"};
+  const localTool = {type:"function_call", id:"synthetic-local", name:"web_search", status:"completed"};
+  const local = await hostedResponse([hostedTerminal([localShell, localTool])], []);
+  assert.equal(local.usage.cost.serverToolUse, undefined);
+  assert.equal(footerLabel(local), "$~0.000015");
+});
+
 test("Responses billing and terminal identity survive malformed optional output", async () => {
   const origin = "https://openrouter.ai";
   const selected = model("fixture", "openrouter", "openai-responses", `${origin}/api/v1`);
@@ -279,6 +381,15 @@ test("a Codex failed terminal frame retains identity and usage without waiting f
     assert.equal(footerLabel(result), "sub");
     assert.equal(cancelled, true);
   }
+});
+
+test("Codex hosted work preserves subscription and possible extra charges", async () => {
+  const fileSearch = {type:"response.file_search_call.completed", item_id:"synthetic-file-search", output_index:0};
+  const result = await fakeCodex(async () => new Response(codexWire([fileSearch, hostedTerminal([hostedImage])]))).result();
+  assert.equal(result.stopReason, "stop", result.errorMessage);
+  assert.deepEqual(result.usage.cost.serverToolUse, {file_search_call:1, image_generation_call:1});
+  assert.equal(result.usage.cost.serverToolCost, undefined);
+  assert.equal(footerLabel(result), "sub+?");
 });
 
 test("Codex fake SSE in-band error codes preserve throttling, known terminal failures and default policy", async () => {

@@ -4,6 +4,7 @@ import { shortHash } from "../utils/hash.js";
 import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { appendGrammarToolInputJsonDelta, getGrammarToolInput, getJsonSchemaToolParameters, resolveGrammarConstrainedSampling, resolveJsonSchemaStrictSampling, } from "./constrained-sampling.js";
+import { createResponsesHostedUsageMeter } from "./openai-responses-hosted-usage.js";
 import { transformMessages } from "./transform-messages.js";
 // =============================================================================
 // Utilities
@@ -328,6 +329,15 @@ function appendCustomToolCallInput(block, nextInput, close) {
     return delta;
 }
 export async function processResponsesStream(openaiStream, output, stream, model, options) {
+    const hostedUsage = createResponsesHostedUsageMeter(model.provider, options?.hostedToolRates);
+    try {
+        await decodeResponsesStream(openaiStream, output, stream, model, options, hostedUsage.observe);
+    } finally {
+        hostedUsage.finish(output);
+    }
+}
+
+async function decodeResponsesStream(openaiStream, output, stream, model, options, observeHostedUsage) {
     let sawTerminalResponseEvent = false;
     const outputSlots = new Map();
     const reasoningBlocksById = new Map();
@@ -516,7 +526,8 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
         }
     };
     for await (const event of openaiStream) {
-        if (event.type === "response.created") {
+        observeHostedUsage(event);
+        if (event.type === "response.created" || event.type === "response.in_progress") {
             rememberResponseId(event.response);
             createdAt ??= providerCreatedMs(event.response?.created_at);
         }

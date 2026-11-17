@@ -7,8 +7,6 @@ import { modelRouteCandidateAt } from "../../shared/model-route.ts";
 import { recordModelRoutingAttempt } from "../../../../lib/model-routing-metrics.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
@@ -162,6 +160,7 @@ import { resolveWatchdogConfig } from "../../watchdog/settings.ts";
 import { writeAsyncStepRecoveryDescriptor } from "./async-resume.ts";
 import { createBoundedByteTail, createBoundedLineReader, formatProtocolOutputLimit, MAX_CHILD_STDERR_BYTES, PI_AGGREGATE_EVENT_PROJECTOR, projectChildLifecycle, type ChildLifecycleAction, type ChildLifecycleState, type ProtocolOutputLimit } from "../shared/child-protocol.ts";
 import { acquireSessionLease, type SessionLeaseRequest } from "../shared/session-lease.ts";
+import { acquireChildAdmission, type ChildAdmissionFailureKind, type ChildAdmissionLease } from "../shared/child-admission.ts";
 import { buildExternalCliPrompt, runExternalCli } from "../shared/external-cli-runner.ts";
 import { resolveClaudeCodeLaunch } from "../shared/claude-code-adapter.ts";
 import { resolveCodexExecLaunch } from "../shared/codex-exec-adapter.ts";
@@ -266,6 +265,7 @@ interface StepResult {
 	model?: string;
 	attemptedModels?: string[];
 	modelAttempts?: ModelAttempt[];
+	admissionFailure?: ChildAdmissionFailureKind;
 	/** True when the dispatch failed because the input exceeded the model's context window. */
 	contextOverflow?: boolean;
 	totalCost?: CostSummary;
@@ -628,6 +628,8 @@ function formatChildFailureDiagnostic(input: {
 }
 
 function runPiStreaming(
+	admission: ChildAdmissionLease,
+	onDispatched: () => void,
 	args: string[],
 	cwd: string,
 	outputFile: string,
@@ -655,65 +657,27 @@ function runPiStreaming(
 	return new Promise((resolve) => {
 		const startedAt = Date.now();
 		const processInstanceId = randomUUID();
-		onWriterProcess?.({ state: "spawning" });
-		const outputStream = fs.createWriteStream(outputFile, { flags: "w" });
-		// PI_SUBAGENT_PRESSURE (local patch; re-applied by verify-harness.mjs): file-based
-// concurrency gate for subagent child processes. Each running child holds a slot
-// file under ~/.pi/inference-slots; acquire blocks until fewer than
-// PI_SUBAGENT_MAX_CONCURRENT (default 4) children are live so a fan-out cannot
-// flood the shared provider quota with simultaneous large-context inferences.
-// Deliberately duplicated verbatim in runs/foreground/execution.ts and
-// runs/background/subagent-runner.ts (independent entry points; no shared graph).
-const __piSubagentGate = (() => {
-    const slotDir = () => path.join(homedir(), ".pi", "inference-slots");
-    const cap = (() => {
-        const v = Number.parseInt(process.env.PI_SUBAGENT_MAX_CONCURRENT ?? "4", 10);
-        return Number.isFinite(v) && v > 0 ? v : 4;
-    })();
-    const sweepStale = () => {
-        let names: string[] = [];
-        try { names = readdirSync(slotDir()); } catch { return; }
-        const now = Date.now();
-        for (const name of names) {
-            const p = path.join(slotDir(), name);
-            try { if (now - statSync(p).mtimeMs > 300000) unlinkSync(p); } catch { }
-        }
-    };
-    const active = (): number => {
-        sweepStale();
-        try { return readdirSync(slotDir()).length; } catch { return 0; }
-    };
-    const sleepMs = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-    const acquire = (): string => {
-        try { mkdirSync(slotDir(), { recursive: true }); } catch { }
-        const deadline = Date.now() + 30000;
-        while (Date.now() < deadline) {
-            const slot = `subagent-${process.pid}-${Math.random().toString(36).slice(2, 10)}.lock`;
-            const slotPath = path.join(slotDir(), slot);
-            // Wait for a free slot under cap; sweep stale locks along the way.
-            if (active() >= cap) { sleepMs(75); continue; }
-            // Slot-name collision (writeFileSync with wx throws EEXIST) is just a
-            // retry with a fresh random name — never recurse unbounded.
-            try { writeFileSync(slotPath, String(Date.now()), { flag: "wx" }); return slot; } catch { sleepMs(10); }
-        }
-        return ""; // proceed rather than deadlock a run
-    };
-    const release = (slot: string) => { if (slot) { try { unlinkSync(path.join(slotDir(), slot)); } catch { } } };
-    return { acquire, release };
-})();
-const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: recoveryRoutesEnv(modelCandidates) };
+		const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: recoveryRoutesEnv(modelCandidates) };
 		const spawnSpec = getPiSpawnCommand(args, {
 			...(piPackageRoot ? { piPackageRoot } : {}),
 			...(piArgv1 ? { argv1: piArgv1 } : {}),
 		});
-		const __subagentSlot = __piSubagentGate.acquire();
-		const child = spawn(spawnSpec.command, spawnSpec.args, {
-			cwd,
-			stdio: ["ignore", "pipe", "pipe"],
-			env: spawnEnv,
-			windowsHide: true,
-			detached: process.platform !== "win32",
-		});
+		const child = (() => {
+			try {
+				onWriterProcess?.({ state: "spawning" });
+				return spawn(spawnSpec.command, spawnSpec.args, {
+					cwd,
+					stdio: ["ignore", "pipe", "pipe"],
+					env: spawnEnv,
+					windowsHide: true,
+					detached: process.platform !== "win32",
+				});
+			} catch (error) {
+				try { onWriterProcess?.({ state: "none" }); } catch { /* Finalization clears writer ownership. */ }
+				throw error;
+			}
+		})();
+		const outputStream = fs.createWriteStream(outputFile, { flags: "w" });
 		let processTreeController: OwnedProcessTreeController | undefined;
 		const stderrTail = createBoundedByteTail();
 		const rawStdoutTail = createBoundedByteTail();
@@ -723,6 +687,8 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 		let stopReason: string | undefined;
 		let writerRegistrationError: string | undefined;
 		if (typeof child.pid === "number") {
+			admission.markChild(child.pid);
+			onDispatched();
 			processTreeController = createOwnedProcessTreeController(child.pid);
 			try {
 				onWriterProcess?.({ state: "running", pid: child.pid });
@@ -1153,6 +1119,7 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 			clearDrainTimers();
 		});
 		child.on("close", async (exitCode, signal) => {
+			if (settled) return;
 			settled = true;
 			const processCloseObservedAt = Date.now();
 			const processTree = processTreeController
@@ -1187,7 +1154,6 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 				stopped,
 				forcedDrainAfterFinalSuccess: forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal,
 			}) ? formatProcessSignalError(signal!) : undefined;
-			__piSubagentGate.release(__subagentSlot);
 			resolve(omitUndefinedProperties({
 				stderr,
 				exitCode: timedOut || stopped ? 1 : interrupted || (forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal) ? 0 : forcedTerminationSignal || signal ? (exitCode ?? 1) : exitCode,
@@ -1220,6 +1186,12 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 		});
 
 		child.on("error", (spawnError) => {
+			const spawnErrorMessage = spawnError instanceof Error ? spawnError.message : String(spawnError);
+			// Failed signals can report an error while the child is still alive.
+			if (typeof child.pid === "number") {
+				error ??= spawnErrorMessage;
+				return;
+			}
 			settled = true;
 			try {
 				onWriterProcess?.({ state: "none" });
@@ -1237,8 +1209,6 @@ const spawnEnv = { ...process.env, ...(env ?? {}), ...getSubagentDepthEnv(maxSub
 			outputStream.end();
 			const stderr = stderrTail.text();
 			const finalOutput = getFinalOutput(messages) || rawStdoutTail.text().trim();
-			const spawnErrorMessage = spawnError instanceof Error ? spawnError.message : String(spawnError);
-			__piSubagentGate.release(__subagentSlot);
 			resolve(omitUndefinedProperties({ stderr, exitCode: 1, messages, stopReason, usage, toolCount, durationMs: Date.now() - startedAt, model, error: stopped ? (stopMessage ?? "Subagent stopped by user.") : timedOut ? (timeoutMessage ?? "Subagent timed out.") : error ?? assistantError ?? spawnErrorMessage, protocolError, finalOutput: (timedOut || stopped) && !finalOutput.trim() ? (stopped ? stopMessage ?? "Subagent stopped by user." : timeoutMessage ?? "Subagent timed out.") : finalOutput, outputState: finalOutput.trim() ? "present" : "absent", timedOut, stopped, observedMutationAttempt, structuredOutputToolInvoked, structuredOutputMessageStartIndex, watchdog: childWatchdogState, processInstanceId, processTree: { state: "unknown", reason: "verification-failed", diagnostic: spawnErrorMessage } }));
 		});
 	});
@@ -1399,10 +1369,48 @@ interface SingleStepContext {
 	orcaProgressTab?: OrcaProgressTab;
 }
 
+type ChildAdmissionFailure = { kind: "stopped" | "timed_out" | "interrupted" | "capacity" | "unavailable"; error: string };
+
+function pendingAdmissionControl(ctx: SingleStepContext, request?: "stopped" | "interrupted"): ChildAdmissionFailure | undefined {
+	if (request === "stopped" || ctx.stopSignal?.aborted) {
+		return { kind: "stopped", error: ctx.stopMessage ?? "Subagent stopped by user." };
+	}
+	if (ctx.timeoutSignal?.aborted || ctx.deadlineAt !== undefined && Date.now() >= ctx.deadlineAt) {
+		return { kind: "timed_out", error: ctx.timeoutMessage ?? "Subagent timed out." };
+	}
+	if (request === "interrupted") return { kind: "interrupted", error: "Paused before subagent process admission." };
+}
+
+async function waitForChildProcessAdmission(ctx: SingleStepContext): Promise<ChildAdmissionFailure | { kind: "admitted"; lease: ChildAdmissionLease }> {
+	const waiting = new AbortController();
+	let request: "stopped" | "interrupted" | undefined;
+	const cancel = (kind: NonNullable<typeof request>) => {
+		request ??= kind;
+		waiting.abort();
+	};
+	ctx.registerStop?.(() => cancel("stopped"));
+	ctx.registerInterrupt?.(() => cancel("interrupted"));
+	try {
+		const signal = AbortSignal.any([waiting.signal, ...[ctx.stopSignal, ctx.timeoutSignal].filter((item): item is AbortSignal => Boolean(item))]);
+		// PI_SUBAGENT_PRESSURE: wait without blocking the runner's control inbox.
+		const admission = await acquireChildAdmission(omitUndefinedProperties({ signal, deadlineAt: ctx.deadlineAt }));
+		const control = pendingAdmissionControl(ctx, request);
+		if (control) {
+			if (admission.kind === "admitted") admission.lease.release();
+			return control;
+		}
+		return admission.kind === "admitted" ? admission : { kind: admission.kind === "cancelled" ? "stopped" : admission.kind, error: admission.error };
+	} finally {
+		ctx.registerStop?.(undefined);
+		ctx.registerInterrupt?.(undefined);
+	}
+}
+
 /** Run a single pi agent step, returning output and metadata */
 async function runSingleStepInner(
 	step: SubagentStep,
 	ctx: SingleStepContext,
+	onDispatched: () => void,
 ): Promise<StepResult & { completionGuardTriggered?: boolean }> {
 	if (step.importAsyncRoot) {
 		let importTimedOut = false;
@@ -1540,7 +1548,8 @@ async function runSingleStepInner(
 
 	let artifactPaths: ArtifactPaths | undefined;
 	let transcriptWriter: ChildTranscriptWriter | undefined;
-	if (ctx.artifactsDir && ctx.artifactConfig?.enabled !== false) {
+	const prepareArtifacts = () => {
+		if (artifactPaths || !ctx.artifactsDir || ctx.artifactConfig?.enabled === false) return;
 		const index = ctx.flatStepCount > 1 ? ctx.flatIndex : undefined;
 		artifactPaths = getArtifactPaths(ctx.artifactsDir, ctx.id, step.agent, index);
 		fs.mkdirSync(ctx.artifactsDir, { recursive: true });
@@ -1557,10 +1566,12 @@ async function runSingleStepInner(
 				cwd: step.cwd ?? ctx.cwd,
 			});
 		}
-	}
-	transcriptWriter?.writeInitialUserMessage(`${PROMPT_REDACTED}; live Prompt Audit only.`);
+		transcriptWriter?.writeInitialUserMessage(`${PROMPT_REDACTED}; live Prompt Audit only.`);
+	};
 
 	if (step.runner?.type === "external-cli") {
+		prepareArtifacts();
+		onDispatched();
 		const externalCwd = step.cwd ?? ctx.cwd;
 		const adapterLaunch = step.runner.adapter === "codex-exec" || step.runner.adapter === "codex-exec-writer"
 			? resolveCodexExecLaunch({ adapter: step.runner.adapter, command: step.runner.command, asyncDir: path.dirname(ctx.outputFile), stepIndex: ctx.flatIndex })
@@ -1639,6 +1650,8 @@ async function runSingleStepInner(
 	}
 
 	if (step.runner?.type === "external-job") {
+		prepareArtifacts();
+		onDispatched();
 		const runner: ExternalJobRunnerStatus = {
 			type: "external-job",
 			provider: step.runner.provider,
@@ -1711,10 +1724,6 @@ async function runSingleStepInner(
 	const effectiveCwd = step.cwd ?? ctx.cwd;
 	const cwdError = preflightLaunchCwd(step.requestedCwd ?? effectiveCwd, effectiveCwd);
 	if (cwdError) return { agent: step.agent, output: cwdError, error: cwdError, exitCode: 1, context: step.context };
-	if (step.context === "fork" && step.sessionFile && fs.existsSync(step.sessionFile)) {
-		alignForkedSessionCwd(step.sessionFile, effectiveCwd);
-	}
-
 	const candidates = step.modelCandidates !== undefined
 		? step.modelCandidates.length > 0 ? step.modelCandidates : [undefined]
 		: step.model
@@ -1750,18 +1759,12 @@ async function runSingleStepInner(
 	let launchWarningsEmitted = false;
 	let abortRecoveryAttempted = false;
 	let nextAttemptTask = task;
+	let admissionFailure: ChildAdmissionFailure | undefined;
 	modelAttemptsLoop: while (modelIndex < candidates.length) {
-		if (ctx.timeoutSignal?.aborted || ctx.stopSignal?.aborted || ctx.skipAcceptance?.()) break;
 		const recoveringAbort = abortRecoveryAttempted;
 		const attemptTask = nextAttemptTask;
 		const candidate = candidates[modelIndex];
 		const modelRouteCandidate = modelRouteCandidateAt(step.modelRouteCandidates, modelIndex);
-		recordModelRoutingAttempt({
-			route: modelRouteCandidate?.route ?? candidate,
-			source: "subagents",
-			fallback: false,
-			providerRouting: modelRouteCandidate?.providerRouting,
-		});
 		const expectedModelForVerification = candidate;
 		try {
 			assertThinkingWithinCeiling({ model: candidate, configThinking: step.thinking, ceiling: step.thinkingCeiling ?? decodeThinkingCeiling(process.env[SUBAGENT_THINKING_CEILING_ENV]), agent: step.agent, runId: ctx.id });
@@ -1769,196 +1772,233 @@ async function runSingleStepInner(
 			const message = error instanceof Error ? error.message : String(error);
 			return omitUndefinedProperties({ agent: step.agent, output: message, error: message, exitCode: 1, context: step.context, thinkingCeiling: step.thinkingCeiling });
 		}
-		ctx.onAttemptStart?.(omitUndefinedProperties({
-			model: candidate,
-			thinking: resolveEffectiveThinking(candidate, step.thinking),
-			contextLimit: findModelInfo(candidate, step.modelVerificationRegistry)?.contextWindow,
-		}));
-		const outputSnapshot = captureSingleOutputSnapshot(step.outputPath);
-		if (effectiveStructuredOutput) {
-			const cleanupError = clearStructuredOutputCaptures(effectiveStructuredOutput);
-			if (cleanupError) {
-				return omitUndefinedProperties({ agent: step.agent, output: cleanupError, error: cleanupError, exitCode: 1, context: step.context });
+		const admission = await waitForChildProcessAdmission(ctx);
+		if (admission.kind !== "admitted") {
+			admissionFailure = admission;
+			break modelAttemptsLoop;
+		}
+		let run: RunPiStreamingResult;
+		let outputSnapshot: SingleOutputSnapshot | undefined;
+		let tempDir: string | null | undefined;
+		let toolAvailabilityError: string | undefined;
+		let runtimeAcknowledgedExtensions: RuntimeAcknowledgedChildExtensionsV1 | undefined;
+		try {
+			outputSnapshot = captureSingleOutputSnapshot(step.outputPath);
+			if (effectiveStructuredOutput) {
+				const cleanupError = clearStructuredOutputCaptures(effectiveStructuredOutput);
+				if (cleanupError) {
+					return omitUndefinedProperties({ agent: step.agent, output: cleanupError, error: cleanupError, exitCode: 1, context: step.context });
+				}
 			}
-		}
-		const watchdogConfig = resolveWatchdogConfig(step.cwd ?? ctx.cwd);
-		const extensionBindings = normalizeExtensionBindings(step.extensionBindings)?.value;
-		const childWatchdog = watchdogConfig.ok
-			? resolveChildWatchdogConfig({
-				config: watchdogConfig.config,
-				agent: step.agent,
-				runId: ctx.id,
-				childIndex: ctx.flatIndex,
-			})
-			: undefined;
-		const { args, env, tempDir, toolDiagnosticPath, runtimeAcknowledgedExtensionsPath, capabilityAudit: attemptCapabilityAudit, warnings } = buildPiArgs(omitUndefinedProperties({
-			parentSessionId: step.parentSessionId,
-			forkCacheKey: step.context === "fork" ? deriveForkPromptCacheKey(step.parentSessionId) : undefined,
-			baseArgs: ["--mode", "json", "-p"],
-			task: attemptTask,
-			taskDelivery: taskDeliveryOverride,
-			sessionEnabled,
-			sessionDir,
-			sessionFile: step.sessionFile,
-			model: candidate,
-			inheritProjectContext: step.inheritProjectContext,
-			inheritGlobalContext: step.inheritGlobalContext,
-			inheritSkills: step.inheritSkills,
-			requireReadTool: Boolean(step.skills?.length),
-			tools: step.tools,
-			excludeTools: step.excludeTools,
-			allowNestedSubagents: step.allowNestedSubagents,
-			extensions: step.extensions,
-			subagentOnlyExtensions: step.subagentOnlyExtensions,
-			fast: step.fast,
-			modelCandidates: step.modelCandidates,
-			modelRouteCandidate,
-			systemPrompt: step.systemPrompt ?? "",
-			systemPromptMode: step.systemPromptMode,
-			mcpDirectTools: step.mcpDirectTools,
-			mcpConfig: step.mcpConfig,
-			runtimeServerNames: step.runtimeServerNames,
-			capabilityCeiling: step.capabilityCeiling ?? ctx.capabilityCeiling,
-			cwd: step.cwd ?? ctx.cwd,
-			promptFileStem: step.agent,
-			intercomSessionName: ctx.childIntercomTarget,
-			sessionName: childSessionName,
-			orchestratorIntercomTarget: ctx.orchestratorIntercomTarget,
-			runId: ctx.id,
-			childAgentName: step.agent,
-			childIndex: ctx.flatIndex,
-			parentEventSink: ctx.nestedRoute?.eventSink,
-			parentControlInbox: ctx.nestedRoute?.controlInbox,
-			parentRootRunId: ctx.nestedRoute?.rootRunId,
-			parentCapabilityToken: ctx.nestedRoute?.capabilityToken,
-			runFanoutBudget: ctx.runFanoutBudget ? {
-				...ctx.runFanoutBudget,
-				...(step.runFanoutPath ? { parentPath: `${ctx.runFanoutBudget.parentPath ? `${ctx.runFanoutBudget.parentPath}/` : ""}${step.runFanoutPath}` } : {}),
-			} : undefined,
-			steerInboxDir: ctx.steerInboxDir,
-			steerCapabilityPath: ctx.steerCapabilityPath,
-			steerAckDir: ctx.steerAckDir,
-			structuredOutput: effectiveStructuredOutput,
-			toolBudget: step.toolBudget,
-			permissionRules: step.permissionRules,
-			permissionAuditPath: step.permissionRules && ctx.artifactsDir
-				? path.join(ctx.artifactsDir, "permission-audit", `${ctx.id}-${ctx.flatIndex}.jsonl`)
-				: undefined,
-			childWatchdog,
-			waitToolEnabled: step.waitToolEnabled,
-			waitToolDefaultTimeoutMs: step.waitToolDefaultTimeoutMs,
-			gitAuthority: step.gitAuthority === true ? true : undefined,
-			thinkingCeiling: step.thinkingCeiling,
-			extensionBindings,
-		}));
-		if (!launchWarningsEmitted && warnings.length > 0) {
-			for (const warning of warnings) console.warn(`[pi-subagents] ${warning}`);
-			launchWarningsEmitted = true;
-		}
-		if (step.definitionDigest) {
-			const toolPlan = resolvedTaskToolPlan ?? resolvePiLaunchToolPlan(omitUndefinedProperties({
+			const watchdogConfig = resolveWatchdogConfig(step.cwd ?? ctx.cwd);
+			const extensionBindings = normalizeExtensionBindings(step.extensionBindings)?.value;
+			const childWatchdog = watchdogConfig.ok
+				? resolveChildWatchdogConfig({
+					config: watchdogConfig.config,
+					agent: step.agent,
+					runId: ctx.id,
+					childIndex: ctx.flatIndex,
+				})
+				: undefined;
+			const { args, env, tempDir: launchTempDir, toolDiagnosticPath, runtimeAcknowledgedExtensionsPath, capabilityAudit: attemptCapabilityAudit, warnings } = buildPiArgs(omitUndefinedProperties({
+				parentSessionId: step.parentSessionId,
+				forkCacheKey: step.context === "fork" ? deriveForkPromptCacheKey(step.parentSessionId) : undefined,
+				baseArgs: ["--mode", "json", "-p"],
+				task: attemptTask,
+				taskDelivery: taskDeliveryOverride,
+				sessionEnabled,
+				sessionDir,
+				sessionFile: step.sessionFile,
+				model: candidate,
+				inheritProjectContext: step.inheritProjectContext,
+				inheritGlobalContext: step.inheritGlobalContext,
+				inheritSkills: step.inheritSkills,
+				requireReadTool: Boolean(step.skills?.length),
 				tools: step.tools,
 				excludeTools: step.excludeTools,
 				allowNestedSubagents: step.allowNestedSubagents,
 				extensions: step.extensions,
 				subagentOnlyExtensions: step.subagentOnlyExtensions,
 				fast: step.fast,
-				model: step.model,
 				modelCandidates: step.modelCandidates,
+				modelRouteCandidate,
+				systemPrompt: step.systemPrompt ?? "",
+				systemPromptMode: step.systemPromptMode,
 				mcpDirectTools: step.mcpDirectTools,
 				mcpConfig: step.mcpConfig,
 				runtimeServerNames: step.runtimeServerNames,
-				cwd: step.cwd ?? ctx.cwd,
-				requireReadTool: Boolean(step.skills?.length),
-				structuredOutput: Boolean(effectiveStructuredOutput),
 				capabilityCeiling: step.capabilityCeiling ?? ctx.capabilityCeiling,
-				inheritedCapabilityCeiling: decodeSubagentCapabilityCeiling(process.env[SUBAGENT_CAPABILITY_CEILING_ENV]),
+				cwd: step.cwd ?? ctx.cwd,
+				promptFileStem: step.agent,
+				intercomSessionName: ctx.childIntercomTarget,
+				sessionName: childSessionName,
+				orchestratorIntercomTarget: ctx.orchestratorIntercomTarget,
+				runId: ctx.id,
+				childAgentName: step.agent,
+				childIndex: ctx.flatIndex,
+				parentEventSink: ctx.nestedRoute?.eventSink,
+				parentControlInbox: ctx.nestedRoute?.controlInbox,
+				parentRootRunId: ctx.nestedRoute?.rootRunId,
+				parentCapabilityToken: ctx.nestedRoute?.capabilityToken,
+				runFanoutBudget: ctx.runFanoutBudget ? {
+					...ctx.runFanoutBudget,
+					...(step.runFanoutPath ? { parentPath: `${ctx.runFanoutBudget.parentPath ? `${ctx.runFanoutBudget.parentPath}/` : ""}${step.runFanoutPath}` } : {}),
+				} : undefined,
+				steerInboxDir: ctx.steerInboxDir,
+				steerCapabilityPath: ctx.steerCapabilityPath,
+				steerAckDir: ctx.steerAckDir,
+				structuredOutput: effectiveStructuredOutput,
+				toolBudget: step.toolBudget,
 				permissionRules: step.permissionRules,
+				permissionAuditPath: step.permissionRules && ctx.artifactsDir
+					? path.join(ctx.artifactsDir, "permission-audit", `${ctx.id}-${ctx.flatIndex}.jsonl`)
+					: undefined,
+				childWatchdog,
+				waitToolEnabled: step.waitToolEnabled,
+				waitToolDefaultTimeoutMs: step.waitToolDefaultTimeoutMs,
+				gitAuthority: step.gitAuthority === true ? true : undefined,
+				thinkingCeiling: step.thinkingCeiling,
+				extensionBindings,
 			}));
-			launchResolvedExtensions = projectLaunchResolvedChildExtensions(toolPlan);
-			actualLaunchContractDigest = launchBindingDigest(omitUndefinedProperties({
-				definitionDigest: step.definitionDigest,
-				task: step.launchBindingTask ?? task,
-				...(candidate ? { model: candidate } : {}),
-				modelCandidates: candidates as string[],
-				modelRouteCandidates: step.modelRouteCandidates,
-				...(step.fast !== undefined ? { fast: step.fast } : {}),
-				...(resolveEffectiveThinking(candidate, step.thinking) ? { thinking: resolveEffectiveThinking(candidate, step.thinking) } : {}),
-				...(step.thinkingCeiling ? { thinkingCeiling: step.thinkingCeiling } : {}),
-				systemPrompt: step.systemPrompt ?? "",
-				systemPromptMode: step.systemPromptMode,
-				inheritProjectContext: step.inheritProjectContext,
-				inheritGlobalContext: step.inheritGlobalContext,
-				inheritSkills: step.inheritSkills,
-				skills: step.skills,
-				tools: toolPlan.effectiveToolAllowlist,
-				...(toolPlan.excludeTools.length > 0 ? { excludeTools: toolPlan.excludeTools } : {}),
-				extensions: toolPlan.extensionArgs,
-				mcpDirectTools: toolPlan.effectiveMcpTools,
-				...(step.outputPath ? { outputPath: step.outputPath } : {}),
-				...(step.outputMode ? { outputMode: step.outputMode } : {}),
-				...(step.structuredOutputSchema ? { structuredOutputSchema: step.structuredOutputSchema } : {}),
-				...(extensionBindings ? { extensionBindings } : {}),
-			}));
+			tempDir = launchTempDir;
+			if (!launchWarningsEmitted && warnings.length > 0) {
+				for (const warning of warnings) console.warn(`[pi-subagents] ${warning}`);
+				launchWarningsEmitted = true;
+			}
+			if (step.definitionDigest) {
+				const toolPlan = resolvedTaskToolPlan ?? resolvePiLaunchToolPlan(omitUndefinedProperties({
+					tools: step.tools,
+					excludeTools: step.excludeTools,
+					allowNestedSubagents: step.allowNestedSubagents,
+					extensions: step.extensions,
+					subagentOnlyExtensions: step.subagentOnlyExtensions,
+					fast: step.fast,
+					model: step.model,
+					modelCandidates: step.modelCandidates,
+					mcpDirectTools: step.mcpDirectTools,
+					mcpConfig: step.mcpConfig,
+					runtimeServerNames: step.runtimeServerNames,
+					cwd: step.cwd ?? ctx.cwd,
+					requireReadTool: Boolean(step.skills?.length),
+					structuredOutput: Boolean(effectiveStructuredOutput),
+					capabilityCeiling: step.capabilityCeiling ?? ctx.capabilityCeiling,
+					inheritedCapabilityCeiling: decodeSubagentCapabilityCeiling(process.env[SUBAGENT_CAPABILITY_CEILING_ENV]),
+					permissionRules: step.permissionRules,
+				}));
+				launchResolvedExtensions = projectLaunchResolvedChildExtensions(toolPlan);
+				actualLaunchContractDigest = launchBindingDigest(omitUndefinedProperties({
+					definitionDigest: step.definitionDigest,
+					task: step.launchBindingTask ?? task,
+					...(candidate ? { model: candidate } : {}),
+					modelCandidates: candidates as string[],
+					modelRouteCandidates: step.modelRouteCandidates,
+					...(step.fast !== undefined ? { fast: step.fast } : {}),
+					...(resolveEffectiveThinking(candidate, step.thinking) ? { thinking: resolveEffectiveThinking(candidate, step.thinking) } : {}),
+					...(step.thinkingCeiling ? { thinkingCeiling: step.thinkingCeiling } : {}),
+					systemPrompt: step.systemPrompt ?? "",
+					systemPromptMode: step.systemPromptMode,
+					inheritProjectContext: step.inheritProjectContext,
+					inheritGlobalContext: step.inheritGlobalContext,
+					inheritSkills: step.inheritSkills,
+					skills: step.skills,
+					tools: toolPlan.effectiveToolAllowlist,
+					...(toolPlan.excludeTools.length > 0 ? { excludeTools: toolPlan.excludeTools } : {}),
+					extensions: toolPlan.extensionArgs,
+					mcpDirectTools: toolPlan.effectiveMcpTools,
+					...(step.outputPath ? { outputPath: step.outputPath } : {}),
+					...(step.outputMode ? { outputMode: step.outputMode } : {}),
+					...(step.structuredOutputSchema ? { structuredOutputSchema: step.structuredOutputSchema } : {}),
+					...(extensionBindings ? { extensionBindings } : {}),
+				}));
+			}
+			// Preserve each native chain/fan-out child's launch contract before it
+			// executes. Dynamic children use their materialized index and budget path.
+			const recoveryDir = path.dirname(ctx.outputFile);
+			if (!fs.existsSync(path.join(recoveryDir, "recovery-descriptor.json"))) {
+				if (!ctx.runFanoutBudget) throw new Error("Async child is missing its run fan-out budget identity.");
+				writeAsyncStepRecoveryDescriptor(recoveryDir, ctx.flatIndex, {
+					...step, model: candidate, thinking: resolveEffectiveThinking(candidate, step.thinking),
+					launchContractDigest: actualLaunchContractDigest, launchResolvedExtensions, extensionBindings,
+				}, { sourceRunId: ctx.id, runFanoutBudget: ctx.runFanoutBudget, cwd: ctx.cwd,
+					sessionDir: ctx.sessionDir, artifactsDir: ctx.artifactsDir,
+					capabilityCeiling: ctx.capabilityCeiling });
+			}
+			capabilityAudit = attemptCapabilityAudit;
+			prepareArtifacts();
+			if (writerAttemptCount === 0 && step.context === "fork" && step.sessionFile && fs.existsSync(step.sessionFile)) {
+				alignForkedSessionCwd(step.sessionFile, effectiveCwd);
+			}
+			admissionFailure = pendingAdmissionControl(ctx);
+			if (admissionFailure) break modelAttemptsLoop;
+			try {
+				admission.lease.markSpawning();
+			} catch (error) {
+				admissionFailure = { kind: "unavailable", error: `Subagent process admission could not record writer startup: ${error instanceof Error ? error.message : String(error)}` };
+				break modelAttemptsLoop;
+			}
+			run = await runPiStreaming(
+				admission.lease,
+				() => {
+					onDispatched();
+					recordModelRoutingAttempt({
+						route: modelRouteCandidate?.route ?? candidate,
+						source: "subagents",
+						fallback: false,
+						providerRouting: modelRouteCandidate?.providerRouting,
+					});
+					try {
+						ctx.onAttemptStart?.(omitUndefinedProperties({
+							model: candidate,
+							thinking: resolveEffectiveThinking(candidate, step.thinking),
+							contextLimit: findModelInfo(candidate, step.modelVerificationRegistry)?.contextWindow,
+						}));
+						shadowAssistanceLaunch({ agent: step.agent, task: step.launchBindingTask ?? task, model: candidate ?? step.model, runId: ctx.id, stepIndex: ctx.flatIndex, mode: "async" });
+					} catch { /* Observation must not leave a launched child untracked. */ }
+				},
+				args,
+				step.cwd ?? ctx.cwd,
+				ctx.outputFile,
+				env,
+				ctx.piPackageRoot,
+				ctx.piArgv1,
+				step.maxSubagentDepth,
+				{ eventsPath, runId: ctx.id, stepIndex: ctx.flatIndex, agent: step.agent },
+				ctx.registerInterrupt,
+				ctx.onChildEvent,
+				transcriptWriter,
+				ctx.registerTimeout,
+				ctx.timeoutMessage,
+				ctx.registerStop,
+				ctx.stopMessage,
+				ctx.onWriterProcess,
+				ctx.toolTimeoutMs,
+				ctx.deadlineAt,
+				ctx.orcaProgressTab,
+				expectedModelForVerification,
+				step.modelVerificationRegistry,
+				step.mutationTools,
+				[...new Set(candidates.filter((value): value is string=>typeof value==="string").map(value=>splitKnownThinkingSuffix(value).baseModel))].slice(0,8),
+			);
+			writerAttemptCount += 1;
+			if (run.processCloseObservedAt !== undefined) {
+				writerProcesses.push({
+					processInstanceId: run.processInstanceId,
+					kind: "pi-writer",
+					attempt: writerAttemptCount - 1,
+					closeObservedAt: run.processCloseObservedAt,
+					exitCode: run.exitCode,
+					signal: run.processSignal ?? null,
+					processTree: run.processTree,
+				});
+			}
+			toolAvailabilityError = run.exitCode === 0 && !run.error
+				? readChildToolDiagnosticError(toolDiagnosticPath)
+				: undefined;
+			runtimeAcknowledgedExtensions = readRuntimeAcknowledgedExtensions(runtimeAcknowledgedExtensionsPath);
+		} finally {
+			admission.lease.release();
+			cleanupTempDir(tempDir);
 		}
-		// Preserve each native chain/fan-out child's launch contract before it
-		// executes. Dynamic children use their materialized index and budget path.
-		const recoveryDir = path.dirname(ctx.outputFile);
-		if (!fs.existsSync(path.join(recoveryDir, "recovery-descriptor.json"))) {
-			if (!ctx.runFanoutBudget) throw new Error("Async child is missing its run fan-out budget identity.");
-			writeAsyncStepRecoveryDescriptor(recoveryDir, ctx.flatIndex, {
-				...step, model: candidate, thinking: resolveEffectiveThinking(candidate, step.thinking),
-				launchContractDigest: actualLaunchContractDigest, launchResolvedExtensions, extensionBindings,
-			}, { sourceRunId: ctx.id, runFanoutBudget: ctx.runFanoutBudget, cwd: ctx.cwd,
-				sessionDir: ctx.sessionDir, artifactsDir: ctx.artifactsDir,
-				capabilityCeiling: ctx.capabilityCeiling });
-		}
-		capabilityAudit = attemptCapabilityAudit;
-		try {
-			shadowAssistanceLaunch({ agent: step.agent, task: step.launchBindingTask ?? task, model: candidate ?? step.model, runId: ctx.id, stepIndex: ctx.flatIndex, mode: "async" });
-		} catch { /* shadow observation never affects launch */ }
-		writerAttemptCount += 1;
-		const run = await runPiStreaming(
-			args,
-			step.cwd ?? ctx.cwd,
-			ctx.outputFile,
-			env,
-			ctx.piPackageRoot,
-			ctx.piArgv1,
-			step.maxSubagentDepth,
-			{ eventsPath, runId: ctx.id, stepIndex: ctx.flatIndex, agent: step.agent },
-			ctx.registerInterrupt,
-			ctx.onChildEvent,
-			transcriptWriter,
-			ctx.registerTimeout,
-			ctx.timeoutMessage,
-			ctx.registerStop,
-			ctx.stopMessage,
-			ctx.onWriterProcess,
-			ctx.toolTimeoutMs,
-			ctx.deadlineAt,
-			ctx.orcaProgressTab,
-			expectedModelForVerification,
-			step.modelVerificationRegistry,
-			step.mutationTools,
-			[...new Set(candidates.filter((value): value is string=>typeof value==="string").map(value=>splitKnownThinkingSuffix(value).baseModel))].slice(0,8),
-		);
-		if (run.processCloseObservedAt !== undefined) {
-			writerProcesses.push({
-				processInstanceId: run.processInstanceId,
-				kind: "pi-writer",
-				attempt: writerAttemptCount - 1,
-				closeObservedAt: run.processCloseObservedAt,
-				exitCode: run.exitCode,
-				signal: run.processSignal ?? null,
-				processTree: run.processTree,
-			});
-		}
-		const toolAvailabilityError = run.exitCode === 0 && !run.error
-			? readChildToolDiagnosticError(toolDiagnosticPath)
-			: undefined;
-		const runtimeAcknowledgedExtensions = readRuntimeAcknowledgedExtensions(runtimeAcknowledgedExtensionsPath);
-		cleanupTempDir(tempDir);
 		const midToolExitError = run.currentTool
 			&& isOrdinaryToolForMidToolExit(run.currentTool)
 			&& !run.interrupted
@@ -2210,7 +2250,7 @@ async function runSingleStepInner(
 	}
 	const output = stripAcceptanceReport(resolvedOutput.fullOutput);
 	const outputReference = resolvedOutput.savedPath ? formatSavedOutputReference(resolvedOutput.savedPath, output) : undefined;
-	let outputForSummary = output;
+	let outputForSummary = output || admissionFailure?.error || "";
 	if (attemptNotes.length > 0) {
 		outputForSummary = `${attemptNotes.join("\n")}\n\n${outputForSummary}`.trim();
 	}
@@ -2227,8 +2267,8 @@ async function runSingleStepInner(
 		? "present"
 		: resolvedOutput.savedPath
 			? "unknown"
-			: finalResult?.outputState ?? "unknown";
-	const timeoutRecovery = finalResult?.timedOut === true || ctx.timeoutSignal?.aborted === true
+			: finalResult?.outputState ?? (admissionFailure ? "absent" : "unknown");
+	const timeoutRecovery = writerAttemptCount > 0 && (finalResult?.timedOut === true || ctx.timeoutSignal?.aborted === true || admissionFailure?.kind === "timed_out")
 		? buildTimeoutRecoverySummary({
 			termination: "timed-out",
 			evidence: finalMutationEvidence,
@@ -2255,7 +2295,7 @@ async function runSingleStepInner(
 		saveError: resolvedOutput.saveError,
 	}));
 	outputForSummary = finalizedOutput.displayOutput;
-	const acceptance = step.effectiveAcceptance && !finalResult?.stopped && !ctx.timeoutSignal?.aborted && !ctx.stopSignal?.aborted && !ctx.skipAcceptance?.()
+	const acceptance = step.effectiveAcceptance && !admissionFailure && !finalResult?.stopped && !ctx.timeoutSignal?.aborted && !ctx.stopSignal?.aborted && !ctx.skipAcceptance?.()
 		? await evaluateAcceptance(omitUndefinedProperties({
 			acceptance: step.effectiveAcceptance,
 			fileBaseline,
@@ -2275,8 +2315,9 @@ async function runSingleStepInner(
 			runId: ctx.id,
 		}))
 		: undefined;
-	const stoppedAfterAcceptance = finalResult?.stopped === true || ctx.stopSignal?.aborted === true;
-	const timedOutAfterAcceptance = !stoppedAfterAcceptance && (finalResult?.timedOut === true || ctx.timeoutSignal?.aborted === true);
+	const stoppedAfterAcceptance = finalResult?.stopped === true || ctx.stopSignal?.aborted === true || admissionFailure?.kind === "stopped";
+	const timedOutAfterAcceptance = !stoppedAfterAcceptance && (finalResult?.timedOut === true || ctx.timeoutSignal?.aborted === true || admissionFailure?.kind === "timed_out");
+	const pausedBeforeSpawn = admissionFailure?.kind === "interrupted";
 	const effectiveAcceptance = step.effectiveAcceptance
 		? stoppedAfterAcceptance
 			? buildSkippedAcceptanceLedger(step.effectiveAcceptance, { id: "stopped", message: "Acceptance was not evaluated because the subagent was stopped." })
@@ -2287,15 +2328,15 @@ async function runSingleStepInner(
 	const acceptanceFailure = effectiveAcceptance ? acceptanceFailureMessage(effectiveAcceptance) : undefined;
 	const missingVisualEvidence = effectiveAcceptance?.runtimeChecks.some((check) => check.id === "visual-source-evidence" && check.status === "failed");
 	const acceptanceCanFailRun = acceptanceFailure && (missingVisualEvidence || hasFailedFileVerification(effectiveAcceptance?.runtimeChecks ?? []) || (effectiveAcceptance?.explicit && !isAgentContractV1(step.agentContract))) && (finalResult?.exitCode ?? 1) === 0 && !finalResult?.interrupted && !timedOutAfterAcceptance && !stoppedAfterAcceptance;
-	const effectiveFinalExitCode = timedOutAfterAcceptance || stoppedAfterAcceptance ? 1 : acceptanceCanFailRun ? 1 : finalResult?.exitCode ?? 1;
+	const effectiveFinalExitCode = timedOutAfterAcceptance || stoppedAfterAcceptance ? 1 : pausedBeforeSpawn ? 0 : acceptanceCanFailRun || admissionFailure ? 1 : finalResult?.exitCode ?? 1;
 	const intercomDetachReceipt = finalResult?.finalOutput === INTERCOM_DETACH_RECEIPT;
 	const baseFinalError = stoppedAfterAcceptance
 		? ctx.stopMessage ?? "Subagent stopped by user."
 		: timedOutAfterAcceptance
-			? finalResult?.error ?? ctx.timeoutMessage ?? "Subagent timed out."
+			? admissionFailure?.error ?? finalResult?.error ?? ctx.timeoutMessage ?? "Subagent timed out."
 			: acceptanceCanFailRun
 					? (finalResult?.error ? `${finalResult.error}\n${acceptanceFailure}` : acceptanceFailure)
-					: finalResult?.error ?? (intercomDetachReceipt ? INTERCOM_DETACH_RECEIPT : undefined);
+					: pausedBeforeSpawn ? undefined : admissionFailure?.error ?? finalResult?.error ?? (intercomDetachReceipt ? INTERCOM_DETACH_RECEIPT : undefined);
 	const effectiveFinalError = formatChildFailureDiagnostic({
 		error: baseFinalError,
 		afterCompactionSettlement: effectiveFinalExitCode !== 0 ? finalResult?.afterCompactionSettlement : undefined,
@@ -2354,6 +2395,7 @@ async function runSingleStepInner(
 		model: finalResult?.model,
 		attemptedModels: attemptedModels.length > 0 ? attemptedModels : undefined,
 		modelAttempts,
+		admissionFailure: admissionFailure?.kind === "stopped" || admissionFailure?.kind === "interrupted" ? "cancelled" : admissionFailure?.kind,
 		contextOverflow: contextOverflow || undefined,
 		totalCost: costSummaryFromAttempts(modelAttempts),
 		usage,
@@ -2362,7 +2404,7 @@ async function runSingleStepInner(
 		metadataSaveError: artifactErrors.metadataSaveError,
 		transcriptPath: transcriptWriter ? artifactPaths?.transcriptPath : undefined,
 		transcriptError: transcriptWriter?.getError(),
-		interrupted: timedOutAfterAcceptance || stoppedAfterAcceptance ? false : finalResult?.interrupted,
+		interrupted: timedOutAfterAcceptance || stoppedAfterAcceptance ? false : pausedBeforeSpawn || finalResult?.interrupted,
 		timedOut: timedOutAfterAcceptance ? true : finalResult?.timedOut,
 		stopped: stoppedAfterAcceptance ? true : finalResult?.stopped,
 		processSignal: finalResult?.processSignal,
@@ -2391,13 +2433,25 @@ async function runSingleStep(
 ): Promise<StepResult & { completionGuardTriggered?: boolean }> {
 	if (!step.importAsyncRoot) ctx.orcaProgressTab?.section({ agent: step.agent, index: ctx.flatIndex, count: ctx.flatStepCount });
 	// A step that starts on a free model holds a lease on the day's free requests until it ends.
-	const freeRun = beginFreeRun(step.modelCandidates);
+	let freeRun: ReturnType<typeof beginFreeRun>;
+	let dispatched = false;
+	const onDispatched = () => {
+		if (dispatched) return;
+		dispatched = true;
+		freeRun = beginFreeRun(step.modelCandidates);
+	};
 	let result: Awaited<ReturnType<typeof runSingleStepInner>> | undefined;
 	try {
-		result = await runSingleStepInner(step, ctx);
+		result = await runSingleStepInner(step, ctx, onDispatched);
 		return result;
 	} finally {
-		freeRun?.finish({ model: result?.model, ok: result?.exitCode === 0 && !result.error, error: result?.error });
+		// A local refusal before a retry cannot change the last provider outcome.
+		const lastDispatch = result?.admissionFailure ? result.modelAttempts?.at(-1) : undefined;
+		freeRun?.finish({
+			model: lastDispatch?.model ?? result?.model,
+			ok: lastDispatch?.success ?? (result?.exitCode === 0 && !result.error),
+			error: result?.admissionFailure ? lastDispatch?.error : result?.error,
+		});
 	}
 }
 
@@ -2609,18 +2663,7 @@ function concreteFailureResult(result: SingleStepResult): boolean {
 
 function combinedAbortSignal(signals: Array<AbortSignal | undefined>): AbortSignal | undefined {
 	const activeSignals = signals.filter((signal): signal is AbortSignal => Boolean(signal));
-	if (activeSignals.length === 0) return undefined;
-	if (activeSignals.length === 1) return activeSignals[0];
-	const controller = new AbortController();
-	const abort = (): void => controller.abort();
-	for (const signal of activeSignals) {
-		if (signal.aborted) {
-			abort();
-			break;
-		}
-		signal.addEventListener("abort", abort, { once: true });
-	}
-	return controller.signal;
+	return activeSignals.length > 0 ? AbortSignal.any(activeSignals) : undefined;
 }
 
 async function runSingleStepWithTimeout(
@@ -2628,9 +2671,10 @@ async function runSingleStepWithTimeout(
 	ctx: SingleStepContext,
 	parentDeadlineAt?: number,
 ): Promise<SingleStepResult> {
-	if (step.timeoutMs === undefined) return runSingleStep(step, ctx);
+	if (step.timeoutMs === undefined) return runSingleStep(step, parentDeadlineAt === undefined ? ctx : { ...ctx, deadlineAt: parentDeadlineAt });
 
-	const parentRemainingMs = parentDeadlineAt === undefined ? undefined : Math.max(0, parentDeadlineAt - Date.now());
+	const startedAt = Date.now();
+	const parentRemainingMs = parentDeadlineAt === undefined ? undefined : Math.max(0, parentDeadlineAt - startedAt);
 	const timeoutMs = parentRemainingMs === undefined ? step.timeoutMs : Math.min(step.timeoutMs, parentRemainingMs);
 	const timeoutMessage = parentRemainingMs !== undefined && parentRemainingMs <= step.timeoutMs
 		? ctx.timeoutMessage
@@ -2655,7 +2699,7 @@ async function runSingleStepWithTimeout(
 		return await runSingleStep(step, {
 			...ctx,
 			registerTimeout,
-			deadlineAt: Date.now() + timeoutMs,
+			deadlineAt: startedAt + timeoutMs,
 			timeoutSignal: combinedAbortSignal([ctx.timeoutSignal, timeoutController.signal]),
 			timeoutMessage,
 		});
@@ -4678,6 +4722,7 @@ async function runSubagent(
 					model: pr.model,
 					attemptedModels: pr.attemptedModels,
 					modelAttempts: pr.modelAttempts,
+					admissionFailure: pr.admissionFailure,
 					stopReason: pr.stopReason,
 					contextOverflow: pr.contextOverflow,
 					totalCost: pr.totalCost,
@@ -5120,6 +5165,7 @@ async function runSubagent(
 						model: pr.model,
 						attemptedModels: pr.attemptedModels,
 						modelAttempts: pr.modelAttempts,
+						admissionFailure: pr.admissionFailure,
 						stopReason: pr.stopReason,
 						contextOverflow: pr.contextOverflow,
 						totalCost: pr.totalCost,
@@ -5374,6 +5420,7 @@ async function runSubagent(
 				model: singleResult.model,
 				attemptedModels: singleResult.attemptedModels,
 				modelAttempts: singleResult.modelAttempts,
+				admissionFailure: singleResult.admissionFailure,
 				stopReason: singleResult.stopReason,
 				contextOverflow: singleResult.contextOverflow,
 				totalCost: singleResult.totalCost,
@@ -5795,6 +5842,7 @@ async function runSubagent(
 				model: r.model,
 				attemptedModels: r.attemptedModels,
 				modelAttempts: r.modelAttempts,
+				admissionFailure: r.admissionFailure,
 				stopReason: r.stopReason,
 				contextOverflow: r.contextOverflow,
 				totalCost: r.totalCost,

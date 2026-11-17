@@ -1,9 +1,11 @@
 import type { Tool as OpenAITool, ResponseCreateParamsStreaming, ResponseInput, ResponseStreamEvent } from "openai/resources/responses/responses.js";
 import type { Api, AssistantMessage, Context, Model, Tool, Usage } from "../types.ts";
 import type { AssistantMessageEventStream } from "../utils/event-stream.ts";
+import type { ResponsesHostedToolRates } from "./openai-responses-hosted-usage.js";
 export interface OpenAIResponsesStreamOptions {
     dispatchedAt?: number;
     serviceTier?: ResponseCreateParamsStreaming["service_tier"];
+    hostedToolRates?: ResponsesHostedToolRates;
     grammarToolInputProperties?: ReadonlyMap<string, string>;
     resolveServiceTier?: (responseServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined, requestServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined) => ResponseCreateParamsStreaming["service_tier"] | undefined;
     applyServiceTierPricing?: (usage: Usage, serviceTier: ResponseCreateParamsStreaming["service_tier"] | undefined) => void;

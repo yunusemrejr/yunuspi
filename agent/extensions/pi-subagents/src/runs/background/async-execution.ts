@@ -2,12 +2,13 @@
  * Async execution logic for subagent tool
  */
 
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
+import { setTimeout as delay } from "node:timers/promises";
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { discoverAgents, formatUnknownAgentError, unknownAgentDiagnosticContext, type AgentConfig, type UnknownAgentDiagnosticContext } from "../../agents/agents.ts";
 import { appendAgentRefinementOverlay } from "../../agents/agent-refinements.ts";
@@ -185,6 +186,7 @@ interface AsyncChainParams {
 	acceptance?: AcceptanceInput;
 	fast?: boolean;
 	timeoutMs?: number;
+	launchSignal?: AbortSignal;
 	toolBudget?: ResolvedToolBudget;
 	usageBudget?: UsageBudgetConfig;
 	configToolBudget?: ResolvedToolBudget;
@@ -255,6 +257,7 @@ interface AsyncSingleParams {
 	acceptance?: AcceptanceInput;
 	timeoutMs?: number;
 	absoluteDeadlineAt?: number;
+	launchSignal?: AbortSignal;
 	/** Optional per-call hard toolTimeoutMs override (highest precedence). */
 	toolTimeoutMs?: number;
 	toolBudget?: ResolvedToolBudget | ToolBudgetConfig;
@@ -383,8 +386,6 @@ function closeFd(fd: number | undefined): void {
  * Spawn the async runner process
  */
 const RUNNER_STARTUP_TIMEOUT_MS = 10_000;
-const RUNNER_STARTUP_WAIT_BUFFER = typeof SharedArrayBuffer !== "undefined" ? new SharedArrayBuffer(4) : undefined;
-const RUNNER_STARTUP_WAIT_VIEW = RUNNER_STARTUP_WAIT_BUFFER ? new Int32Array(RUNNER_STARTUP_WAIT_BUFFER) : undefined;
 
 type RunnerStartupState = "ready" | "acknowledged";
 
@@ -392,21 +393,14 @@ type RunnerStartupWaitResult =
 	| { ok: true; token: string }
 	| { ok: false; error: string; startupDidNotProceed?: boolean };
 
-function waitForStartupInterval(delayMs = 20): void {
-	if (RUNNER_STARTUP_WAIT_VIEW) {
-		Atomics.wait(RUNNER_STARTUP_WAIT_VIEW, 0, 0, delayMs);
-		return;
-	}
-	const waitUntil = Date.now() + delayMs;
-	while (Date.now() < waitUntil) {
-		// Startup handshakes are synchronous so resume rejects before reporting a run as started.
-	}
+function startupInterruption(signal?: AbortSignal, runDeadlineAt?: number): string | undefined {
+	if (signal?.aborted) return signal.reason instanceof Error ? signal.reason.message : "Async runner startup was stopped.";
+	if (runDeadlineAt !== undefined && Date.now() >= runDeadlineAt) return "Async run timed out during startup.";
 }
 
-function readRunnerStartup(startupPath: string, expectedState: RunnerStartupState, expectedToken?: string): RunnerStartupWaitResult | undefined {
-	if (!fs.existsSync(startupPath)) return undefined;
+async function readRunnerStartup(startupPath: string, expectedState: RunnerStartupState, expectedToken?: string): Promise<RunnerStartupWaitResult | undefined> {
 	try {
-		const payload = JSON.parse(fs.readFileSync(startupPath, "utf-8")) as { state?: unknown; token?: unknown; error?: unknown };
+		const payload = JSON.parse(await fs.promises.readFile(startupPath, "utf-8")) as { state?: unknown; token?: unknown; error?: unknown };
 		if (payload.state === "error" && typeof payload.error === "string") return { ok: false, error: payload.error, startupDidNotProceed: true };
 		if (payload.state !== expectedState) return undefined;
 		if (typeof payload.token !== "string" || (expectedToken !== undefined && payload.token !== expectedToken)) {
@@ -414,20 +408,25 @@ function readRunnerStartup(startupPath: string, expectedState: RunnerStartupStat
 		}
 		return { ok: true, token: payload.token };
 	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return undefined;
 		return { ok: false, error: `Failed to read async runner startup handshake '${startupPath}': ${error instanceof Error ? error.message : String(error)}`, startupDidNotProceed: true };
 	}
 }
 
-function waitForRunnerStartup(startupPath: string, expectedState: RunnerStartupState, timeoutMs: number, expectedToken?: string): RunnerStartupWaitResult {
-	const deadline = Date.now() + timeoutMs;
+async function waitForRunnerStartup(startupPath: string, expectedState: RunnerStartupState, timeoutMs: number, expectedToken?: string, signal?: AbortSignal, runDeadlineAt?: number): Promise<RunnerStartupWaitResult> {
+	const deadline = Math.min(Date.now() + timeoutMs, runDeadlineAt ?? Infinity);
 	for (;;) {
-		const result = readRunnerStartup(startupPath, expectedState, expectedToken);
+		const beforeRead = startupInterruption(signal, runDeadlineAt);
+		if (beforeRead) return { ok: false, error: beforeRead, startupDidNotProceed: true };
+		const result = await readRunnerStartup(startupPath, expectedState, expectedToken);
+		const afterRead = startupInterruption(signal, runDeadlineAt);
+		if (afterRead) return { ok: false, error: afterRead, startupDidNotProceed: true };
 		if (result) return result;
-		if (Date.now() >= deadline) break;
-		waitForStartupInterval(Math.min(20, Math.max(1, deadline - Date.now())));
+		const remaining = deadline - Date.now();
+		if (remaining <= 0) break;
+		try { await delay(Math.min(20, remaining), undefined, { signal }); }
+		catch (error) { if (!signal?.aborted) throw error; }
 	}
-	const finalResult = readRunnerStartup(startupPath, expectedState, expectedToken);
-	if (finalResult) return finalResult;
 	return { ok: false, error: `Timed out after ${timeoutMs}ms waiting for the async runner startup state '${expectedState}'.`, startupDidNotProceed: true };
 }
 
@@ -442,30 +441,18 @@ function writeRunnerStartupControl(filePath: string, payload: { action: "ack" | 
 	writePrivateStartupControlJson(filePath, payload);
 }
 
-function runnerIsAlive(pid: number): boolean {
-	try {
-		process.kill(pid, 0);
-		return true;
-	} catch (error) {
-		return (error as NodeJS.ErrnoException).code === "EPERM";
-	}
-}
-
-function terminateRunnerBeforeProceed(pid: number): boolean {
+async function terminateRunnerBeforeProceed(child: ChildProcess): Promise<boolean> {
+	const exited = () => child.pid === undefined || child.exitCode !== null || child.signalCode !== null;
 	for (const signal of ["SIGTERM", "SIGKILL"] as const) {
-		if (!runnerIsAlive(pid)) return true;
-		try {
-			process.kill(pid, signal);
-		} catch {
-			if (!runnerIsAlive(pid)) return true;
-		}
+		if (exited()) return true;
+		try { child.kill(signal); } catch { /* Observe the owned process before escalating. */ }
 		const deadline = Date.now() + 1000;
-		while (runnerIsAlive(pid) && Date.now() < deadline) waitForStartupInterval();
+		while (!exited() && Date.now() < deadline) await delay(20);
 	}
-	return !runnerIsAlive(pid);
+	return exited();
 }
 
-function persistPreProceedStartupFailure(asyncDir: string, runId: string, runnerProcessInstanceId: string, sessionId: string | undefined, completionOwnerId: string | undefined, message: string): void {
+function persistPreProceedStartupFailure(asyncDir: string, runId: string, runnerProcessInstanceId: string, sessionId: string | undefined, completionOwnerId: string | undefined, message: string, outcome?: "stopped" | "timed-out"): void {
 	const now = Date.now();
 	try {
 		const statusPath = path.join(asyncDir, "status.json");
@@ -478,7 +465,10 @@ function persistPreProceedStartupFailure(asyncDir: string, runId: string, runner
 			runId,
 			...(sessionId ? { sessionId } : {}),
 			...(completionOwnerId ? { completionOwnerId } : {}),
-			state: "failed",
+			state: outcome === "stopped" ? "stopped" : "failed",
+			...(outcome === "stopped" ? { stopped: true } : {}),
+			...(outcome === "timed-out" ? { timedOut: true } : {}),
+			endedAt: now,
 			lastUpdate: now,
 			error: message,
 			processTerminal: {
@@ -521,7 +511,9 @@ export function emitProcessTerminalEvent(ctx: AsyncExecutionContext, proof: unkn
 	}
 }
 
-function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Omit<AsyncStatus, "pid" | "processTerminal">, initialStatusPath: string, onProcessTerminal?: (proof: unknown) => void, onBeforeProceed?: (runnerProcessInstanceId: string) => void, requestedCwd = cwd): SpawnRunnerResult {
+async function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Omit<AsyncStatus, "pid" | "processTerminal">, initialStatusPath: string, onProcessTerminal?: (proof: unknown) => void, onBeforeProceed?: (runnerProcessInstanceId: string) => void, requestedCwd = cwd, signal?: AbortSignal, deadlineAt?: number): Promise<SpawnRunnerResult> {
+	const stopped = startupInterruption(signal, deadlineAt);
+	if (stopped) return { error: stopped, startupDidNotProceed: true };
 	const cwdError = preflightLaunchCwd(requestedCwd, cwd);
 	if (cwdError) return { error: cwdError };
 
@@ -576,6 +568,23 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 		});
 		closeFd(stdoutFd);
 		closeFd(stderrFd);
+		stdoutFd = undefined;
+		stderrFd = undefined;
+		let startupCommitted = false;
+		let startupFailurePersisted = false;
+		const persistStartupFailure = (message: string) => {
+			if (!launchAsyncDir || startupFailurePersisted) return;
+			startupFailurePersisted = true;
+			const timedOut = signal?.reason?.name === "TimeoutError" || (deadlineAt !== undefined && Date.now() >= deadlineAt);
+			const outcome = timedOut ? "timed-out" : signal?.aborted ? "stopped" : undefined;
+			persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message, outcome);
+		};
+		const failBeforeProceed = async (message: string): Promise<SpawnRunnerResult> => {
+			persistStartupFailure(message);
+			const pid = proc.pid;
+			const terminationObserved = await terminateRunnerBeforeProceed(proc);
+			return { pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
+		};
 		proc.on("error", (error) => {
 			console.error(`[pi-subagents] async spawn failed: ${error.message}`);
 		});
@@ -584,6 +593,7 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 			const asyncDir = launch.asyncDir;
 			const runId = launch.id;
 			if (typeof asyncDir !== "string" || typeof runId !== "string") return;
+			if (!startupCommitted) persistStartupFailure("Async runner exited before startup was authorized.");
 			finalizeProcessTerminal(asyncDir, runId, {
 				processInstanceId: runnerProcessInstanceId,
 				closeObservedAt: Date.now(),
@@ -640,70 +650,54 @@ function spawnRunner(cfg: object, suffix: string, cwd: string, initialStatus: Om
 			});
 			if (!guarded.written) throw new Error(`initial status was superseded (${guarded.reason ?? "newer status"})`);
 		} catch (error) {
-			const message = `Failed to persist initial async status: ${error instanceof Error ? error.message : String(error)}`;
-			if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
-			const terminationObserved = terminateRunnerBeforeProceed(proc.pid);
-			return { pid: proc.pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
+			return failBeforeProceed(`Failed to persist initial async status: ${error instanceof Error ? error.message : String(error)}`);
 		}
 		try {
 			if (!launchAsyncDir) throw new Error("Async runner is missing its lifecycle directory.");
 			initializeProcessTerminal(launchAsyncDir, launchRunId, runnerProcessInstanceId);
 		} catch (error) {
-			const message = `Failed to establish async runner lifecycle sidecar: ${error instanceof Error ? error.message : String(error)}`;
-			if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
-			const terminationObserved = terminateRunnerBeforeProceed(proc.pid);
-			return { pid: proc.pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
+			return failBeforeProceed(`Failed to establish async runner lifecycle sidecar: ${error instanceof Error ? error.message : String(error)}`);
 		}
 		try {
 			onBeforeProceed?.(runnerProcessInstanceId);
 		} catch (error) {
-			const message = `Failed to establish async runner capacity ownership: ${error instanceof Error ? error.message : String(error)}`;
-			if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
-			const terminationObserved = terminateRunnerBeforeProceed(proc.pid);
-			return { pid: proc.pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
+			return failBeforeProceed(`Failed to establish async runner capacity ownership: ${error instanceof Error ? error.message : String(error)}`);
 		}
+		const beforeProceed = startupInterruption(signal, deadlineAt);
+		if (beforeProceed) return failBeforeProceed(beforeProceed);
 		if (launchBarrierToken && startupProceedPath) {
 			try {
 				writeRunnerStartupControl(startupProceedPath, { action: "proceed", token: launchBarrierToken });
+				startupCommitted = true;
 			} catch (error) {
-				const message = `Failed to authorize async runner startup: ${error instanceof Error ? error.message : String(error)}`;
-				if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
-				const terminationObserved = terminateRunnerBeforeProceed(proc.pid);
-				return { pid: proc.pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
+				return failBeforeProceed(`Failed to authorize async runner startup: ${error instanceof Error ? error.message : String(error)}`);
 			}
 		}
 		proc.unref();
 		if (startupPath && startupAckPath && startupProceedPath) {
-			const persistStartupFailure = (message: string) => {
-				if (launchAsyncDir) persistPreProceedStartupFailure(launchAsyncDir, launchRunId, runnerProcessInstanceId, launchSessionId, launchCompletionOwnerId, message);
-			};
-			const ready = waitForRunnerStartup(startupPath, "ready", RUNNER_STARTUP_TIMEOUT_MS);
-			if (ready.ok === false) {
-				persistStartupFailure(ready.error);
-				const terminationObserved = terminateRunnerBeforeProceed(proc.pid);
-				return { pid: proc.pid, runnerProcessInstanceId, error: ready.error, terminationObserved, startupDidNotProceed: ready.startupDidNotProceed };
-			}
+			const exited = new AbortController();
+			const onExit = () => exited.abort(new Error("Async runner exited before startup was authorized."));
+			proc.once("exit", onExit);
+			proc.once("error", onExit);
+			const waitSignal = signal ? AbortSignal.any([signal, exited.signal]) : exited.signal;
 			try {
-				writeRunnerStartupControl(startupAckPath, { action: "ack", token: ready.token });
-			} catch (error) {
-				const message = `Failed to acknowledge async runner startup: ${error instanceof Error ? error.message : String(error)}`;
-				persistStartupFailure(message);
-				const terminationObserved = terminateRunnerBeforeProceed(proc.pid);
-				return { pid: proc.pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
-			}
-			const acknowledged = waitForRunnerStartup(startupPath, "acknowledged", RUNNER_STARTUP_TIMEOUT_MS, ready.token);
-			if (acknowledged.ok === false) {
-				persistStartupFailure(acknowledged.error);
-				const terminationObserved = terminateRunnerBeforeProceed(proc.pid);
-				return { pid: proc.pid, runnerProcessInstanceId, error: acknowledged.error, terminationObserved, startupDidNotProceed: acknowledged.startupDidNotProceed };
-			}
-			try {
-				writeRunnerStartupControl(startupProceedPath, { action: "proceed", token: ready.token });
-			} catch (error) {
-				const message = `Failed to authorize async runner startup: ${error instanceof Error ? error.message : String(error)}`;
-				persistStartupFailure(message);
-				const terminationObserved = terminateRunnerBeforeProceed(proc.pid);
-				return { pid: proc.pid, runnerProcessInstanceId, error: message, terminationObserved, startupDidNotProceed: true };
+				const ready = await waitForRunnerStartup(startupPath, "ready", RUNNER_STARTUP_TIMEOUT_MS, undefined, waitSignal, deadlineAt);
+				if (ready.ok === false) return failBeforeProceed(ready.error);
+				const beforeAck = startupInterruption(waitSignal, deadlineAt);
+				if (beforeAck) return failBeforeProceed(beforeAck);
+				try { writeRunnerStartupControl(startupAckPath, { action: "ack", token: ready.token }); }
+				catch (error) { return failBeforeProceed(`Failed to acknowledge async runner startup: ${error instanceof Error ? error.message : String(error)}`); }
+
+				const acknowledged = await waitForRunnerStartup(startupPath, "acknowledged", RUNNER_STARTUP_TIMEOUT_MS, ready.token, waitSignal, deadlineAt);
+				if (acknowledged.ok === false) return failBeforeProceed(acknowledged.error);
+				const interrupted = startupInterruption(waitSignal, deadlineAt);
+				if (interrupted) return failBeforeProceed(interrupted);
+				try { writeRunnerStartupControl(startupProceedPath, { action: "proceed", token: ready.token }); }
+				catch (error) { return failBeforeProceed(`Failed to authorize async runner startup: ${error instanceof Error ? error.message : String(error)}`); }
+				startupCommitted = true;
+			} finally {
+				proc.off("exit", onExit);
+				proc.off("error", onExit);
 			}
 			try {
 				fs.rmSync(startupPath, { force: true });
@@ -1155,10 +1149,10 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 /**
  * Execute a chain asynchronously
  */
-export function executeAsyncChain(
+export async function executeAsyncChain(
 	id: string,
 	params: AsyncChainParams,
-): AsyncExecutionResult {
+): Promise<AsyncExecutionResult> {
 	const {
 		chain,
 		agents,
@@ -1285,7 +1279,7 @@ export function executeAsyncChain(
 
 	let spawnResult: SpawnRunnerResult = {};
 	try {
-		spawnResult = spawnRunner(
+		spawnResult = await spawnRunner(
 			{
 				id,
 				steps,
@@ -1347,6 +1341,9 @@ export function executeAsyncChain(
 			path.join(asyncDir, "status.json"),
 			(proof) => emitProcessTerminalEvent(ctx, proof),
 			(runnerProcessInstanceId) => params.activeAsyncCapacity?.markStarted(runnerProcessInstanceId),
+			runnerCwd,
+			params.launchSignal,
+			deadlineAt,
 		);
 	} catch (error) {
 		params.activeAsyncCapacity?.rollback();
@@ -1495,10 +1492,10 @@ export function workflowAwaitedAsyncResultPath(asyncDir: string): string {
 	return path.join(asyncDir, "workflow-result.json");
 }
 
-export function executeAsyncSingle(
+export async function executeAsyncSingle(
 	id: string,
 	params: AsyncSingleParams,
-): AsyncExecutionResult {
+): Promise<AsyncExecutionResult> {
 	const {
 		agent,
 		agentConfig,
@@ -1812,7 +1809,7 @@ export function executeAsyncSingle(
 	const initialStatusAt = Date.now();
 	const initialCompletionOwnerId = ctx.completionOwnerId ?? currentCompletionOwnerId();
 	try {
-		spawnResult = spawnRunner(
+		spawnResult = await spawnRunner(
 			{
 				id,
 				steps: [
@@ -1937,6 +1934,8 @@ export function executeAsyncSingle(
 			(proof) => emitProcessTerminalEvent(ctx, proof),
 			(runnerProcessInstanceId) => params.activeAsyncCapacity?.markStarted(runnerProcessInstanceId),
 			params.requestedCwd ?? runnerCwd,
+			params.launchSignal,
+			deadlineAt,
 		);
 	} catch (error) {
 		params.activeAsyncCapacity?.rollback();

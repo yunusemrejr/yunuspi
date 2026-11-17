@@ -10,6 +10,7 @@ import { captureProviderRetryAdvice, retryProviderRequest } from "../utils/provi
 import { createGrammarToolInputProperties } from "./constrained-sampling.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { clampOpenAIPromptCacheKey, isOpenAIEndpoint } from "./openai-prompt-cache.js";
+import { responsesHostedToolRates } from "./openai-responses-hosted-usage.js";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
 import { buildBaseOptions } from "./simple-options.js";
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
@@ -115,6 +116,7 @@ export const stream = (model, context, options) => {
             if (nextParams !== undefined) {
                 params = nextParams;
             }
+            const hostedToolRates = responsesHostedToolRates(model, params?.tools);
             const requestOptions = {
                 ...(options?.signal ? { signal: options.signal } : {}),
                 ...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
@@ -135,6 +137,7 @@ export const stream = (model, context, options) => {
             await processResponsesStream(openaiStream, output, stream, model, {
                 dispatchedAt,
                 serviceTier: options?.serviceTier,
+                hostedToolRates,
                 grammarToolInputProperties,
                 applyServiceTierPricing: (usage, serviceTier) => applyServiceTierPricing(usage, serviceTier, model),
             });

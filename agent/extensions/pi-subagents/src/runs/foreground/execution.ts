@@ -6,10 +6,10 @@ import { createProgressEvidence, observeProgressEvidence } from "../../shared/pr
  * Core execution logic for running subagents
  */
 
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { existsSync } from "node:fs";
 import * as path from "node:path";
+import type { Readable } from "node:stream";
 import type { Message } from "@yunuspi/ai";
 import { discoverAgents, formatUnknownAgentError, unknownAgentDiagnosticContext, type AgentConfig } from "../../agents/agents.ts";
 import { appendAgentRefinementOverlay } from "../../agents/agent-refinements.ts";
@@ -67,6 +67,7 @@ import { planCompletionEvidence } from "../shared/completion-evidence.ts";
 import { planAbortRecovery } from "../shared/abort-recovery.ts";
 import { arbitrateCompletionGuardRescue } from "../shared/llm-intent-arbiter.ts";
 import { getPiSpawnCommand } from "../shared/pi-spawn.ts";
+import { acquireChildAdmission, type ChildAdmissionFailureKind } from "../shared/child-admission.ts";
 import { preflightLaunchCwd } from "../shared/launch-cwd.ts";
 import { createJsonlWriter } from "../../shared/jsonl-writer.ts";
 import { createOrcaProgressTab, type OrcaProgressTab } from "../shared/orca-progress-tabs.ts";
@@ -166,6 +167,7 @@ function persistSingleResultMetadata(input: {
 		task: PROMPT_REDACTED,
 		exitCode: target.exitCode,
 		processSignal: target.processSignal,
+		admissionFailure: target.admissionFailure,
 		usage: target.usage,
 		model: target.model,
 		attemptedModels: target.attemptedModels,
@@ -379,6 +381,7 @@ async function runSingleAttempt(
 		launchWarnings: { emitted: boolean };
 		verifyModel: boolean;
 		progressEvidence: ReturnType<typeof createProgressEvidence>;
+		onLaunch: () => void;
 	},
 ): Promise<SingleResult> {
 	const effectiveThinking = options.thinkingOverride;
@@ -567,17 +570,6 @@ async function runSingleAttempt(
 		...(capabilityAudit ? { capabilityAudit } : {}),
 	}, options.context);
 	const startTime = Date.now();
-	if (options.structuredOutput) {
-		const cleanupError = clearStructuredOutputCaptures(options.structuredOutput);
-		if (cleanupError) {
-			cleanupTempDir(tempDir);
-			result.exitCode = 1;
-			result.error = cleanupError;
-			result.finalOutput = cleanupError;
-			result.progressSummary = { toolCount: 0, tokens: 0, durationMs: Date.now() - startTime };
-			return result;
-		}
-	}
 	const controlConfig = options.controlConfig ?? DEFAULT_CONTROL_CONFIG;
 	let interruptedByControl = false;
 	const allControlEvents: ControlEvent[] = [];
@@ -616,15 +608,24 @@ async function runSingleAttempt(
 		lastActivityAt: startTime,
 	};
 	result.progress = progress;
-	const attemptTimeout = resolveAttemptTimeout(options);
-	if (attemptTimeout?.remainingMs === 0) {
+	const deadlineAt = options.deadlineAt ?? (options.timeoutMs === undefined ? undefined : startTime + options.timeoutMs);
+	const signal = options.signal && options.interruptSignal
+		? AbortSignal.any([options.signal, options.interruptSignal])
+		: options.signal ?? options.interruptSignal;
+	const failBeforeLaunch = (error: string, kind?: ChildAdmissionFailureKind): SingleResult => {
 		cleanupTempDir(tempDir);
-		result.exitCode = 1;
-		result.timedOut = true;
-		result.error = attemptTimeout.message;
-		result.finalOutput = attemptTimeout.message;
-		progress.status = "failed";
-		progress.error = attemptTimeout.message;
+		if (kind) result.admissionFailure = kind;
+		if (kind === "cancelled") {
+			if (options.interruptSignal?.aborted && !options.signal?.aborted) result.interrupted = true;
+			else result.stopped = true;
+		}
+		if (kind === "timed_out") result.timedOut = true;
+		result.exitCode = result.interrupted ? 0 : 1;
+		result.error = result.interrupted ? undefined : error;
+		result.finalOutput = result.interrupted ? "Interrupted. Waiting for explicit next action." : error;
+		progress.status = result.interrupted ? "running" : "failed";
+		progress.error = result.error;
+		progress.durationMs = Date.now() - startTime;
 		result.progressSummary = {
 			toolCount: progress.toolCount,
 			progressEvidence: progress.progressEvidence,
@@ -632,90 +633,72 @@ async function runSingleAttempt(
 			durationMs: progress.durationMs,
 		};
 		return result;
+	};
+	const spawnSpec = getPiSpawnCommand(args);
+	const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: recoveryRoutesEnv(shared.modelCandidates) };
+	// PI_SUBAGENT_PRESSURE: both launchers share one cancellable child gate.
+	const admission = await acquireChildAdmission({ signal, deadlineAt });
+	const timeoutMessage = options.timeoutMs === undefined ? "Subagent timed out waiting for a child slot." : formatTimeoutMessage(options.timeoutMs);
+	if (admission.kind !== "admitted") {
+		return failBeforeLaunch(admission.kind === "timed_out" ? timeoutMessage : admission.error, admission.kind);
 	}
-	// PI_SUBAGENT_PRESSURE (local patch; re-applied by verify-harness.mjs): file-based
-// concurrency gate for subagent child processes. Each running child holds a slot
-// file under ~/.pi/inference-slots; acquire blocks until fewer than
-// PI_SUBAGENT_MAX_CONCURRENT (default 4) children are live so a fan-out cannot
-// flood the shared provider quota with simultaneous large-context inferences.
-// Deliberately duplicated verbatim in runs/foreground/execution.ts and
-// runs/background/subagent-runner.ts (independent entry points; no shared graph).
-const __piSubagentGate = (() => {
-    const slotDir = () => path.join(homedir(), ".pi", "inference-slots");
-    const cap = (() => {
-        const v = Number.parseInt(process.env.PI_SUBAGENT_MAX_CONCURRENT ?? "4", 10);
-        return Number.isFinite(v) && v > 0 ? v : 4;
-    })();
-    const sweepStale = () => {
-        let names: string[] = [];
-        try { names = readdirSync(slotDir()); } catch { return; }
-        const now = Date.now();
-        for (const name of names) {
-            const p = path.join(slotDir(), name);
-            try { if (now - statSync(p).mtimeMs > 300000) unlinkSync(p); } catch { }
-        }
-    };
-    const active = (): number => {
-        sweepStale();
-        try { return readdirSync(slotDir()).length; } catch { return 0; }
-    };
-    const sleepMs = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-    const acquire = (): string => {
-        try { mkdirSync(slotDir(), { recursive: true }); } catch { }
-        const deadline = Date.now() + 30000;
-        while (Date.now() < deadline) {
-            const slot = `subagent-${process.pid}-${Math.random().toString(36).slice(2, 10)}.lock`;
-            const slotPath = path.join(slotDir(), slot);
-            // Wait for a free slot under cap; sweep stale locks along the way.
-            if (active() >= cap) { sleepMs(75); continue; }
-            // Slot-name collision (writeFileSync with wx throws EEXIST) is just a
-            // retry with a fresh random name — never recurse unbounded.
-            try { writeFileSync(slotPath, String(Date.now()), { flag: "wx" }); return slot; } catch { sleepMs(10); }
-        }
-        return ""; // proceed rather than deadlock a run
-    };
-    const release = (slot: string) => { if (slot) { try { unlinkSync(path.join(slotDir(), slot)); } catch { } } };
-    return { acquire, release };
-})();
-const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.maxSubagentDepth), PI_INFERENCE_ORIGIN: "subagent", PI_SUBAGENT_RECOVERY_ROUTES: recoveryRoutesEnv(shared.modelCandidates) };
+	const { lease } = admission;
+	const releaseBeforeLaunch = (error: string, kind?: ChildAdmissionFailureKind): SingleResult => {
+		lease.release();
+		return failBeforeLaunch(error, kind);
+	};
+	if (signal?.aborted) return releaseBeforeLaunch("Subagent stopped before child launch.", "cancelled");
+	if (deadlineAt !== undefined && Date.now() >= deadlineAt) return releaseBeforeLaunch(timeoutMessage, "timed_out");
+	if (options.structuredOutput) {
+		const cleanupError = clearStructuredOutputCaptures(options.structuredOutput);
+		if (cleanupError) return releaseBeforeLaunch(cleanupError);
+	}
 	const mutationSnapshot = snapshotTrackedMutations(options.cwd ?? runtimeCwd);
 	let observedMutationAttempt = false;
 	let structuredOutputToolInvoked = false;
 	let structuredOutputMessageStartIndex: number | undefined;
 	let toolAvailabilityError: string | undefined;
 	let abortedBySignal = options.signal?.aborted === true;
-
-	const spawnSpec = getPiSpawnCommand(args);
+	if (signal?.aborted) return releaseBeforeLaunch("Subagent stopped before child launch.", "cancelled");
+	if (deadlineAt !== undefined && Date.now() >= deadlineAt) return releaseBeforeLaunch(timeoutMessage, "timed_out");
+	try { lease.markSpawning(); }
+	catch { return releaseBeforeLaunch("Subagent child admission could not record dispatch.", "unavailable"); }
+	const attemptTimeout = resolveAttemptTimeout({ ...options, deadlineAt });
+	if (deadlineAt !== undefined && Date.now() >= deadlineAt) return releaseBeforeLaunch(timeoutMessage, "timed_out");
 	if (options.workflowChildPermitLaunch) {
-		const permitError = consumeWorkflowChildPermit(options.workflowChildPermitLaunch.permit, {
-			workflowRunId: options.workflowChildPermitLaunch.workflowRunId,
-			childKey: options.workflowChildPermitLaunch.childKey,
-			agent: agent.name,
-			launchContractDigest,
-			context: options.context ?? "fresh",
-			runner: "pi",
-			...(permitRoutes?.length ? {allowedRoutes:admittedModels} : {}),
-		});
-		if (permitError) {
-			cleanupTempDir(tempDir);
-			result.exitCode = 1;
-			result.error = permitError;
-			result.finalOutput = permitError;
-			progress.status = "failed";
-			progress.error = permitError;
-			return result;
-		}
+		let permitError: string | undefined;
+		try {
+			permitError = consumeWorkflowChildPermit(options.workflowChildPermitLaunch.permit, {
+				workflowRunId: options.workflowChildPermitLaunch.workflowRunId,
+				childKey: options.workflowChildPermitLaunch.childKey,
+				agent: agent.name,
+				launchContractDigest,
+				context: options.context ?? "fresh",
+				runner: "pi",
+				...(permitRoutes?.length ? {allowedRoutes:admittedModels} : {}),
+			});
+		} catch (error) { return releaseBeforeLaunch(error instanceof Error ? error.message : String(error)); }
+		if (permitError) return releaseBeforeLaunch(permitError);
 	}
 	let afterCompactionSettlement = false;
 	const exitCode = await new Promise<number>((resolve) => {
-		const __subagentSlot = __piSubagentGate.acquire();
-		const proc = spawn(spawnSpec.command, spawnSpec.args, {
-			cwd: options.cwd ?? runtimeCwd,
-			env: spawnEnv,
-			stdio: ["ignore", "pipe", "pipe"],
-			windowsHide: true,
+		let proc: ChildProcessByStdio<null, Readable, Readable>;
+		try {
+			proc = spawn(spawnSpec.command, spawnSpec.args, {
+				cwd: options.cwd ?? runtimeCwd,
+				env: spawnEnv,
+				stdio: ["ignore", "pipe", "pipe"],
+				windowsHide: true,
+			});
+		} catch (error) {
+			releaseBeforeLaunch(error instanceof Error ? error.message : String(error));
+			resolve(1);
+			return;
+		}
+		if (proc.pid) lease.markChild(proc.pid);
+		proc.once("spawn", () => {
+			try { shared.onLaunch(); options.onProcessStarted?.(); } catch { /* Observability cannot alter child execution. */ }
 		});
-		proc.once("spawn", () => { try { options.onProcessStarted?.(); } catch { /* Observability cannot alter child execution. */ } });
 		const jsonlWriter = createJsonlWriter(shared.jsonlPath, proc.stdout);
 		let processClosed = false;
 		let lifecycleFinished = false;
@@ -911,7 +894,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 			unsubscribeIntercomDetach?.();
 			removeAbortListener?.();
 			removeInterruptListener?.();
-			__piSubagentGate.release(__subagentSlot);
+			lease.release();
 			resolve(code);
 		};
 
@@ -1398,8 +1381,7 @@ const spawnEnv = { ...process.env, ...sharedEnv, ...getSubagentDepthEnv(options.
 		const armToolTimeout = (event: { toolCallId?: unknown; toolName: string }): void => {
 			const timeoutForTool = effectiveToolTimeoutMs(event.toolName, options.toolTimeoutMs);
 			if (timeoutForTool === undefined) return;
-			const elapsed = Date.now() - startTime;
-			const runRemaining = attemptTimeout ? Math.max(0, attemptTimeout.remainingMs - elapsed) : undefined;
+			const runRemaining = deadlineAt === undefined ? undefined : Math.max(0, deadlineAt - Date.now());
 			if (runRemaining !== undefined && timeoutForTool >= runRemaining) return;
 			const key = toolTimeoutCallKey(event, ++toolTimeoutSequence);
 			const toolName = event.toolName;
@@ -2076,8 +2058,9 @@ async function runSyncCompletionInner(
 		},
 	};
 	let lastResult: SingleResult | undefined;
+	let lastDispatchedResult: SingleResult | undefined;
 	// A child that starts on a free model holds a lease on the day's free requests until it ends.
-	const freeRun = beginFreeRun(modelCandidates);
+	let freeRun: ReturnType<typeof beginFreeRun>;
 	const modelsToTry: Array<ModelRouteCandidate | undefined> = candidates.length > 0 ? candidates : [undefined];
 	// Escalated to "file" after an unexplained zero-activity startup failure so
 	// retries keep the task text out of argv (endpoint pre-exec scans may deny it).
@@ -2087,20 +2070,25 @@ async function runSyncCompletionInner(
 	modelAttemptsLoop: for (let modelIndex = 0; modelIndex < modelsToTry.length; modelIndex++) {
 		const routeCandidate = modelRouteCandidateAt(candidates, modelIndex);
 		const candidate = routeCandidate?.route;
-		recordModelRoutingAttempt({
-			route: candidate,
-			source: "subagents",
-			fallback: false,
-			providerRouting: routeCandidate?.providerRouting,
-		});
+		let routeObserved = false;
+		let attemptedCandidate = false;
 		for (let startupAttemptIndex = 0; ; startupAttemptIndex++) {
 			const recoveringAbort = abortRecoveryAttempted;
 			const attemptTask = nextAttemptTask;
 			const verifyModel = Boolean(candidate);
 			const outputSnapshot = captureSingleOutputSnapshot(options.outputPath);
-			try {
-				shadowAssistanceLaunch({ agent: agent.name, task: attemptTask, model: candidate, runId: options.runId, stepIndex: options.index, mode: "foreground" });
-			} catch { /* shadow observation never affects launch */ }
+			let launched = false;
+			const onLaunch = () => {
+				launched = true;
+				if (!lastDispatchedResult) freeRun = beginFreeRun(modelCandidates);
+				if (!routeObserved) {
+					routeObserved = true;
+					recordModelRoutingAttempt({ route: candidate, source: "subagents", fallback: false, providerRouting: routeCandidate?.providerRouting });
+				}
+				try {
+					shadowAssistanceLaunch({ agent: agent.name, task: attemptTask, model: candidate, runId: options.runId, stepIndex: options.index, mode: "foreground" });
+				} catch { /* shadow observation never affects launch */ }
+			};
 			const result = await runSingleAttempt(runtimeCwd, agent, attemptTask, candidate, attemptOptions, {
 				sessionEnabled,
 				systemPrompt,
@@ -2120,15 +2108,19 @@ async function runSyncCompletionInner(
 				launchWarnings,
 				verifyModel,
 				progressEvidence,
+				onLaunch,
 			});
 			lastResult = result;
-			if (!recoveringAbort && startupAttemptIndex === 0) {
+			totalDurationMs += result.progressSummary?.durationMs ?? 0;
+			if (result.admissionFailure) break modelAttemptsLoop;
+			if (launched) lastDispatchedResult = result;
+			if (launched && !recoveringAbort && !attemptedCandidate) {
+				attemptedCandidate = true;
 				if (result.model) attemptedModels.push(result.model);
 				else if (candidate) attemptedModels.push(candidate);
 			}
 			sumUsage(aggregateUsage, result.usage);
 			totalToolCount += result.progressSummary?.toolCount ?? 0;
-			totalDurationMs += result.progressSummary?.durationMs ?? 0;
 			const attemptSucceeded = result.exitCode === 0 && !result.error;
 			const attempt: ModelAttempt = {
 				model: result.model ?? candidate ?? "default",
@@ -2138,7 +2130,7 @@ async function runSyncCompletionInner(
 				error: result.error,
 				usage: { ...result.usage },
 			};
-			modelAttempts.push(attempt);
+			if (launched) modelAttempts.push(attempt);
 			if (!attemptSucceeded) {
 				const afterCompactionSettlement = (result as AbortRecoverySingleResult)[AFTER_COMPACTION_SETTLEMENT];
 				const abortRecovery = planAbortRecovery({
@@ -2267,11 +2259,13 @@ async function runSyncCompletionInner(
 		error: "Subagent did not produce a result.",
 	} satisfies SingleResult, options.context);
 	result.task = task;
-	freeRun?.finish({ model: result.model, ok: result.exitCode === 0 && !result.error, error: result.error });
+	if (lastDispatchedResult) {
+		freeRun?.finish({ model: lastDispatchedResult.model, ok: lastDispatchedResult.exitCode === 0 && !lastDispatchedResult.error, error: lastDispatchedResult.error });
+	}
 
 	result.usage = aggregateUsage;
-	result.attemptedModels = attemptedModels.length > 0 ? attemptedModels : undefined;
-	result.modelAttempts = modelAttempts.length > 0 ? modelAttempts : undefined;
+	result.attemptedModels = attemptedModels.length > 0 || result.admissionFailure ? attemptedModels : undefined;
+	result.modelAttempts = modelAttempts.length > 0 || result.admissionFailure ? modelAttempts : undefined;
 	result.progressSummary = {
 		...(childSessionName ? { sessionName: childSessionName } : {}),
 		toolCount: totalToolCount,
@@ -2328,6 +2322,8 @@ async function runSyncCompletionInner(
 			result.acceptance = buildSkippedAcceptanceLedger(effectiveAcceptance, { id: "stopped", message: "Acceptance was not evaluated because the subagent was stopped." });
 		} else if (result.timedOut) {
 			result.acceptance = buildSkippedAcceptanceLedger(effectiveAcceptance, { id: "timeout", message: "Acceptance was not evaluated because the subagent timed out." });
+		} else if (result.admissionFailure) {
+			result.acceptance = buildSkippedAcceptanceLedger(effectiveAcceptance, { id: "admission", message: "Acceptance was not evaluated because the child did not launch." });
 		} else {
 			result.acceptance = await evaluateAcceptance({
 				acceptance: effectiveAcceptance,
@@ -2546,7 +2542,7 @@ export async function runSync(
 
 	let terminalCallbackInvoked = false;
 	void authoritativeCompletion.then((terminalResult) => {
-		if (processObserved) lifecycle(terminalResult.stopped ? 'stopped' : terminalResult.interrupted ? 'paused' : terminalResult.exitCode === 0 && !terminalResult.error ? 'completed' : 'failed');
+		if (processObserved || terminalResult.admissionFailure) lifecycle(terminalResult.stopped ? 'stopped' : terminalResult.interrupted ? 'paused' : terminalResult.exitCode === 0 && !terminalResult.error ? 'completed' : 'failed');
 		if (!detachedReason || terminalCallbackInvoked) return;
 		terminalCallbackInvoked = true;
 		terminalResult.detached = undefined;

@@ -24,6 +24,7 @@ const piArgs = await import(shared + "pi-args.ts");
 const promptRuntime = await import(shared + "subagent-prompt-runtime.ts");
 const modelRoute = await import(shared + "../../shared/model-route.ts");
 const { runSync } = await import(pathToFileURL(path.join(agent, "extensions/pi-subagents/src/runs/foreground/execution.ts")).href);
+const { acquireChildAdmission } = await import(shared + "child-admission.ts");
 
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 
@@ -215,4 +216,43 @@ setInterval(() => {}, 1000);
     }
     await pending;
   }
+});
+
+test("a foreground child waiting for admission stops or times out before launch or a model attempt", { timeout: 5000 }, async t => {
+  const directory = path.join(root, "foreground-admission");
+  const prior = Object.fromEntries(["PI_SUBAGENT_ADMISSION_DIR", "PI_SUBAGENT_MAX_CONCURRENT", "PI_SUBAGENT_PI_BINARY"].map(key => [key, process.env[key]]));
+  process.env.PI_SUBAGENT_ADMISSION_DIR = directory;
+  process.env.PI_SUBAGENT_MAX_CONCURRENT = "1";
+  process.env.PI_SUBAGENT_PI_BINARY = path.join(root, "must-not-launch");
+  t.after(() => {
+    for (const [key, value] of Object.entries(prior)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+  });
+  const held = await acquireChildAdmission({ directory, capacity: 1 });
+  assert.equal(held.kind, "admitted");
+  t.after(() => held.lease.release());
+  const agentConfig = {
+    name: "waiting-fixture", description: "Synthetic queued child", source: "runtime",
+    filePath: path.join(root, "waiting-fixture.md"), systemPrompt: "", systemPromptMode: "replace",
+    inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false,
+  };
+  const lifecycle = [];
+  const options = {
+    availableModels: registry, modelOverride: route, timeoutMs: 2000,
+    onLifecycle: status => lifecycle.push(status),
+    onProcessStarted: () => lifecycle.push("spawned"),
+  };
+  const controller = new AbortController();
+  const pending = runSync(process.cwd(), [agentConfig], agentConfig.name, "Inspect the synthetic task", { ...options, signal: controller.signal });
+  setTimeout(() => controller.abort(), 30);
+  const stopped = await pending;
+  assert.equal(stopped.admissionFailure, "cancelled");
+  assert.equal(stopped.stopped, true);
+  assert.deepEqual(stopped.modelAttempts, []);
+  assert.equal(stopped.usage.turns, 0);
+  const timedOut = await runSync(process.cwd(), [agentConfig], agentConfig.name, "Inspect the synthetic task", { ...options, timeoutMs: 60 });
+  assert.equal(timedOut.admissionFailure, "timed_out");
+  assert.equal(timedOut.timedOut, true);
+  assert.deepEqual(timedOut.modelAttempts, []);
+  assert.equal(timedOut.usage.cost, 0);
+  assert.deepEqual(lifecycle, ["stopped", "failed"]);
 });

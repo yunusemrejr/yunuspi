@@ -10,6 +10,7 @@ import type { FSWatcher } from "node:fs";
 import type { ExtensionContext } from "@yunuspi/coding-agent";
 import type { ModelScopeRule } from "../runs/shared/model-scope.ts";
 import type { ChildSpawnPreflight, ChildRouteProvenance } from "../runs/shared/child-spawn-preflight.ts";
+import type { ChildAdmissionFailureKind } from "../runs/shared/child-admission.ts";
 import type { ChildTerminalCause, ChildTerminalState, GroupCounters, GroupLifecycleState, GroupTelemetry } from "../runs/shared/group-reliability.ts";
 import type { ResolvedSubagentCapabilityCeiling, SubagentCapabilityAudit } from "../runs/shared/capability-ceiling.ts";
 import type { AuthorityPolicyConfig } from "../policy/authority.ts";
@@ -1238,6 +1239,8 @@ export interface SingleResult {
 	/** Last assistant transport stop reason, retained after transcript compaction. */
 	stopReason?: string;
 	processSignal?: string | null;
+	/** Local result before a child process could start. */
+	admissionFailure?: ChildAdmissionFailureKind;
 	timeoutRecovery?: TimeoutRecoverySummary;
 	detached?: boolean;
 	detachedReason?: string;
@@ -2104,6 +2107,7 @@ export interface ForegroundResumeChild {
 	windowPeak?: number;
 	toolCount?: number;
 	exitCode?: number;
+	admissionFailure?: ChildAdmissionFailureKind;
 	error?: string;
 	finalOutput?: string;
 	outputState?: SubagentOutputState;

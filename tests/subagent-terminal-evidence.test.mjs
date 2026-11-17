@@ -12,6 +12,7 @@ assert.ok(agent, 'subagent source is available');
 const runs = pathToFileURL(path.join(agent, 'extensions/pi-subagents/src/runs/')).href;
 const { classifyChildTerminal, childTerminalCause, groupCounters, groupLifecycleState } = await import(runs + 'shared/group-reliability.ts');
 const { toWaitCompletion } = await import(runs + 'background/wait-completions.ts');
+const { projectRunEvidence } = await import(runs + 'shared/run-history.ts');
 
 test('process exit evidence classifies slim child results without a status field', () => {
   assert.equal(classifyChildTerminal({ exitCode: 0 }), 'succeeded');
@@ -49,6 +50,17 @@ test('breaker causes survive when no separate cause was persisted', () => {
     ['runaway_cost', 'budget_exhausted'],
   ]) assert.equal(childTerminalCause({ status: 'failed', breakerReason }), expected, breakerReason);
   assert.equal(childTerminalCause({ status: 'failed', breakerReason: 'new_unknown_breaker' }), 'unknown');
+});
+
+test('local child admission evidence is retained without assigning provider health blame', () => {
+  const facts = { exitCode: 1, admissionFailure: 'unavailable', modelAttempts: [], error: 'Child admission is unavailable' };
+  assert.equal(childTerminalCause(facts), 'admission_failure');
+  const evidence = projectRunEvidence(facts);
+  assert.equal(evidence.admissionFailure, 'unavailable');
+  assert.equal(evidence.attemptCount, 0);
+  assert.equal(evidence.cause.stage, 'launch');
+  assert.equal(evidence.cause.retryable, false);
+  assert.equal(evidence.cause.healthScopes, undefined);
 });
 
 test('wait completion preserves success, failed contracts, and breaker causes for sibling decisions', () => {

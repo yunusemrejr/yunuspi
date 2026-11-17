@@ -300,7 +300,10 @@ export interface Usage {
         total: number;
         priceBasis?: string;
         serverToolCost?: number;
-        serverToolUse?: Partial<Record<"tool_search" | "tool_fetch" | "tool_image_search", number>>;
+        serverToolPriceBasis?: string;
+        serverToolUse?: Partial<Record<
+            "tool_search" | "tool_fetch" | "tool_image_search" | "web_search_call" | "file_search_call" |
+            "image_generation_call" | "code_interpreter_call" | "shell_call", number>>;
     };
 }
 export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred";
