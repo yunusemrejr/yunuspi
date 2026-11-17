@@ -867,9 +867,9 @@ export default async function registerSubagentPromptRuntime(pi: ExtensionAPI): P
 			// Diagnostic recording is best-effort telemetry and must not break child execution.
 		}
 	});
-	onRuntimeEvent("agent_end", async (_event: unknown, ctx: unknown) => {
-		if ((ctx as { hasUI?: boolean } | undefined)?.hasUI === true) return;
-		await drainOutstandingWork({ state: waitState, events: pi.events });
+	pi.on("agent_end", async (event, ctx) => {
+		if (ctx.hasUI || event.aborted) return;
+		await drainOutstandingWork({ state: waitState, events: pi.events, signal: ctx.signal });
 	});
 	const structuredOutputPath = process.env[STRUCTURED_OUTPUT_CAPTURE_ENV];
 	const structuredAcceptanceReportPath = process.env[STRUCTURED_OUTPUT_ACCEPTANCE_CAPTURE_ENV];

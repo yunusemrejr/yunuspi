@@ -137,6 +137,123 @@ test("native Responses isolates response, route and price provenance", async () 
   assert.equal(footerLabel(local), "$~0.000015");
 });
 
+const anthropicId = "synthetic-anthropic-hosted-response";
+const anthropicTools = [{type:"web_search_20250305", name:"web_search"}, {type:"web_fetch_20250910", name:"web_fetch"}];
+const anthropicUsage = {input_tokens:12, output_tokens:0, cache_read_input_tokens:0, cache_creation_input_tokens:0};
+const anthropicStart = usage => ({type:"message_start", message:{id:anthropicId, model:"claude-sonnet-4-6", role:"assistant",
+  type:"message", content:[], usage:{...anthropicUsage, ...usage}}});
+const anthropicDelta = usage => ({type:"message_delta", delta:{stop_reason:"end_turn"}, usage:{output_tokens:3, ...usage}});
+const anthropicStop = {type:"message_stop"};
+const anthropicServerTool = (name, id) => ({type:"content_block_start", index:0, content_block:{type:"server_tool_use", id, name}});
+const anthropicSearchResult = (id, content = []) => ({type:"content_block_start", index:1,
+  content_block:{type:"web_search_tool_result", tool_use_id:id, content}});
+
+async function anthropicHostedResponse(frames, {origin = "https://api.anthropic.com", tools = anthropicTools, inferenceGeo, responseUrl, credentials = session} = {}) {
+  const selected = model("claude-sonnet-4-6", "anthropic", "anthropic-messages", origin);
+  return await anthropic(selected, prompt, {...credentials,
+    onPayload:params => ({...params, tools, inference_geo:inferenceGeo}),
+    fetch:async (input, init) => {
+      const url = new URL(String(input.url ?? input));
+      assert.equal(url.origin, origin);
+      assert.equal(url.pathname, "/v1/messages");
+      const sent = JSON.parse(init.body);
+      assert.deepEqual(sent.tools, tools);
+      assert.equal(sent.inference_geo, inferenceGeo);
+      const response = new Response(frames.map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
+        {headers:{"content-type":"text/event-stream"}});
+      if (responseUrl) Object.defineProperty(response, "url", {value:responseUrl});
+      return response;
+    },
+  }).result();
+}
+
+test("Anthropic native search counts distinct proven successes and keeps cumulative provider meters", async () => {
+  const first = anthropicSearchResult("synthetic-search-one");
+  const second = anthropicSearchResult("synthetic-search-two");
+  const blocks = [anthropicServerTool("web_search", "synthetic-search-one"), first, first,
+    anthropicServerTool("web_search", "synthetic-search-two"), second,
+    anthropicServerTool("web_fetch", "synthetic-fetch")];
+  const result = await anthropicHostedResponse([
+    anthropicStart({server_tool_use:{web_search_requests:1, web_fetch_requests:0}}), ...blocks,
+    anthropicDelta({server_tool_use:{web_search_requests:2, web_fetch_requests:1}}), anthropicDelta(), anthropicStop,
+  ]);
+  assert.equal(result.stopReason, "stop", result.errorMessage);
+  assert.deepEqual(result.content, []);
+  assert.deepEqual(result.usage.cost.serverToolUse, {web_search_requests:2, web_fetch_requests:1, web_search_successes:2});
+  assert.equal(result.usage.cost.serverToolCost, .02);
+  assert.equal(result.usage.cost.serverToolPriceBasis, "anthropic-api-published-web-search-rate");
+  const replay = JSON.parse(JSON.stringify(result));
+  assert.equal(footerLabel(replay), "$~0.020015");
+  assert.equal(collectSessionCost([{type:"message", message:replay}, {type:"message", message:replay}]).formatted, "$~0.020015");
+});
+
+test("Anthropic hosted billing preserves attested spend across transport failure and exposes unresolved attempts", async () => {
+  const first = anthropicSearchResult("synthetic-search-one");
+  const failed = anthropicSearchResult("synthetic-search-two", {type:"web_search_tool_result_error", error_code:"unavailable"});
+  const meter = anthropicDelta({server_tool_use:{web_search_requests:2, web_fetch_requests:0}});
+  const failure = {type:"error", error:{type:"api_error", message:"Synthetic Anthropic failure"}};
+  const result = await anthropicHostedResponse([anthropicStart(), first, failed, meter, anthropicDelta(), failure]);
+  assert.equal(result.stopReason, "error");
+  assert.match(result.errorMessage, /Synthetic Anthropic failure/);
+  assert.deepEqual(result.usage.cost.serverToolUse, {web_search_requests:2, web_fetch_requests:0, web_search_successes:1});
+  assert.equal(result.usage.cost.serverToolCost, .01);
+  assert.equal(footerLabel(result), "$~0.010015+?");
+
+  const hidden = await anthropicHostedResponse([anthropicStart(), meter, anthropicStop]);
+  assert.equal(hidden.usage.cost.serverToolCost, undefined);
+  assert.equal(footerLabel(hidden), "$~0.000015+?");
+  const free = await anthropicHostedResponse([anthropicStart(), failed, anthropicServerTool("web_fetch", "synthetic-fetch"),
+    anthropicDelta({server_tool_use:{web_search_requests:0, web_fetch_requests:1}}), anthropicStop]);
+  assert.deepEqual(free.usage.cost.serverToolUse, {web_search_requests:0, web_fetch_requests:1, web_search_successes:0});
+  assert.equal(free.usage.cost.serverToolCost, 0);
+  assert.equal(footerLabel(free), "$~0.000015");
+  const contradiction = await anthropicHostedResponse([anthropicStart(), first,
+    anthropicDelta({server_tool_use:{web_search_requests:0}}), anthropicStop]);
+  assert.equal(contradiction.usage.cost.serverToolCost, .01);
+  assert.equal(footerLabel(contradiction), "$~0.010015+?");
+  const malformed = await anthropicHostedResponse([anthropicStart(),
+    anthropicDelta({server_tool_use:{web_search_requests:-1}}), anthropicStop]);
+  assert.equal(malformed.usage.cost.serverToolCost, undefined);
+  assert.equal(footerLabel(malformed), "$~0.000015+?");
+});
+
+test("Anthropic hosted code keeps container pricing unknown unless the submitted tool includes it", async () => {
+  const frames = [anthropicStart(), anthropicServerTool("code_execution", "synthetic-code"), anthropicDelta(), anthropicStop];
+  const unpriced = await anthropicHostedResponse(frames, {tools:[{type:"code_execution_20250825", name:"code_execution"}]});
+  assert.equal(unpriced.usage.cost.serverToolCost, undefined);
+  assert.equal(footerLabel(unpriced), "$~0.000015+?");
+  const bundled = await anthropicHostedResponse(frames, {tools:[{type:"web_search_20260209", name:"web_search"}]});
+  assert.equal(bundled.usage.cost.serverToolCost, 0);
+  assert.equal(footerLabel(bundled), "$~0.000015");
+});
+
+test("Anthropic hosted prices require the direct API route and verified US requests scale only the tokens", async () => {
+  const frames = [anthropicStart({inference_geo:"us"}), anthropicSearchResult("synthetic-search-one"),
+    anthropicDelta({server_tool_use:{web_search_requests:1, web_fetch_requests:0}}), anthropicStop];
+  const global = await anthropicHostedResponse([anthropicStart({inference_geo:"global"}), ...frames.slice(1)], {inferenceGeo:"global"});
+  assert.equal(global.usage.cost.total, .010015);
+  const us = await anthropicHostedResponse(frames, {inferenceGeo:"us"});
+  assert.equal(us.usage.cost.serverToolCost, .01);
+  assert.equal(us.usage.cost.tokenPriceMultiplier, 1.1);
+  assert.ok(Math.abs(us.usage.cost.total - .0100165) < 1e-12);
+  assert.ok(Math.abs(us.usage.cost.input - .0000132) < 1e-12);
+  assert.equal(us.usage.cost.complete, true);
+  const ambiguous = await anthropicHostedResponse([anthropicStart(), ...frames.slice(1)], {inferenceGeo:"us"});
+  assert.equal(ambiguous.usage.cost.tokenPriceMultiplier, undefined);
+  assert.equal(footerLabel(ambiguous), "$~0.010015+?");
+
+  for (const options of [{origin:"https://api.anthropic.com.example.invalid"}, {responseUrl:"https://proxy.example.invalid/v1/messages"}]) {
+    const gateway = await anthropicHostedResponse(frames, {...options, inferenceGeo:"us"});
+    assert.equal(gateway.usage.cost.serverToolUse?.web_search_successes, 1);
+    assert.equal(gateway.usage.cost.serverToolCost, undefined);
+    assert.equal(gateway.usage.cost.tokenPriceMultiplier, undefined);
+    assert.equal(footerLabel(gateway), "$~0.000015+?");
+  }
+  const oauth = await anthropicHostedResponse(frames, {credentials:{...session, apiKey:"synthetic-sk-ant-oat"}});
+  assert.equal(oauth.usage.cost.serverToolCost, undefined);
+  assert.equal(footerLabel(oauth), "sub+?");
+});
+
 test("Responses billing and terminal identity survive malformed optional output", async () => {
   const origin = "https://openrouter.ai";
   const selected = model("fixture", "openrouter", "openai-responses", `${origin}/api/v1`);

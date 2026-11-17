@@ -22,7 +22,7 @@ import { closeSteerInbox, consumeInterruptRequest, consumeSteerRequests, deliver
 import { appendJsonl as appendRawJsonl, formatOutputArtifactContent, getArtifactPaths, writeArtifact, writeMetadata } from "../../shared/artifacts.ts";
 import { PI_CODING_AGENT_PACKAGE, getPiSpawnCommand, resolveInstalledPiPackageRoot } from "../shared/pi-spawn.ts";
 import { preflightLaunchCwd } from "../shared/launch-cwd.ts";
-import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, injectOutputPathSystemPrompt, injectSingleOutputInstruction, resolveSingleOutput, type SingleOutputSnapshot } from "../shared/single-output.ts";
+import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, hasSingleOutputChangedSinceSnapshot, injectOutputPathSystemPrompt, injectSingleOutputInstruction, resolveSingleOutput, type SingleOutputSnapshot } from "../shared/single-output.ts";
 import {
 	type ActivityState,
 	type ArtifactConfig,
@@ -1779,11 +1779,12 @@ async function runSingleStepInner(
 		}
 		let run: RunPiStreamingResult;
 		let outputSnapshot: SingleOutputSnapshot | undefined;
+		let writerDispatched = false;
+		let fileReportChanged: boolean | undefined;
 		let tempDir: string | null | undefined;
 		let toolAvailabilityError: string | undefined;
 		let runtimeAcknowledgedExtensions: RuntimeAcknowledgedChildExtensionsV1 | undefined;
 		try {
-			outputSnapshot = captureSingleOutputSnapshot(step.outputPath);
 			if (effectiveStructuredOutput) {
 				const cleanupError = clearStructuredOutputCaptures(effectiveStructuredOutput);
 				if (cleanupError) {
@@ -1936,9 +1937,11 @@ async function runSingleStepInner(
 				admissionFailure = { kind: "unavailable", error: `Subagent process admission could not record writer startup: ${error instanceof Error ? error.message : String(error)}` };
 				break modelAttemptsLoop;
 			}
+			outputSnapshot = captureSingleOutputSnapshot(step.outputPath);
 			run = await runPiStreaming(
 				admission.lease,
 				() => {
+					writerDispatched = true;
 					onDispatched();
 					recordModelRoutingAttempt({
 						route: modelRouteCandidate?.route ?? candidate,
@@ -1979,6 +1982,10 @@ async function runSingleStepInner(
 				step.mutationTools,
 				[...new Set(candidates.filter((value): value is string=>typeof value==="string").map(value=>splitKnownThinkingSuffix(value).baseModel))].slice(0,8),
 			);
+			// Record file evidence at writer settlement, before admitting a successor.
+			if (writerDispatched && step.outputMode === "file-only") {
+				fileReportChanged = hasSingleOutputChangedSinceSnapshot(step.outputPath, outputSnapshot);
+			}
 			writerAttemptCount += 1;
 			if (run.processCloseObservedAt !== undefined) {
 				writerProcesses.push({
@@ -2087,7 +2094,11 @@ async function runSingleStepInner(
 			: effectiveStructuredOutput
 				? { kind: "structured" as const, path: effectiveStructuredOutput.outputPath, missing: !fs.existsSync(effectiveStructuredOutput.outputPath) }
 			: undefined;
-		finalRequiredOutputMissing = requiredOutput?.missing;
+		if (requiredOutput?.kind === "file-only") {
+			finalRequiredOutputMissing = fileReportChanged === undefined ? undefined : !fileReportChanged;
+		} else {
+			finalRequiredOutputMissing = requiredOutput?.missing;
+		}
 		const missingRequiredOutputError = formatRequiredOutputError(requiredOutput);
 		const missingRequiredOutputAfterMutation = Boolean(missingRequiredOutputError) && (mutationAttemptObserved || Boolean(mutationEvidence.changedFiles.length));
 		const effectiveExitCode = toolAvailabilityError || completionEvidence.legacyFailureError || midToolExitError || structuredError || emptyOutputError || missingRequiredOutputError
@@ -2317,6 +2328,11 @@ async function runSingleStepInner(
 		: undefined;
 	const stoppedAfterAcceptance = finalResult?.stopped === true || ctx.stopSignal?.aborted === true || admissionFailure?.kind === "stopped";
 	const timedOutAfterAcceptance = !stoppedAfterAcceptance && (finalResult?.timedOut === true || ctx.timeoutSignal?.aborted === true || admissionFailure?.kind === "timed_out");
+	const settlementDiagnostic = finalResult?.effects?.settlementDiagnostic;
+	if (timedOutAfterAcceptance && settlementDiagnostic?.requiredOutput?.kind === "file-only") {
+		if (finalRequiredOutputMissing === undefined) delete settlementDiagnostic.requiredOutput;
+		else settlementDiagnostic.requiredOutput.missing = finalRequiredOutputMissing;
+	}
 	const pausedBeforeSpawn = admissionFailure?.kind === "interrupted";
 	const effectiveAcceptance = step.effectiveAcceptance
 		? stoppedAfterAcceptance

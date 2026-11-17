@@ -832,8 +832,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 
 	registerWaitTool(pi, state, waitToolConfig.enabled, waitSubscriptionManager, waitToolConfig.defaultTimeoutMs);
 
-	pi.on("agent_end", async (_event, ctx) => {
-		if (!ctx.hasUI) await drainOutstandingWork({ state, events: pi.events });
+	pi.on("agent_end", async (event, ctx) => {
+		if (!ctx.hasUI && !event.aborted) await drainOutstandingWork({ state, events: pi.events, signal: ctx.signal });
 		const ownerSessionId = state.currentSessionId;
 		if (!ownerSessionId) return;
 		goalTurnId += 1;

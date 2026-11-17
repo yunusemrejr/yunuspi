@@ -299,11 +299,14 @@ export interface Usage {
         cacheWrite: number;
         total: number;
         priceBasis?: string;
+        tokenPriceMultiplier?: number;
+        tokenPriceMultiplierBasis?: string;
         serverToolCost?: number;
         serverToolPriceBasis?: string;
         serverToolUse?: Partial<Record<
             "tool_search" | "tool_fetch" | "tool_image_search" | "web_search_call" | "file_search_call" |
-            "image_generation_call" | "code_interpreter_call" | "shell_call", number>>;
+            "image_generation_call" | "code_interpreter_call" | "shell_call" | "web_search_requests" |
+            "web_fetch_requests" | "code_execution_requests" | "web_search_successes", number>>;
     };
 }
 export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred";

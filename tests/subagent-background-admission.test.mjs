@@ -16,12 +16,15 @@ const jiti = path.join(path.dirname(require.resolve('jiti/package.json')), 'lib'
 const runner = path.resolve(import.meta.dirname, '../agent/extensions/pi-subagents/src/runs/background/subagent-runner.ts');
 const previousOutput = 'Prior output belongs to the previous writer.\n';
 const resultText = 'Synthetic admitted child output.';
+const previousReport = 'The existing requested report belongs to an earlier attempt.';
+const childReport = 'This admitted writer changed the requested report.';
 
-async function fixture(t, { occupied = true, timeoutMs, unavailable = false } = {}) {
+async function fixture(t, { occupied = true, timeoutMs, unavailable = false, report } = {}) {
   const root = fs.mkdtempSync(path.join(tmpdir(), 'pi-background-admission-'));
   const directory = path.join(root, 'slots');
   const asyncDir = path.join(root, 'async');
   const outputPath = path.join(asyncDir, 'output-0.log');
+  const reportPath = path.join(root, 'report.md');
   const resultPath = path.join(root, 'result.json');
   const markerPath = path.join(root, 'invocations');
   const childPath = path.join(root, 'fixture-pi');
@@ -30,6 +33,7 @@ async function fixture(t, { occupied = true, timeoutMs, unavailable = false } = 
   fs.mkdirSync(asyncDir);
   fs.mkdirSync(agentDir);
   fs.writeFileSync(outputPath, previousOutput);
+  if (report) fs.writeFileSync(reportPath, previousReport);
   if (unavailable) fs.writeFileSync(directory, 'This path cannot be a slot directory.');
   const holder = occupied ? await acquireChildAdmission({ directory, capacity: 1 }) : undefined;
   assert.equal(holder?.kind, occupied ? 'admitted' : undefined);
@@ -39,7 +43,20 @@ async function fixture(t, { occupied = true, timeoutMs, unavailable = false } = 
     { type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: resultText }],
       stopReason: 'stop', provider: 'openrouter', model: 'fixture:free', usage: { input: 2, output: 3 } } },
   ];
-  fs.writeFileSync(childPath, `#!${process.execPath}\nconst fs = require('node:fs');\nfs.appendFileSync(${JSON.stringify(markerPath)}, 'started\\n');\nfor (const event of ${JSON.stringify(events)}) console.log(JSON.stringify(event));\n`, { mode: 0o700 });
+  const writeReport = `fs.writeFileSync(${JSON.stringify(reportPath)}, ${JSON.stringify(childReport)});`;
+  const markStarted = `fs.appendFileSync(${JSON.stringify(markerPath)}, 'started\\n');`;
+  const timedReport = Boolean(report && timeoutMs !== undefined && report !== 'complete');
+  fs.writeFileSync(childPath, [
+    `#!${process.execPath}`,
+    `const fs = require('node:fs');`,
+    report === 'shutdown' ? `process.on('SIGTERM', () => { ${writeReport} process.exit(0); });` : '',
+    report === 'retry' ? `if (!fs.existsSync(${JSON.stringify(markerPath)})) { ${markStarted} ${writeReport} process.exit(1); }` : '',
+    report === 'write' || report === 'complete' ? writeReport : '',
+    markStarted,
+    `for (const event of ${JSON.stringify(timedReport ? events.slice(0, 1) : events)}) console.log(JSON.stringify(event));`,
+    timedReport ? 'setInterval(() => {}, 1000);' : '',
+    '',
+  ].join('\n'), { mode: 0o700 });
   const worker = spawn(process.execPath, [jiti, runner], {
     cwd: root,
     env: { ...process.env, PI_CODING_AGENT_DIR: agentDir, PI_SUBAGENT_PI_BINARY: childPath,
@@ -61,7 +78,8 @@ async function fixture(t, { occupied = true, timeoutMs, unavailable = false } = 
     id: 'background-admission', steps: [{ agent: 'fixture', task: 'Return a synthetic report.', tools: ['read'],
       model: 'openrouter/fixture:free', modelCandidates: ['openrouter/fixture:free', 'openrouter/second:free'],
       inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false,
-      runFanoutPath: 'tasks[0]', ...(timeoutMs === undefined ? {} : { timeoutMs }) }],
+      runFanoutPath: 'tasks[0]', ...(timeoutMs === undefined ? {} : { timeoutMs }),
+      ...(report ? { outputPath: reportPath, outputMode: 'file-only' } : {}) }],
     runFanoutBudget: fanout, resultPath, cwd: root, placeholder: '{{previous}}', asyncDir, artifactsDir, sessionId: 'background-admission-session',
   }));
 
@@ -86,6 +104,7 @@ async function fixture(t, { occupied = true, timeoutMs, unavailable = false } = 
     unblock: () => holder?.lease.release(),
     invocations: () => fs.existsSync(markerPath) ? fs.readFileSync(markerPath, 'utf8') : '',
     output: () => fs.readFileSync(outputPath, 'utf8'),
+    report: () => fs.readFileSync(reportPath, 'utf8'),
     artifacts: () => fs.existsSync(artifactsDir) ? fs.readdirSync(artifactsDir) : [],
     exited: async () => { assert.deepEqual(await closed, [0, null], stderr); },
   };
@@ -112,11 +131,13 @@ test('a targeted child stop settles an occupied background slot without a dispat
 });
 
 test('a step deadline includes background slot wait time and records no route attempt', { timeout: 40_000 }, async t => {
-  const run = await fixture(t, { timeoutMs: 300 });
+  const run = await fixture(t, { timeoutMs: 300, report: 'untouched' });
   await run.started();
   const receipt = await run.result();
   assert.equal(receipt.state, 'failed');
   assert.equal(receipt.results[0].timedOut, true);
+  assert.equal(receipt.results[0].timeoutRecovery, undefined);
+  assert.equal(run.report(), previousReport);
   assertNoDispatch(run, receipt, 'timed_out');
   await run.exited();
 });
@@ -156,4 +177,42 @@ test('an unavailable child admission store is a terminal local error without a r
   assert.match(receipt.results[0].error, /child admission is unavailable/i);
   assertNoDispatch(run, receipt, 'unavailable');
   await run.exited();
+});
+
+for (const [report, reportStatus] of [['untouched', 'missing'], ['write', 'written'], ['shutdown', 'written']]) {
+  test(`timeout recovery records an admitted ${report} report as ${reportStatus}`, { timeout: 40_000 }, async t => {
+    const run = await fixture(t, { occupied: false, timeoutMs: 1500, report });
+    const receipt = await run.result();
+    await run.exited();
+    assert.equal(run.invocations(), 'started\n');
+    assert.equal(receipt.state, 'failed');
+    const row = receipt.results[0];
+    assert.equal(row.timedOut, true);
+    assert.equal(row.timeoutRecovery.reportStatus, reportStatus);
+    assert.equal(row.effects.settlementDiagnostic.requiredOutput.kind, 'file-only');
+    assert.equal(row.effects.settlementDiagnostic.requiredOutput.missing, reportStatus === 'missing');
+    assert.equal(run.report(), report === 'untouched' ? previousReport : childReport);
+  });
+}
+
+test('a child-written report that finishes before deadline remains the successful output', { timeout: 40_000 }, async t => {
+  const run = await fixture(t, { occupied: false, timeoutMs: 5000, report: 'complete' });
+  const receipt = await run.result();
+  await run.exited();
+  assert.equal(run.invocations(), 'started\n');
+  assert.equal(receipt.state, 'complete');
+  assert.equal(receipt.results[0].timeoutRecovery, undefined);
+  assert.equal(run.report(), childReport);
+});
+
+test('a report left by a prior attempt is not credited to the timed-out retry', { timeout: 40_000 }, async t => {
+  const run = await fixture(t, { occupied: false, timeoutMs: 2500, report: 'retry' });
+  const receipt = await run.result();
+  await run.exited();
+  assert.equal(run.invocations(), 'started\nstarted\n');
+  assert.equal(receipt.results[0].modelAttempts.length, 2);
+  assert.equal(receipt.results[0].timedOut, true);
+  assert.equal(receipt.results[0].timeoutRecovery.reportStatus, 'missing');
+  assert.equal(receipt.results[0].effects.settlementDiagnostic.requiredOutput.missing, true);
+  assert.equal(run.report(), childReport);
 });

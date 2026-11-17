@@ -459,7 +459,7 @@ export class AgentSession {
         catch { return false; }
     }
     /** Internal handler for agent events - shared by subscribe and reconnect */
-    _handleAgentEvent = async (event) => {
+    _handleAgentEvent = async (event, signal) => {
         const input = (event.type === "message_start" || event.type === "message_end") && event.message.role === "user"
             ? event.message[DESKTOP_QUEUED_INPUT]
             : undefined;
@@ -490,8 +490,9 @@ export class AgentSession {
         }
         // A tool-phase interrupt leaves a valid assistant/tool pair in history.
         // Skip retry and compaction without rewriting its recorded stop reason.
-        if (event.type === "agent_end" && event.aborted) {
+        if (event.type === "agent_end" && (event.aborted || signal?.aborted)) {
             this._lastAssistantResponse = undefined;
+            if (!event.aborted) event = { ...event, aborted: true };
         }
         // Emit to extensions first
         await this._emitExtensionEvent((/* PI_RESPONSE_BILLING_V1 */
@@ -499,7 +500,13 @@ export class AgentSession {
     (event.message.usage.cost.billing = this.modelRuntime.isUsingSubscription(event.message.provider) || isFlatPlanProvider(event.message.provider) ? 'subscription' : 'metered'), event));
         // Notify all listeners
         if (isDesktopInputId(desktopInputId)) this._emit({ ...event, desktopInputId });
-        else this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
+        else if (event.type === "agent_end") {
+            // An awaited terminal hook can hold a finished response while Stop
+            // cancels its still-live run signal.
+            const ended = signal?.aborted && !event.aborted ? { ...event, aborted: true } : event;
+            this._emit({ ...ended, willRetry: this._willRetryAfterAgentEnd(ended) });
+        }
+        else this._emit(event);
         // Handle session persistence
         if (event.type === "message_end") {
             // Check if this is a custom message from extensions
@@ -923,10 +930,24 @@ export class AgentSession {
     async _runAgentPrompt(messages) {
         this._isAgentRunActive = true;
         try {
-            await this.agent.prompt(messages);
-            let continuation;
-            while ((continuation = await this._handlePostAgentRun())) {
-                await this.agent.continue(continuation.providerRequest);
+            let run = this.agent.prompt(messages);
+            while (true) {
+                // Agent clears its active signal after its last listener. Keep
+                // the completed run's signal through the continuation decision.
+                const signal = this.agent.signal;
+                await run;
+                if (signal?.aborted) {
+                    this._lastAssistantResponse = undefined;
+                    if (this._retryAttempt > 0) {
+                        const attempt = this._retryAttempt;
+                        this._retryAttempt = 0;
+                        this._emit({ type: "auto_retry_end", success: false, attempt, finalError: "Retry cancelled" });
+                    }
+                    break;
+                }
+                const continuation = await this._handlePostAgentRun();
+                if (!continuation) break;
+                run = this.agent.continue(continuation.providerRequest);
             }
         }
         finally {

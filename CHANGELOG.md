@@ -1,3 +1,10 @@
+## 0.56.18 — Anthropic billing and reliable timeout evidence
+
+- The Claude API ledger estimates fees for distinct successful hosted searches. It preserves known fees on interrupted streams and marks unresolved activity as partial. Explicit US-only token prices apply once the provider confirms that routing.
+- Background timeout reports and workflow diagnostics use file changes from the dispatched attempt. Writes made while the process shuts down still count.
+- Stop releases headless waits and prevents a provider retry after cancellation during a terminal hook. A dispatched attempt keeps its recorded usage.
+- Span records physical request costs in the submitting session even when the answer is unusable or arrives after cancellation. Cached scores follow the selected model and endpoint.
+
 ## 0.56.17 — Cancellable child admission and hosted tool billing
 
 - Foreground and background subagents share an atomic process admission gate. Waiting leaves Stop, pause, and deadlines responsive. Requests stopped in the queue leave zero provider attempts.

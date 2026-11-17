@@ -9,6 +9,7 @@ export const DEFAULT_AUTO_DRAIN_TIMEOUT_MS = 30 * 60 * 1000;
 export interface AutoDrainDeps {
 	state: SubagentState;
 	events?: WaitEventBus;
+	signal?: AbortSignal;
 	timeoutMs?: number;
 	now?: () => number;
 	wait?: (
@@ -35,6 +36,7 @@ function hasOutstandingWork(sessionId: string, nowMs: number): boolean {
 
 /** Drain all work owned by the current headless session, including work added while draining. */
 export async function drainOutstandingWork(deps: AutoDrainDeps): Promise<void> {
+	if (deps.signal?.aborted) return;
 	const sessionId = deps.state.currentSessionId;
 	if (!sessionId) throw new Error("Cannot auto-drain background work without an active session identity.");
 	const now = deps.now ?? Date.now;
@@ -44,14 +46,14 @@ export async function drainOutstandingWork(deps: AutoDrainDeps): Promise<void> {
 	const hasWork = deps.hasWork ?? hasOutstandingWork;
 	const wait = deps.wait ?? waitForSubagents;
 
-	while (hasWork(sessionId, now())) {
+	while (!deps.signal?.aborted && hasWork(sessionId, now())) {
 		const remainingMs = deadlineAt - now();
 		if (remainingMs <= 0) {
 			throw new Error(`Auto-drain timed out after ${timeoutMs}ms with background work still active in session '${sessionId}'.`);
 		}
 		const waitResult = await wait(
 			{ all: true, timeoutMs: remainingMs },
-			undefined,
+			deps.signal,
 			{
 				state: deps.state,
 				events: deps.events,
@@ -61,6 +63,8 @@ export async function drainOutstandingWork(deps: AutoDrainDeps): Promise<void> {
 				failOnAttention: true,
 			},
 		);
+		// The caller can stop its turn while detached work remains active.
+		if (deps.signal?.aborted) return;
 		if (waitResult.isError) {
 			throw new Error(`Auto-drain failed for session '${sessionId}': ${resultText(waitResult) || "bg_wait returned an error without details"}.`);
 		}

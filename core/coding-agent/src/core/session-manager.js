@@ -124,7 +124,7 @@ function buildEntryIndex(entries, byId) {
 }
 const accountingReceiptTypes = new Set(["auxiliary-model-usage-v1", "subagent-cost-v1", "subagent-lifecycle-v1"]);
 const originalSessionPendingReceipts = new Set([
-    "jev", "project-memory", "project-memory-rerank", "web_search", "source_check", "fetch_content", "web_research",
+    "jev", "span", "project-memory", "project-memory-rerank", "web_search", "source_check", "fetch_content", "web_research",
 ]);
 function isRecoveredChildCost(entry) {
     return entry.type === "custom" && entry.customType === "subagent-cost-v1" && typeof entry.data?.recoveredForSessionId === "string";

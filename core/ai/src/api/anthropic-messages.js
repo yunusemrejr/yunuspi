@@ -5,12 +5,14 @@ import { calculateCost, clampThinkingLevel } from "../models.js";
 import { splitDeferredTools } from "../utils/deferred-tools.js";
 import { appendAssistantMessageDiagnostic } from "../utils/diagnostics.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
+import { isFlatPlanProvider } from "../utils/flat-plan.js";
 import { headersToRecord } from "../utils/headers.js";
 import { parseJsonWithRepair, parseStreamingJson } from "../utils/json-parse.js";
 import { getPiUserAgent } from "../utils/pi-user-agent.js";
 import { getProviderEnvValue } from "../utils/provider-env.js";
 import { captureProviderRetryAdvice, retryProviderRequest } from "../utils/provider-retry.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { createAnthropicHostedUsage, isDirectAnthropicBilling } from "./anthropic-hosted-usage.js";
 import { getJsonSchemaToolParameters, resolveJsonSchemaStrictSampling } from "./constrained-sampling.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { adjustMaxTokensForThinking, buildBaseOptions, clampMaxTokensToContext } from "./simple-options.js";
@@ -246,6 +248,7 @@ export const stream = (model, context, options) => {
             stopReason: "pending",
             timestamp: Date.now(),
         };
+        let hostedUsage;
         try {
             let client;
             let isOAuth;
@@ -284,6 +287,8 @@ export const stream = (model, context, options) => {
             };
             const directDeepSeek = isDirectDeepSeek(model);
             const tracksPriceTime = directDeepSeek || model.cost?.validUntil !== undefined;
+            const requestedGeo = params.inference_geo;
+            const submittedTools = params.tools;
             let dispatchedAt, createdAt;
             const response = await retryProviderRequest(() => {
                 if (tracksPriceTime) dispatchedAt = Date.now();
@@ -294,10 +299,18 @@ export const stream = (model, context, options) => {
                 maxRetryDelayMs: options?.maxRetryDelayMs,
                 signal: options?.signal,
             });
+            if (!directDeepSeek) {
+                const keyAuth = options?.apiKey || hasHeader(options?.headers, "x-api-key");
+                const headerAuth = hasHeader(options?.headers, "authorization") || hasHeader(model.headers, "authorization");
+                const direct = !options?.client && !isOAuth && Boolean(keyAuth) && !headerAuth && isDirectAnthropicBilling(model, response);
+                const subscription = (isOAuth && model.provider === "anthropic") || isFlatPlanProvider(model.provider);
+                hostedUsage = createAnthropicHostedUsage({ direct, subscription, requestedGeo, tools: submittedTools });
+            }
             await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
             stream.push({ type: "start", partial: output });
             const blocks = output.content;
             for await (const event of iterateAnthropicEvents(response, options?.signal, directDeepSeek)) {
+                hostedUsage?.observe(event);
                 if (event.type === "message_start") {
                     output.responseId = event.message.id;
                     if (tracksPriceTime) createdAt = providerCreatedMs(event.message.created_at);
@@ -528,10 +541,12 @@ export const stream = (model, context, options) => {
                     },
                 });
             }
+            hostedUsage?.finish(output.usage);
             stream.push({ type: "done", reason: output.stopReason, message: output });
             stream.end();
         }
         catch (error) {
+            hostedUsage?.finish(output.usage);
             for (const block of output.content) {
                 delete block.index;
                 // partialJson is only a streaming scratch buffer; never persist it.

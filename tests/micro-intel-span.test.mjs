@@ -3,9 +3,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { setTimeout as delay } from "node:timers/promises";
+import { collectSessionCost } from '../core/coding-agent/src/core/session-accounting.js';
 
 const root = path.resolve(import.meta.dirname, "..");
 const agent = [path.join(root, "agent"), path.resolve(root, "..")].find((p) =>
@@ -184,6 +186,119 @@ test("without a session model Span refuses instead of choosing another route", a
   const ctx = { model: undefined, modelRegistry: { completeSimple: async () => { calls++; return { content: [], stopReason: "stop" }; } } };
   await assert.rejects(sessionSpanScorer(ctx)("trace", {}), /no session model/);
   assert.equal(calls, 0);
+});
+
+test('Span reuses scores only on the selected model and endpoint', async () => {
+  const trace = traceFrom(fixtures.traces[0].events);
+  const model = { provider: 'fixture', id: 'session-model', api: 'openai-completions', baseUrl: 'https://primary.invalid/v1' };
+  const calls = [];
+  const modelRegistry = { completeSimple: async selected => {
+    calls.push(selected);
+    return { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify(scoresFor([])) }] };
+  } };
+  clearSpanCache();
+  try {
+    const score = selected => scoreSpanTrace(trace, sessionSpanScorer({ model: selected, modelRegistry }));
+    assert.equal((await score(model)).cached, false);
+    assert.equal((await score({ ...model })).cached, true);
+    assert.equal((await score({ ...model, id: 'other-model' })).cached, false);
+    assert.equal((await score({ ...model, baseUrl: 'https://other.invalid/v1' })).cached, false);
+    assert.equal((await score(undefined)).ok, false);
+    assert.equal(calls.length, 3);
+  } finally { clearSpanCache(); }
+});
+
+test('Span keeps paid physical responses when the scorer cannot use them', async () => {
+  const trace = traceFrom(fixtures.traces[0].events);
+  const entries = [];
+  const append = (customType, data) => entries.push({ type: 'custom', customType, data });
+  const pi = { appendEntry: append, bindAuxiliaryUsage: () => data => { append('auxiliary-model-usage-v1', data); return true; } };
+  const model = { provider: 'anthropic', id: 'fixture' };
+  const responses = [
+    { content: [{ type: 'text', text: 'malformed fixture' }], stopReason: 'stop', usage: { input: 9, output: 3, cost: { total: .021, complete: true } } },
+    { content: [], stopReason: 'error', errorMessage: 'Fixture request failed', usage: { input: 9, output: 3, cost: { total: .013, source: 'provider-reported' } } },
+    { content: [{ type: 'text', text: JSON.stringify(scoresFor([])) }], stopReason: 'stop', usage: { input: 9, output: 3, cost: { total: .005, complete: true } } },
+  ];
+  clearSpanCache();
+  try {
+    const scorer = sessionSpanScorer({ model, modelRegistry: { completeSimple: async () => responses.shift() } });
+    assert.equal((await scoreSpanTrace(trace, scorer, { pi })).skipped, 'malformed');
+    assert.equal((await scoreSpanTrace(trace, scorer, { pi })).skipped, 'unavailable');
+    assert.equal((await scoreSpanTrace(trace, scorer, { pi })).ok, true);
+    const account = collectSessionCost(entries);
+    assert.equal(account.reported, .013);
+    assert.ok(Math.abs(account.estimated - .026) < 1e-12);
+    assert.equal(account.formatted, '$~0.039000');
+    assert.equal(account.pending, 0);
+    const receipts = entries.filter(entry => entry.customType === 'auxiliary-model-usage-v1');
+    assert.deepEqual(receipts.map(entry => entry.data.status), ['pending', 'completed', 'pending', 'failed', 'pending', 'completed']);
+    assert.ok(receipts.every(entry => entry.data.owner === 'span' && entry.data.provider === 'anthropic' && entry.data.model === 'fixture'));
+    assert.equal(new Set(receipts.map(entry => entry.data.id)).size, 3);
+    assert.equal(collectSessionCost([...entries, ...receipts]).total, account.total);
+    assert.doesNotMatch(JSON.stringify(entries), /malformed fixture|Fixture request failed/);
+  } finally { clearSpanCache(); }
+});
+
+test('an abandoned Span request settles in its source session after a real SDK fork', { timeout: 10000 }, async t => {
+  const { AgentSessionRuntime, DefaultResourceLoader, SessionManager, SettingsManager, createAgentSession } =
+    await import('../core/coding-agent/src/index.js');
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-span-fork-'));
+  const model = { id: 'fixture', name: 'Fixture', api: 'openai-completions', provider: 'audit', baseUrl: 'https://fixture.invalid',
+    input: ['text'], reasoning: false, contextWindow: 8192, maxTokens: 2048, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  const modelRuntime = { getModel: () => model, getAvailable: () => [model], hasConfiguredAuth: () => true, isUsingSubscription: () => false,
+    streamSimple() { assert.fail('the SDK fixture makes no provider requests'); } };
+  let runtimePi;
+  async function create(sessionManager) {
+    const settingsManager = SettingsManager.inMemory();
+    const resourceLoader = new DefaultResourceLoader({ cwd, agentDir: cwd, settingsManager, noExtensions: true,
+      noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true, extensionFactories: [pi => {
+        pi.on('session_start', () => { runtimePi = pi; });
+      }] });
+    await resourceLoader.reload();
+    const result = await createAgentSession({ cwd, agentDir: cwd, model, modelRuntime, settingsManager, resourceLoader, sessionManager, tools: [] });
+    await result.session.bindExtensions({ mode: 'print' });
+    return { ...result, services: { cwd, agentDir: cwd } };
+  }
+  const manager = SessionManager.create(cwd, cwd);
+  manager.appendMessage({ role: 'user', content: 'Fixture source', timestamp: Date.now() });
+  manager.flush();
+  const original = await create(manager);
+  const host = new AgentSessionRuntime(original.session, original.services, ({ sessionManager }) => create(sessionManager));
+  t.after(async () => { await host.dispose(); fs.rmSync(cwd, { recursive: true, force: true }); clearSpanCache(); });
+  const sourceFile = manager.getSessionFile();
+  const sourceLeaf = manager.getLeafId();
+  const saved = () => SessionManager.open(sourceFile, cwd).getEntries();
+  const submitted = Promise.withResolvers(), response = Promise.withResolvers(), settled = Promise.withResolvers();
+  const controller = new AbortController();
+  const owner = runtimePi;
+  const pi = { bindAuxiliaryUsage() {
+    const append = owner.bindAuxiliaryUsage();
+    return data => {
+      const written = append(data);
+      if (data.status !== 'pending') settled.resolve(written);
+      return written;
+    };
+  } };
+  const scorer = sessionSpanScorer({ model, modelRegistry: { completeSimple() { submitted.resolve(); return response.promise; } } });
+  clearSpanCache();
+  const score = scoreSpanTrace(traceFrom(fixtures.traces[0].events), scorer, { pi, signal: controller.signal });
+  try {
+    await Promise.race([submitted.promise, score.then(result => assert.fail(`Span skipped before dispatch: ${result.skipped}`))]);
+    assert.equal(collectSessionCost(saved()).pending, 1);
+    assert.equal((await host.fork(sourceLeaf, { position: 'at' })).cancelled, false);
+    assert.equal(collectSessionCost(host.session.sessionManager.getEntries()).pending, 0);
+    controller.abort();
+    assert.equal((await score).skipped, 'aborted');
+  } finally {
+    response.resolve({ content: [{ type: 'text', text: 'late fixture' }], stopReason: 'stop', usage: { input: 12, output: 3, cost: { total: .037, source: 'provider-reported' } } });
+  }
+  assert.equal(await settled.promise, true);
+  const entries = saved(), source = collectSessionCost(entries);
+  assert.equal(source.formatted, '$0.037000');
+  assert.equal(source.pending, 0);
+  assert.equal(collectSessionCost([...entries, ...entries]).reported, .037);
+  assert.equal(collectSessionCost(host.session.sessionManager.getEntries()).reported, 0);
+  assert.equal(entries.some(entry => entry.customType === 'span-usage-v1'), false);
 });
 
 test("env gates behave", () => {

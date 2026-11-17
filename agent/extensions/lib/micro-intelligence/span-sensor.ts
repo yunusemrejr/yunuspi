@@ -17,12 +17,13 @@
  * model with its registry credentials: it receives the bounded trace with the
  * behavior catalog and answers one JSON object of per-signal probabilities,
  * which parseSpanScores validates. No other model is chosen; without a session
- * model the trace yields no signal. Every paid call is ledgered as a
- * `span-usage-v1` session entry (same contract as `jev-usage-v1`) so cost and
- * metrics treat Span like any other route.
+ * model the trace yields no signal. Physical requests settle against their
+ * submitting session, even when the caller has stopped waiting. Successful
+ * scores also leave a `span-usage-v1` metrics entry.
  */
 import { raceWithAbortSignal } from "@yunuspi/ai/utils/abort";
-import { createHash } from "node:crypto";
+import { readCostEvidence } from "@yunuspi/coding-agent/session-accounting";
+import { createHash, randomUUID } from "node:crypto";
 import { microMetrics } from "./metrics.ts";
 import { sessionObservability } from "../session-observability.ts";
 import { beginHarnessActivity } from "../harness-activity.ts";
@@ -130,16 +131,19 @@ export interface SpanScoreResult {
   shadow: boolean;
 }
 
-export type SpanScorer = (prompt: string, opts: {
+export type SpanScorer = ((prompt: string, opts: {
   signal?: AbortSignal;
   timeoutMs?: number;
+  pi?: unknown;
 }) => Promise<{
   text: string;
   model: string;
   inputTokens?: number;
   costUsd?: number;
+  costSource?: "provider-reported" | "estimate";
+  billingReceiptId?: string;
   ms: number;
-}>;
+}>) & { cacheRoute?: string };
 
 export function spanEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return !["1", "true", "yes"].includes((env.PI_OFFLINE ?? "").toLowerCase())
@@ -200,8 +204,6 @@ export function spanPrompt(trace: SpanTrace): string {
 interface SpanCacheEntry {
   scores: Record<string, SpanSignalScores>;
   model: string;
-  inputTokens?: number;
-  costUsd?: number;
   at: number;
 }
 
@@ -246,7 +248,8 @@ export async function scoreSpanTrace(
     return { ok: false, ...base, ms: 0, cached: false, skipped: "trivial" };
   }
   metrics.offer("span");
-  const cached = spanCache.get(fingerprint);
+  const cacheKey = scorer?.cacheRoute ? `${scorer.cacheRoute}:${fingerprint}` : fingerprint;
+  const cached = spanCache.get(cacheKey);
   if (cached && now() - cached.at < SPAN_CACHE_TTL_MS) {
     metrics.run("span", 0);
     metrics.cacheHit("span");
@@ -274,7 +277,7 @@ export async function scoreSpanTrace(
   let succeeded = false;
   try {
     const prompt = spanPrompt({ events });
-    const answer = await raceWithAbortSignal(Promise.resolve(scorer(prompt, { signal, timeoutMs })), signal);
+    const answer = await raceWithAbortSignal(Promise.resolve(scorer(prompt, { signal, timeoutMs, pi: opts.pi })), signal);
     signal.throwIfAborted();
     const ms = Math.max(0, now() - started);
     let parsed: Record<string, SpanSignalScores> | undefined;
@@ -289,11 +292,14 @@ export async function scoreSpanTrace(
       return { ok: false, ...base, ms, cached: false, skipped: "malformed" };
     }
     metrics.run("span", ms, prompt.length);
+    spanCache.delete(cacheKey);
     if (spanCache.size >= SPAN_CACHE_MAX) spanCache.delete(spanCache.keys().next().value!);
-    spanCache.set(fingerprint, { scores: structuredClone(parsed), model: answer.model, inputTokens: answer.inputTokens, costUsd: answer.costUsd, at: now() });
+    spanCache.set(cacheKey, { scores: structuredClone(parsed), model: answer.model, at: now() });
     const presentCount = Object.values(parsed).filter((scores) => scores.present >= SPAN_ADVISE_THRESHOLD).length;
+    const costSource = "costSource" in answer ? answer.costSource
+      : typeof answer.costUsd === "number" && Number.isFinite(answer.costUsd) && answer.costUsd >= 0 ? "provider-reported" : undefined;
     ledger(opts.pi, { model: answer.model, inputTokens: answer.inputTokens, costUsd: answer.costUsd,
-      ...(typeof answer.costUsd==='number'&&Number.isFinite(answer.costUsd)&&answer.costUsd>=0?{costSource:'provider-reported'}:{}),
+      ...(costSource ? { costSource } : {}), ...(answer.billingReceiptId ? { billingReceiptId: answer.billingReceiptId } : {}),
       ms, cached: false, signals: Object.keys(parsed).length, present: presentCount, shadow });
     const present = Object.entries(parsed).filter(([, scores]) => scores.present >= SPAN_ADVISE_THRESHOLD).map(([id]) => id);
     // Shadow evaluations stay out of the transcript activity feed (the
@@ -357,18 +363,38 @@ function spanInstructions(): string {
  * never chooses another model: without a session model the call is refused and
  * the trace yields no signal. */
 export function sessionSpanScorer(ctx: any): SpanScorer {
-  return async (prompt, callOpts) => {
-    const model = ctx?.model;
+  const model = ctx?.model;
+  const score: SpanScorer = async (prompt, callOpts) => {
     if (typeof model?.provider !== "string" || typeof model?.id !== "string") throw Error("span: no session model");
     if (typeof ctx.modelRegistry?.completeSimple !== "function") throw Error("span: registry dispatch unavailable");
     const started = Date.now();
     const thinking = clampThinkingLevel(model, "off");
-    const response = await ctx.modelRegistry.completeSimple(model, {
-      messages: [{ role: "user", content: [{ type: "text", text: `${spanInstructions()}\n\n${prompt}` }], timestamp: started }],
-    }, {
-      maxTokens: SPAN_MAX_OUTPUT_TOKENS, signal: callOpts.signal, maxRetries: 0,
-      ...(thinking === "off" ? {} : { reasoning: thinking }),
-    });
+    callOpts.signal?.throwIfAborted();
+    const accounting = bindSpanAccounting(callOpts.pi, model);
+    accounting?.record("pending");
+    const abortStatus = () => callOpts.signal?.reason?.name === "TimeoutError" ? "timeout" as const : "cancelled" as const;
+    let response;
+    try {
+      response = await ctx.modelRegistry.completeSimple(model, {
+        messages: [{ role: "user", content: [{ type: "text", text: `${spanInstructions()}\n\n${prompt}` }], timestamp: started }],
+      }, {
+        maxTokens: SPAN_MAX_OUTPUT_TOKENS, signal: callOpts.signal, maxRetries: 0,
+        ...(thinking === "off" ? {} : { reasoning: thinking }),
+      });
+    } catch (error) {
+      accounting?.record(callOpts.signal?.aborted ? abortStatus() : "failed",
+        (error as { code?: string })?.code === "PI_AUTONOMOUS_REQUEST_DENIED" ? { dispatchOutcome: "not-dispatched" } : undefined);
+      throw error;
+    }
+    const rawUsage = response?.usage;
+    const evidence = readCostEvidence(rawUsage, response?.provider ?? model.provider);
+    const usage: Record<string, unknown> | undefined = rawUsage ? { costDetails: evidence } : undefined;
+    if (usage) for (const field of ["input", "output", "cacheRead", "cacheWrite", "reasoning"]) {
+      if (Number.isSafeInteger(rawUsage[field]) && rawUsage[field] >= 0) usage[field] = rawUsage[field];
+    }
+    const status = response?.stopReason === "aborted" ? abortStatus()
+      : !response || response.stopReason === "error" ? "failed" : "completed";
+    const recorded = accounting?.record(status, usage);
     if (response?.stopReason === "error") throw Error(response.errorMessage || "span: model request failed");
     if (response?.stopReason === "aborted") throw Object.assign(Error("span: request aborted"), { name: "AbortError" });
     const text = (response?.content ?? []).filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n");
@@ -377,9 +403,28 @@ export function sessionSpanScorer(ctx: any): SpanScorer {
       text,
       model: `${model.provider}/${model.id}`,
       inputTokens: typeof response?.usage?.input === "number" ? response.usage.input : undefined,
-      costUsd: typeof cost === "number" && Number.isFinite(cost) ? cost : undefined,
+      costUsd: evidence.seen ? evidence.reported + evidence.estimated : cost === 0 ? 0 : undefined,
+      costSource: evidence.seen ? evidence.estimatedUsage ? "estimate" : "provider-reported" : undefined,
+      billingReceiptId: recorded ? accounting?.id : undefined,
       ms: Date.now() - started,
     };
+  };
+  score.cacheRoute = createHash("sha256").update(JSON.stringify([model?.provider, model?.id, model?.api, model?.baseUrl])).digest("hex");
+  return score;
+}
+
+function bindSpanAccounting(pi: unknown, model: { provider: string; id: string }) {
+  let append: ((data: unknown) => boolean) | undefined;
+  try { append = (pi as { bindAuxiliaryUsage?: () => ((data: unknown) => boolean) })?.bindAuxiliaryUsage?.(); }
+  catch { return undefined; }
+  if (!append) return undefined;
+  const id = randomUUID();
+  return {
+    id,
+    record(status: "pending" | "completed" | "failed" | "cancelled" | "timeout", usage?: Record<string, unknown>) {
+      try { return append({ id, owner: "span", provider: model.provider, model: model.id, status, ...(usage ? { usage } : {}) }); }
+      catch { return false; }
+    },
   };
 }
 

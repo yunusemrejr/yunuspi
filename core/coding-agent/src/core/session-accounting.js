@@ -59,7 +59,7 @@ export function hasRecordedTokenUsage(usage, noExecution = false) {
 
 const elevenLabsMediaOwner = owner => owner === 'audio_generate' || owner === 'narration_tts';
 const elevenLabsRequestId = id => typeof id === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(id) ? id : undefined;
-const linkedJevMetric = data => typeof data?.billingReceiptId === 'string' && /^[0-9a-f-]{36}$/.test(data.billingReceiptId);
+const linkedAuxiliaryMetric = data => typeof data?.billingReceiptId === 'string' && /^[0-9a-f-]{36}$/.test(data.billingReceiptId);
 function elevenLabsBillingUnits(value) {
   const amount = typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value) ? Number(value) : value;
   return typeof amount === 'number' && Number.isFinite(amount) && amount >= 0 ? amount : undefined;
@@ -315,10 +315,10 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
       const span = entry.customType === 'span-usage-v1';
       // A logical decision can be saved after navigation. Its source branch
       // owns the submitted request, so following the metric must not move cost.
-      if (!span && linkedJevMetric(data)) continue;
+      if (linkedAuxiliaryMetric(data)) continue;
       const known = valid(data?.costUsd) && (!span || data.costUsd > 0 || data.costSource === 'provider-reported');
       const cost = known ? data.costUsd : 0;
-      const reported = span || data?.costSource === 'provider-reported';
+      const reported = span ? data?.costSource !== 'estimate' : data?.costSource === 'provider-reported';
       const evidence = {reported:reported ? cost : 0, estimated:reported ? 0 : cost, unknown:!known && data?.cached !== true, subscription:false, seen:known || data?.cached === true, estimatedUsage:!reported && data?.cached !== true};
       auxiliary = mergeCostEvidence(auxiliary, evidence);
       addRow('auxiliary', typeof data?.model === 'string' && data.model ? `openrouter/${data.model.slice(0,128)}` : `openrouter/${span?'span':'jev'}`, evidence);
@@ -609,7 +609,7 @@ export function collectSessionMetrics(entries, live) {
    const d=e.data??{};
    m.jev.hits++;if(d.cached===true)m.jev.cached++;
    const site=typeof d.site==='string'&&d.site?d.site.slice(0,48):'unknown';
-   const linked=linkedJevMetric(d);
+   const linked=linkedAuxiliaryMetric(d);
    addJevUsage(site,1,linked?0:number(d.inputTokens),linked?0:number(d.costUsd));
   }
   if(e.type==='custom'&&e.customType==='span-usage-v1'){
@@ -770,7 +770,7 @@ export function collectSessionMetrics(entries, live) {
   m.abortedTelemetry?`Aborted/zero-content assistant attempts kept as telemetry (not model-visible): ${m.abortedTelemetry}.`:'Aborted/zero-content assistant attempts: none counted; empty aborted attempts stay telemetry, never projected context.',
   `Parent skills suggested: ${m.skillsRouted.join(', ')||'none recorded'}`,
   `Parent skills fully read: ${m.skillsRead.join(', ')||'none recorded'}; partial reads only: ${m.skillsPartial.join(', ')||'none'}. A routed suggestion is not a read or proof of application.`,
-  ...(m.span.hits?[`Span behavior sensor: ${m.span.hits} scored traces (${m.span.shadow} shadow record-only, ${m.span.cached} cached); ${m.span.present} above-bar signal readings; ${m.span.tokens.toLocaleString('en-US')} input tokens${m.span.costUsd?`, $${m.span.costUsd.toFixed(4)} reported cost`:''}. Scores are advisory and reach consumers only with deterministic corroboration.`]:[]),
+  ...(m.span.hits?[`Span behavior sensor: ${m.span.hits} scored traces (${m.span.shadow} shadow record-only, ${m.span.cached} cached); ${m.span.present} above-bar signal readings; ${m.span.tokens.toLocaleString('en-US')} input tokens${m.span.costUsd?`, $${m.span.costUsd.toFixed(4)} recorded cost`:''}. Scores are advisory and reach consumers only with deterministic corroboration.`]:[]),
   'Tools: '+Object.entries(m.tools).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`${k} ${v}`).join(', '),
   m.telemetry?`Hook checks: ${m.hookCalls} intervention-handler calls; ${m.hookChanged} returned results (not proof of useful changes). Excluded ${m.hookExcluded} streaming/lifecycle-observer notifications from legacy telemetry.${m.confirmDialogs?` User-confirm waits: ${m.confirmDialogs} dialogs holding ${Math.round(m.confirmWaitMs).toLocaleString('en-US')} ms of hook wall time, split out of the filesystem-safety row below.`:''}`:'Extension hook invocations before instrumentation: unknown. Health logs contain lifecycle events only.',
   ...Object.entries(m.hooks).sort((a,b)=>b[1].calls-a[1].calls).map(([k,v])=>v.confirmWaitMs>0?`${k}: ${v.calls} calls, ${v.errors} errors, ${Math.round(v.activeMs)} ms active (+${Math.round(v.confirmWaitMs)} ms user-confirm wait across ${v.confirmDialogs} dialogs), ${v.changed} returned results`:`${k}: ${v.calls} calls, ${v.errors} errors, ${Math.round(v.ms)} ms, ${v.changed} returned results`),
