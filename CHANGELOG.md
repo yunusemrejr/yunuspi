@@ -1,7 +1,8 @@
 ## 0.56.15 — Bounded Jev waits and exact desktop delivery
 
-- Jev returns at the caller deadline even if a transport keeps running. The original session can still record the late physical request charge.
-- Desktop acknowledges queued input by ID and keeps transcript order when a steer overtakes a follow-up. Matching captions and image-only messages retain their own attachments.
+- Jev returns at each caller's deadline. A waiting caller can keep the shared request open within its hard limit, and the submitting session records any late charge.
+- Desktop tracks queued input by ID and keeps its preview when switching sessions. When a steer overtakes a follow-up, each message and its attachments appear in delivery order.
+- A desktop history snapshot includes the current user message while an extension hook delays saving it.
 - Hosted Web Access requests settle paid failures in the submitting session when a fork happens during the request.
 
 ## 0.56.14 — Ordered streaming and durable completion receipts

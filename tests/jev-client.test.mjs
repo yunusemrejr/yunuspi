@@ -191,6 +191,109 @@ test('a short coalesced deadline leaves the submitting caller and the shared rou
   assert.deepEqual(owner.receipts.map(row => row.data.status), ['pending', 'completed']);
 });
 
+test('a longer follower extends a short submitting caller’s live HTTP request without paying twice', async t => {
+  mockDeadline(t);
+  const reply = Promise.withResolvers();
+  let signal, sends = 0, shortResult;
+  const owner = harness(async (_url, request) => {
+    sends++;
+    signal = request.signal;
+    return new Promise((resolve, reject) => {
+      reply.promise.then(resolve, reject);
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+    });
+  });
+  const followerRows = [];
+  const followerPi = { appendEntry: (...row) => followerRows.push(row) };
+  const params = ['deadline-extended', 'synthetic evidence', { ping: { type: 'noul' } }];
+  const short = jev.askJev(...params, { pi: owner.pi, timeoutMs: 40 }).then(result => { shortResult = result; return result; });
+  let long;
+  try {
+    await tick();
+    assert.ok(signal);
+    t.mock.timers.tick(10);
+    long = jev.askJev(...params, { pi: followerPi, timeoutMs: 200 });
+    t.mock.timers.tick(30);
+    await tick();
+    assert.deepEqual(shortResult, { ok: false, skipped: 'timeout' });
+    assert.equal(signal.aborted, false);
+    assert.equal(sends, 1);
+    t.mock.timers.tick(10);
+  } finally {
+    reply.resolve(jsonOk({ answers: ANSWERS, usage: { cost: 0.031 } }));
+    await short;
+  }
+  assert.equal((await long).usage.cached, true);
+  assert.deepEqual(owner.receipts.map(row => row.data.status), ['pending', 'completed']);
+  assert.equal(owner.receipts[1].data.usage.cost.total, 0.031);
+  assert.equal(followerRows.length, 1);
+  assert.equal(followerRows[0][1].costUsd, 0);
+  assert.equal(sends, 1);
+});
+
+for (const elapsed of [18, 40]) {
+  test(`a late join after the ${elapsed === 18 ? 'family' : 'cascade'} cutoff cannot revive expired work`, async t => {
+    t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+    let now = 0;
+    t.mock.method(performance, 'now', () => now);
+    const reply = Promise.withResolvers();
+    const signals = [];
+    const owner = harness(async (_url, request) => {
+      signals.push(request.signal);
+      return signals.length === 1 ? reply.promise : decisionsOk();
+    });
+    const params = ['deadline-expired-join', 'synthetic evidence', { ping: { type: 'noul' } }];
+    const short = jev.askJev(...params, { pi: owner.pi, timeoutMs: 40 });
+    let long;
+    try {
+      await tick();
+      assert.equal(signals.length, 1);
+      now = elapsed; // Deadline has passed even though its timer callback has not run.
+      long = jev.askJev(...params, { timeoutMs: 200 });
+      assert.equal(signals[0].aborted, true);
+      assert.equal(signals.length, 1);
+    } finally { reply.resolve(decisionsOk()); }
+    const [first, follower] = await Promise.all([short, long]);
+    const expectedReceipts = ['pending', 'timeout'];
+    if (elapsed === 18) {
+      assert.equal(first.ok, true);
+      assert.equal(follower.usage.model, jev.KEV_SLUG);
+      assert.equal(signals.length, 2, 'only the next family runs after the original HTTP request settles');
+      expectedReceipts.push('pending', 'completed');
+    } else {
+      assert.equal(first.skipped, 'timeout');
+      assert.equal(follower.skipped, 'busy');
+      assert.equal(signals.length, 1);
+    }
+    await tick();
+    assert.deepEqual(owner.receipts.map(row => row.data.status), expectedReceipts);
+  });
+}
+
+test('a follower cannot extend physical work beyond the hard cascade cap', async t => {
+  mockDeadline(t);
+  const reply = Promise.withResolvers();
+  let sends = 0, followersResult;
+  const owner = harness(async () => { sends++; return reply.promise; });
+  const params = ['cascade-hard-cap', 'synthetic evidence', { ping: { type: 'noul' } }];
+  const first = jev.askJev(...params, { pi: owner.pi, timeoutMs: 60_000 });
+  let follower;
+  try {
+    await tick();
+    t.mock.timers.tick(1000);
+    follower = jev.askJev(...params, { timeoutMs: 60_000 }).then(result => { followersResult = result; return result; });
+    t.mock.timers.tick(59_000);
+    await tick();
+    assert.deepEqual(followersResult, { ok: false, skipped: 'timeout' });
+    assert.equal(sends, 1);
+  } finally {
+    reply.resolve(decisionsOk());
+    await Promise.all([first, follower]);
+  }
+  await tick();
+  assert.deepEqual(owner.receipts.map(row => row.data.status), ['pending', 'timeout']);
+});
+
 test('an optional second opinion shares the caller deadline and a late rejection is settled', async t => {
   mockDeadline(t);
   const previous = process.env.PI_JEV_SECOND_OPINION;

@@ -28,6 +28,7 @@ import path from 'node:path';
 
 const cwd = process.env.PI_REATTACH_FIXTURE_DIR;
 const stage = process.env.PI_REATTACH_FIXTURE_STAGE;
+const holdUserEnd = stage === 'user_end';
 const held = Promise.withResolvers();
 let send;
 process.on('message', action => {
@@ -38,9 +39,9 @@ const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false 
 const resourceLoader = new DefaultResourceLoader({ cwd, agentDir: cwd, settingsManager,
   noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
   extensionFactories: [pi => {
-    if (!stage.startsWith('message_')) return;
-    pi.on(stage, async event => {
-      if (event.message?.role !== 'assistant') return;
+    if (!holdUserEnd && !stage.startsWith('message_')) return;
+    pi.on(holdUserEnd ? 'message_end' : stage, async event => {
+      if (event.message?.role !== (holdUserEnd ? 'user' : 'assistant')) return;
       if (stage === 'message_update' && event.assistantMessageEvent?.type !== 'text_delta') return;
       process.send('held');
       await held.promise;
@@ -104,7 +105,7 @@ const modelRuntime = {
         send = undefined;
       }
     };
-    if (stage === 'message_end' || stage === 'queued-input' && ++streamCount > 1) send('finish');
+    if (holdUserEnd || stage === 'message_end' || stage === 'queued-input' && ++streamCount > 1) send('finish');
     return source;
   },
 };
@@ -147,7 +148,7 @@ function startWorker(t, cwd, stage = '') {
     await worker.stop();
   }
   t.after(stop);
-  return { worker, events, held: stage.startsWith('message_') ? watch(held.promise) : undefined, waitFor, stop };
+  return { worker, events, held: stage === 'user_end' || stage.startsWith('message_') ? watch(held.promise) : undefined, waitFor, stop };
 }
 
 const history = (worker, options) => worker.requestWithBoundary('get_messages', { projection: 'desktop', ...options });
@@ -198,6 +199,29 @@ for (const [stage, expectedPreview] of [['message_start', null], ['message_updat
     assert.deepEqual(savedAssistants(complete), [previous, phrase]);
   });
 }
+
+test('desktop reattach includes a published user start while its transcript append waits for an extension', { timeout: 20_000 }, async t => {
+  const cwd = mkdtempSync(path.join(tmpdir(), 'pi-reattach-user-'));
+  const { worker, events, held, waitFor } = startWorker(t, cwd, 'user_end');
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const message = 'Current fixture prompt.';
+  const desktopInputId = randomUUID();
+  await worker.request('prompt', { message, desktopInputId });
+  await held;
+  const boundary = await history(worker, { limit: 1 });
+  const start = events.find(({ event }) => event.type === 'message_start' && event.desktopInputId === desktopInputId);
+  assert.ok(start && start.sequence <= boundary.sequence, 'start already belongs to the history boundary');
+  assert.deepEqual(boundary.data.messages.map(messageText), [previous, message]);
+  const earlier = await history(worker, { before: boundary.data.before, anchor: boundary.data.anchor });
+  assert.deepEqual(earlier.data.messages.map(messageText), ['Previous fixture prompt.']);
+  const view = reattach(boundary);
+  worker.child.send('release');
+  await waitFor(settled);
+  view.replay(events);
+  assert.equal(view.state.messages.filter(item => item.kind === 'user' && messageText(item) === message).length, 1);
+  const complete = (await history(worker)).data;
+  assert.equal(complete.messages.filter(item => item.role === 'user' && messageText(item) === message).length, 1);
+});
 
 test('desktop reattach appends identical deltas, expires old fork cursors and restores settled history in a fresh worker', { timeout: 30_000 }, async t => {
   const cwd = mkdtempSync(path.join(tmpdir(), 'pi-reattach-'));

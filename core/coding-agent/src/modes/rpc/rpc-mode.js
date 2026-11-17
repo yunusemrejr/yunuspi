@@ -600,12 +600,15 @@ export async function runRpcMode(runtimeHost) {
             case "get_messages": {
                 if (command.projection === 'desktop') {
                     const page = desktopSessionHistory(session.sessionManager, { limit: command.limit, before: command.before, anchor: command.anchor });
+                    const initial = command.before === undefined;
+                    const userMessage = initial ? desktopStreamingPreview?.userMessage : null;
                     const live = session.agent.state.streamingMessage;
-                    const streamingMessage = command.before !== undefined ? null : desktopStreamingPreview
+                    const streamingMessage = !initial ? null : desktopStreamingPreview
                         ? desktopStreamingPreview.snapshot()
                         : live?.role === 'assistant' ? desktopMessage(live) : null;
                     const data = page.reset ? { ...page, messages: [] } : {
                         ...page,
+                        messages: userMessage ? [...page.messages, userMessage] : page.messages,
                         isStreaming: session.isStreaming,
                         streamingMessage,
                     };

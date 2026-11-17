@@ -72,6 +72,7 @@ export const JEV_REQUEST_TIMEOUT_MS = 15_000;
 export const JEV_DISCOVERY_TTL_MS = 10 * 60 * 1000;
 export const JEV_CACHE_TTL_MS = 30 * 60 * 1000;
 const JEV_CACHE_MAX = 500;
+const MAX_JEV_DEADLINE_MS = 60_000;
 export const JEV_MAX_INPUT_CHARS = 32768;
 export const JEV_REMOTE_PROVIDER = "OpenRouter";
 export const JEV_INPUT_POLICY = `When the Jev/Kev judge is enabled, bounded task/request excerpts may be sent to ${JEV_REMOTE_PROVIDER}; the input is capped at ${JEV_MAX_INPUT_CHARS} characters. Set PI_JEV=off (or PI_JEV=0) to disable both remote judge routes.`;
@@ -216,10 +217,78 @@ let lastError = "";
 let discovered: { at: number; slugs: string[] } = { at: 0, slugs: [] };
 let discoveryInflight: Promise<string[]> | null = null;
 const cache = new Map<string, { answers: Record<string, JevAnswer>; inputTokens: number; model: string; at: number }>();
+/** One physical timer governs the cascade and its current family/HTTP request. */
+class SharedJevDeadline {
+  private readonly controller = new AbortController();
+  readonly signal = this.controller.signal;
+  private readonly startedAt = performance.now();
+  private readonly hardDeadline = this.startedAt + MAX_JEV_DEADLINE_MS;
+  private cutoff = this.hardDeadline;
+  private family?: { startedAt: number; controller: AbortController };
+  private timer?: ReturnType<typeof setTimeout>;
+  cancelled = false;
+
+  private familyCutoff(): number {
+    return this.family && !this.family.controller.signal.aborted
+      ? this.family.startedAt + Math.max(1, Math.floor((this.cutoff - this.startedAt) * 0.45))
+      : Infinity;
+  }
+
+  check(): void {
+    if (this.signal.aborted) return;
+    const now = performance.now();
+    if (now >= this.cutoff) this.controller.abort(new DOMException("Jev cascade deadline exceeded", "TimeoutError"));
+    else if (now >= this.familyCutoff()) this.family?.controller.abort(new DOMException("Judge route timeout", "TimeoutError"));
+  }
+
+  setCutoff(liveDeadline: number): void {
+    // A waiter arriving after the old boundary cannot resurrect its signal.
+    this.check();
+    if (this.signal.aborted) return;
+    const next = Math.min(this.hardDeadline, liveDeadline);
+    if (next === this.cutoff && this.timer !== undefined) return;
+    this.cutoff = next;
+    this.arm();
+  }
+
+  startFamily(): AbortSignal {
+    this.family = { startedAt: performance.now(), controller: new AbortController() };
+    this.arm();
+    return AbortSignal.any([this.signal, this.family.controller.signal]);
+  }
+
+  finishFamily(): void {
+    this.family = undefined;
+    this.arm();
+  }
+
+  cancel(reason: unknown): void {
+    if (this.signal.aborted) return;
+    this.cancelled = true;
+    this.controller.abort(reason);
+    this.dispose();
+  }
+
+  dispose(): void {
+    clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+
+  private arm(): void {
+    this.dispose();
+    this.check();
+    if (this.signal.aborted) return;
+    const next = Math.min(this.cutoff, this.familyCutoff());
+    this.timer = setTimeout(() => this.arm(), Math.max(1, Math.ceil(next - performance.now())));
+  }
+}
+
+type JevWaiter = { deadlineAt: number; settle: (result: JevAskResult) => void };
 type InflightEntry = {
-  promise: Promise<JevAskResult>;
-  controller: AbortController;
-  waiters: number;
+  deadline: SharedJevDeadline;
+  waiters: Set<JevWaiter>;
+  longestDeadline: number;
+  longestCount: number;
   settled: boolean;
 };
 const inflight = new Map<string, InflightEntry>();
@@ -238,7 +307,7 @@ function resetJevClientLocal(): void {
   discovered = { at: 0, slugs: [] };
   discoveryInflight = null;
   cache.clear();
-  for (const entry of inflight.values()) entry.controller.abort(new DOMException('Jev client reset', 'AbortError'));
+  for (const entry of inflight.values()) entry.deadline.cancel(new DOMException('Jev client reset', 'AbortError'));
   inflight.clear();
 }
 
@@ -376,13 +445,14 @@ async function postDecisions(
   state: unknown,
   questions: Record<string, unknown>,
   key: string,
-  signal?: AbortSignal,
-  timeoutMs = JEV_REQUEST_TIMEOUT_MS,
+  signal: AbortSignal,
+  deadline: SharedJevDeadline,
   accounting?: DecisionAccounting,
   estimatedInputTokens?: number,
 ): Promise<{ answers: Record<string, JevAnswer>; model?: string; billingReceiptId?: string } & DecisionUsage> {
   const payload = JSON.stringify({ model: slug, state, questions });
-  signal?.throwIfAborted();
+  deadline.check();
+  signal.throwIfAborted();
   const finish = beginHarnessActivity('jev');
   let returned = false, dispatched = false;
   let bill: DecisionUsage = {};
@@ -406,13 +476,10 @@ async function postDecisions(
     };
     if (JEV_FAMILY_SLUG.test(slug) && typeof value?.model === 'string' && JEV_SERVED_SLUG.test(value.model)) settledModel = value.model;
   };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(new DOMException("Judge route timeout", "TimeoutError")), timeoutMs);
-  const onAbort = () => controller.abort();
-  signal?.addEventListener("abort", onAbort, { once: true });
   try {
     record("pending");
-    controller.signal.throwIfAborted();
+    deadline.check();
+    signal.throwIfAborted();
     dispatched = true;
     const response = await deps.fetchImpl(JEV_DECISIONS_URL, {
       method: "POST",
@@ -424,11 +491,13 @@ async function postDecisions(
         "X-Title": "yunuspi",
       },
       body: payload,
-      signal: controller.signal,
+      signal,
     });
     if (!response.ok) {
       const body = await boundedBody(response, 4096).catch(() => "");
       try { readUsage(JSON.parse(body)); } catch { /* Error content is not billing evidence. */ }
+      deadline.check();
+      signal.throwIfAborted();
       // Provider error bodies may echo the submitted state. Retain only the
       // status and safe model-rejection category in health/UI diagnostics.
       const err = Error(`decisions ${response.status}${isModelRejection(response.status, body) ? ': invalid model' : ''}`) as Error & { status?: number };
@@ -437,7 +506,8 @@ async function postDecisions(
     }
     const body = await boundedJson(response) as { answers?: Record<string, JevAnswer>; model?: string };
     readUsage(body);
-    controller.signal.throwIfAborted();
+    deadline.check();
+    signal.throwIfAborted();
     if (!body || typeof body !== "object" || !body.answers || typeof body.answers !== "object" || Array.isArray(body.answers))
       throw Error("decisions: malformed answers");
     // Validate the requested typed values before they reach routing, caches,
@@ -464,11 +534,9 @@ async function postDecisions(
     returned = true;
     return { answers: body.answers, model, inputTokens, costUsd: bill.costUsd, costSource: bill.costSource, billingReceiptId };
   } finally {
-    const cancelled = signal?.aborted && signal.reason?.name !== 'TimeoutError';
-    if (!returned) record(cancelled ? 'cancelled' : controller.signal.aborted ? 'timeout' : 'failed');
+    const cancelled = signal.aborted && signal.reason?.name !== 'TimeoutError';
+    if (!returned) record(cancelled ? 'cancelled' : signal.aborted ? 'timeout' : 'failed');
     finish(returned ? 'ok' : cancelled ? 'cancelled' : 'error');
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", onAbort);
   }
 }
 
@@ -500,12 +568,13 @@ export type JevAskOpts = {
    * omitted means the full JEV_REQUEST_TIMEOUT_MS cascade deadline. */
   timeoutMs?: number;
 };
+type JevCallerOpts = JevAskOpts & { deadlineAt: number; signal: AbortSignal };
 
 /** The whole cascade (both families and alias discovery) stays inside one
  * caller-selected deadline, capped so a caller cannot create an unbounded wait. */
 function cascadeDeadline(opts: JevAskOpts): number {
   const wanted = opts.timeoutMs ?? deps.requestTimeoutMs;
-  return Math.max(1, Math.min(Number.isFinite(wanted) ? wanted : deps.requestTimeoutMs, 60_000));
+  return Math.max(1, Math.min(Number.isFinite(wanted) ? wanted : deps.requestTimeoutMs, MAX_JEV_DEADLINE_MS));
 }
 
 function knownSlugs(): string[] {
@@ -575,21 +644,17 @@ async function askJevLocal(
   const started = deps.now();
   const budget = cascadeDeadline(opts);
   const deadlineAt = performance.now() + budget;
-  const remaining = () => Math.ceil(deadlineAt - performance.now());
   const deadline = new AbortController();
   const signal = opts.signal ? AbortSignal.any([opts.signal, deadline.signal]) : deadline.signal;
+  const caller = { ...opts, signal, deadlineAt };
   const timer = setTimeout(() => deadline.abort(new DOMException("Jev caller deadline exceeded", "TimeoutError")), budget);
   let result: JevAskResult;
   let consensus: "agree" | "split" | undefined;
   try {
     const fitted = fitJevState(state, questions, { protect: opts.protect });
-    const primaryBudget = remaining();
-    result = primaryBudget > 0
-      ? await askJevShared(site, fitted, questions, { ...opts, signal, timeoutMs: primaryBudget })
-      : { ok: false, skipped: "timeout" };
-    const secondBudget = remaining();
-    if (result.ok && !opts.family && secondBudget > 0 && !signal.aborted) {
-      const second = await secondOpinion(site, fitted, questions, { ...opts, signal, timeoutMs: secondBudget }, result);
+    result = await askJevShared(site, fitted, questions, caller);
+    if (result.ok && !opts.family && performance.now() < deadlineAt && !signal.aborted) {
+      const second = await secondOpinion(site, fitted, questions, caller, result);
       if (second) { result = second.result; consensus = second.split ? "split" : "agree"; }
     }
   } finally {
@@ -626,7 +691,7 @@ function takeSecondOpinionToken(): boolean {
  * then pool both distributions (see jev-fusion.ts). Any failure, cancellation
  * or incompatibility keeps the first judge's answer untouched. */
 async function secondOpinion(
-  site: string, state: unknown, questions: Record<string, unknown>, opts: JevAskOpts,
+  site: string, state: unknown, questions: Record<string, unknown>, opts: JevCallerOpts,
   first: Extract<JevAskResult, { ok: true }>,
 ): Promise<{ result: Extract<JevAskResult, { ok: true }>; split: boolean } | undefined> {
   if (!secondOpinionEnabled() || opts.signal?.aborted) return undefined;
@@ -651,7 +716,7 @@ async function secondOpinion(
   };
 }
 
-async function askJevShared(site: string, state: unknown, questions: Record<string, unknown>, opts: JevAskOpts): Promise<JevAskResult> {
+async function askJevShared(site: string, state: unknown, questions: Record<string, unknown>, opts: JevCallerOpts): Promise<JevAskResult> {
   // A caller can leave its own wait without cancelling an identical shared
   // transport. The last cancelled waiter aborts the underlying request so a
   // stale advisory cannot keep consuming network/provider time.
@@ -659,6 +724,7 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
   // still bill when PI_JEV=0 (askJevOnce used to accept only the literal "off").
   if (!jevEnabled()) return { ok: false, skipped: "disabled" };
   if (opts.signal?.aborted) return { ok: false, skipped: opts.signal.reason?.name === "TimeoutError" ? "timeout" : "aborted" };
+  if (performance.now() >= opts.deadlineAt) return { ok: false, skipped: "timeout" };
   let identity: string;
   try {
     // The transport, validation and cache must refer to one immutable request.
@@ -676,91 +742,98 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
   let entry = inflight.get(identity);
   // A cancelled transport may still be running and billed. Keep its identity
   // and concurrency slot until physical settlement so repeats cannot repay it.
-  if (entry?.controller.signal.aborted) return { ok: false, skipped: "busy" };
+  entry?.deadline.check();
+  if (entry?.deadline.signal.aborted) return { ok: false, skipped: "busy" };
   const submittingWaiter = !entry;
   if (!entry) {
-    if(inflight.size>=64)return {ok:false,skipped:'busy'};
-    const controller=new AbortController();
+    if (inflight.size >= 64) return { ok: false, skipped: "busy" };
+    const shared: InflightEntry = {
+      deadline: new SharedJevDeadline(), waiters: new Set(), longestDeadline: -Infinity, longestCount: 0, settled: false,
+    };
+    inflight.set(identity, shared);
+    entry = shared;
+    // Register the identity before callbacks, and capture the submitting
+    // branch before yielding to the deferred transport.
     const accounting = bindDecisionAccounting(opts.pi, site);
-    entry={controller,waiters:0,settled:false,promise:Promise.resolve({ok:false,skipped:'unavailable'})};
-    // Register the work before entering transport or accounting callbacks.
-    entry.promise = Promise.resolve().then(async () => {
+    void Promise.resolve().then(async () => {
+      let result: JevAskResult;
       try {
-        const result = await boundedAsk(state,questions,{...opts,signal:controller.signal},accounting);
+        result = await askJevOnce(state, questions, opts.family, shared.deadline, accounting);
         if (result.ok && !result.usage.cached) ledger(opts.pi, { site, ...result.usage });
-        return result;
       }
-      catch { return {ok:false,skipped:'unavailable'}; }
+      catch { result = { ok: false, skipped: "unavailable" }; }
       finally {
-        entry!.settled=true;
-        if(inflight.get(identity)===entry)inflight.delete(identity);
+        shared.settled = true;
+        shared.deadline.dispose();
+        if (breakerTrial === shared.deadline.signal) {
+          breakerTrial = undefined;
+          if (breakerOpen && !shared.deadline.cancelled) breakerOpenedAt = deps.now();
+        }
+        if (inflight.get(identity) === shared) inflight.delete(identity);
       }
+      for (const waiter of shared.waiters) waiter.settle(result);
     });
-    inflight.set(identity,entry);
   }
-  const joined = entry;
-  joined.waiters++;
-  let waiterReleased = false;
-  const releaseWaiter = (signal?: AbortSignal) => {
-    if (waiterReleased) return;
-    waiterReleased = true;
-    joined.waiters--;
-    if (joined.waiters === 0 && !joined.settled) {
-      const timedOut = signal?.reason?.name === 'TimeoutError';
-      joined.controller.abort(new DOMException(timedOut ? 'Jev caller deadline exceeded' : 'All Jev callers cancelled', timedOut ? 'TimeoutError' : 'AbortError'));
-    }
-  };
-  try {
-    const signal = opts.signal ? AbortSignal.any([opts.signal, joined.controller.signal]) : joined.controller.signal;
-    const result = await waitForInflight(joined, signal, releaseWaiter);
-    if (!result.ok) return result;
-    if (!result.usage.cached && submittingWaiter) return { ...result, answers: structuredClone(result.answers) };
-    const { billingReceiptId: _receipt, costSource: _source, ...reused } = result.usage;
-    const usage={...reused,inputTokens:0,costUsd:0,cached:true};
-    ledger(opts.pi,{site,...usage});
-    return {ok:true,answers:structuredClone(result.answers),usage};
-  } finally {
-    releaseWaiter();
-  }
+  const result = await waitForInflight(entry, opts);
+  if (!result.ok) return result;
+  if (!result.usage.cached && submittingWaiter) return { ...result, answers: structuredClone(result.answers) };
+  const { billingReceiptId: _receipt, costSource: _source, ...reused } = result.usage;
+  const usage = { ...reused, inputTokens: 0, costUsd: 0, cached: true };
+  ledger(opts.pi, { site, ...usage });
+  return { ok: true, answers: structuredClone(result.answers), usage };
 }
 
-async function waitForInflight(entry: InflightEntry, signal: AbortSignal, release: (signal: AbortSignal) => void): Promise<JevAskResult> {
-  const skipped = (): JevAskResult => {
-    release(signal);
-    return { ok: false, skipped: signal.reason?.name === "TimeoutError" ? "timeout" : "aborted" };
-  };
-  if (signal.aborted) return skipped();
-  let abort!: () => void;
-  const cancelled = new Promise<JevAskResult>(resolve => {
-    abort = () => resolve(skipped());
-    signal.addEventListener("abort", abort, { once: true });
+function refreshCutoff(entry: InflightEntry): void {
+  entry.longestDeadline = -Infinity;
+  entry.longestCount = 0;
+  for (const waiter of entry.waiters) {
+    if (waiter.deadlineAt > entry.longestDeadline) {
+      entry.longestDeadline = waiter.deadlineAt;
+      entry.longestCount = 0;
+    }
+    if (waiter.deadlineAt === entry.longestDeadline) entry.longestCount++;
+  }
+  entry.deadline.setCutoff(entry.longestDeadline);
+}
+
+function waitForInflight(entry: InflightEntry, opts: JevCallerOpts): Promise<JevAskResult> {
+  const signal = AbortSignal.any([opts.signal, entry.deadline.signal]);
+  return new Promise(resolve => {
+    const waiter: JevWaiter = {
+      deadlineAt: opts.deadlineAt,
+      settle(result) {
+        entry.waiters.delete(waiter);
+        signal.removeEventListener("abort", abort);
+        // The event loop can deliver I/O before an already-due caller timer.
+        resolve(!signal.aborted && performance.now() >= waiter.deadlineAt ? { ok: false, skipped: "timeout" } : result);
+      },
+    };
+    const abort = () => {
+      waiter.settle({ ok: false, skipped: signal.reason?.name === "TimeoutError" ? "timeout" : "aborted" });
+      if (entry.settled) return;
+      if (entry.waiters.size === 0) entry.deadline.cancel(signal.reason);
+      else if (waiter.deadlineAt === entry.longestDeadline && --entry.longestCount === 0) refreshCutoff(entry);
+    };
+    entry.waiters.add(waiter);
+    const extendsCutoff = waiter.deadlineAt > entry.longestDeadline;
+    if (extendsCutoff) {
+      entry.longestDeadline = waiter.deadlineAt;
+      entry.longestCount = 0;
+    }
+    if (waiter.deadlineAt === entry.longestDeadline) entry.longestCount++;
+    if (signal.aborted) abort();
+    else {
+      signal.addEventListener("abort", abort, { once: true });
+      if (extendsCutoff) entry.deadline.setCutoff(entry.longestDeadline);
+    }
   });
-  try { return await Promise.race([entry.promise, cancelled]); }
-  finally { signal.removeEventListener("abort", abort); }
-}
-
-/** One deadline covers the entire alias cascade and discovery, not each
- * alias independently. Cancellation never poisons provider health. */
-async function boundedAsk(state: unknown, questions: Record<string, unknown>, opts: JevAskOpts, accounting?: DecisionAccounting): Promise<JevAskResult> {
-  const controller = new AbortController();
-  const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
-  const timer = setTimeout(() => controller.abort(new DOMException('JEV deadline exceeded', 'TimeoutError')), cascadeDeadline(opts));
-  try {
-    const result = await askJevOnce(state, questions, { ...opts, signal }, accounting);
-    return controller.signal.aborted && !opts.signal?.aborted ? { ok: false, skipped: 'timeout' } : result;
-  } finally {
-    clearTimeout(timer);
-    if (breakerTrial === signal) {
-      breakerTrial = undefined;
-      if (breakerOpen && !opts.signal?.aborted) breakerOpenedAt = deps.now();
-    }
-  }
 }
 
 async function askJevOnce(
   state: unknown,
   questions: Record<string, unknown>,
-  opts: JevAskOpts,
+  requestedFamily: JudgeFamily | undefined,
+  deadline: SharedJevDeadline,
   accounting?: DecisionAccounting,
 ): Promise<JevAskResult> {
   if (!jevEnabled()) return { ok: false, skipped: "disabled" };
@@ -770,17 +843,17 @@ async function askJevOnce(
     return { ok: false, skipped: "trivial" };
   const key = openRouterKey();
   if (!key) return { ok: false, skipped: "no-key" };
-  if (opts.signal?.aborted) return { ok: false, skipped: "aborted" };
+  deadline.check();
+  if (deadline.signal.aborted) return { ok: false, skipped: "aborted" };
   let payloadChars: number;
   try { payloadChars = JSON.stringify([state, questions]).length; }
   catch { return { ok: false, skipped: 'invalid-input' }; }
   if (payloadChars > JEV_MAX_INPUT_CHARS) return { ok: false, skipped: 'input-budget' };
   const inputTokens = estimateJevTokens(payloadChars);
   const started = deps.now();
-  const routeBudget = cascadeDeadline(opts);
   // Known-good and preferred routes need no catalog request. Discover other
   // aliases only after all known ones explicitly reject the requested model.
-  const ordered = knownSlugs().filter(slug => !opts.family || (opts.family === "kev") === (slug === KEV_SLUG));
+  const ordered = knownSlugs().filter(slug => !requestedFamily || (requestedFamily === "kev") === (slug === KEV_SLUG));
   for (const slug of ordered) {
     const hit = cacheGet(cacheKey(slug, state, questions));
     if (hit) {
@@ -799,43 +872,39 @@ async function askJevOnce(
   const epoch = generation;
   // Cache hits above do not advance traffic. Equal-load healthy families
   // alternate; a recovering route admits only one probationary request.
-  const eligible = families.filter(family => (!opts.family || family === opts.family) && routeHealth[family].retryAt <= deps.now()
+  const eligible = families.filter(family => (!requestedFamily || family === requestedFamily) && routeHealth[family].retryAt <= deps.now()
     && !(routeHealth[family].retryAt && routeHealth[family].active));
   eligible.sort((a, b) => routeHealth[a].active - routeHealth[b].active || (a === nextFamily ? -1 : 1));
   if (!eligible.length) return { ok: false, skipped: "unhealthy" };
-  if (breakerOpen) breakerTrial = opts.signal;
+  if (breakerOpen) breakerTrial = deadline.signal;
   // A forced second opinion must not disturb the alternation of ordinary traffic.
-  if (!opts.family) nextFamily = eligible[0] === "jev" ? "kev" : "jev";
+  if (!requestedFamily) nextFamily = eligible[0] === "jev" ? "kev" : "jev";
   for (const family of eligible) {
-    if (opts.signal?.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
+    deadline.check();
+    if (deadline.signal.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
     const route = routeHealth[family];
     if (route.retryAt > deps.now() || route.retryAt && route.active) continue;
     route.active++;
-    const familyStarted = deps.now();
-    // Reserve time for the other route inside the one overall deadline.
-    const familyBudget = Math.max(1, Math.floor(routeBudget * 0.45));
-    const familyController = new AbortController();
-    const familyTimer = setTimeout(() => familyController.abort(new DOMException("Judge route timeout", "TimeoutError")), familyBudget);
-    const familySignal = opts.signal ? AbortSignal.any([opts.signal, familyController.signal]) : familyController.signal;
+    const familySignal = deadline.startFamily();
     const slugs = family === "kev" ? [KEV_SLUG] : knownSlugs().filter(slug => slug !== KEV_SLUG);
     let searched = family === "kev";
     try {
       for (let index = 0; ; index++) {
+        deadline.check();
+        if (familySignal.aborted) break;
         if (index >= slugs.length) {
           if (searched) break;
           searched = true;
           const found = await discoverForCaller(familySignal);
-          if (opts.signal?.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
+          if (deadline.signal.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
           slugs.push(...found.filter(slug => !slugs.includes(slug)).slice(0, 4));
           if (index >= slugs.length) break;
         }
-        const remaining = familyBudget - (deps.now() - familyStarted);
-        if (remaining <= 0 || familySignal.aborted) break;
         const slug = slugs[index];
         try {
-          const response = await postDecisions(slug, state, questions, key, familySignal, remaining, accounting, inputTokens);
+          const response = await postDecisions(slug, state, questions, key, familySignal, deadline, accounting, inputTokens);
           if (epoch !== generation) return { ok: false, skipped: "aborted" };
-          if (breakerTrial && breakerTrial === opts.signal) breakerOpen = false;
+          if (breakerTrial === deadline.signal) breakerOpen = false;
           route.retryAt = 0; route.failures = 0;
           if (family === "jev") stickySlug = slug;
           // The decisions route names the dated model it served. Report that
@@ -850,7 +919,8 @@ async function askJevOnce(
             costUsd: response.costUsd, costSource: response.costSource, billingReceiptId: response.billingReceiptId,
             ms: deps.now() - started, cached: false } };
         } catch (error) {
-          if (opts.signal?.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
+          deadline.check();
+          if (deadline.signal.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
           const status = (error as { status?: number }).status;
           // No provider echo, network exception text or input in health state.
           lastError = status ? `decisions ${status}` : "judge transport or response failure";
@@ -866,10 +936,11 @@ async function askJevOnce(
           break; // transport, timeout, 429, 5xx or malformed answer: other family
         }
       }
+      if (deadline.signal.aborted || epoch !== generation) return { ok: false, skipped: "aborted" };
       route.failures++;
       route.retryAt = deps.now() + deps.openMs;
     } finally {
-      clearTimeout(familyTimer);
+      deadline.finishFamily();
       if (epoch === generation) route.active = Math.max(0, route.active - 1);
     }
   }

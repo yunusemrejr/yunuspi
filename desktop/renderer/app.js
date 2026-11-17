@@ -178,8 +178,9 @@ async function openSession(id, reload = false) {
     if (result.messages) {
       state.historyBefore = result.before; state.historyAnchor = result.anchor; state.hasMore = result.hasMore;
       pendingView.savedGoal = result.goal ?? null;
-      if (!result.passive && result.revision === previous.historyRevision) {
-        for (const input of previous.pendingInputs.values()) stagePendingInput(state, input);
+      for (const input of previous.pendingInputs.values()) {
+        // A send waiting on worker startup has not been assigned a worker yet.
+        if (input.workerRevision === undefined || (!result.passive && input.workerRevision === result.revision)) stagePendingInput(state, input);
       }
     }
     state.historyRevision = result.revision;
@@ -188,10 +189,15 @@ async function openSession(id, reload = false) {
     for (const item of pendingView.replay) if (item.event.type === 'notice' || (result.messages && item.sequence > result.sequence)) applyAgentEvent(state, item.event);
     pendingView.pendingHistory = false; pendingView.replay = [];
     conversations.set(id, state); viewOf(id).nodes.clear(); $('messages').replaceChildren();
-    // Keep at most eight loaded transcript caches. Closed/archived sessions are
-    // released immediately; all history remains in the core's JSONL files.
+    // Keep eight loaded transcripts when possible. A live queue still owns
+    // its previews while a saved transcript is open in the foreground.
     const other = [...conversations.keys()].filter(key => key !== id);
-    while (other.length >= 8) { const oldest = other.shift(); conversations.delete(oldest); views.get(oldest)?.nodes.clear(); }
+    let cacheSize = other.length + 1;
+    for (const oldest of other) {
+      if (cacheSize <= 8) break;
+      if (conversations.get(oldest).pendingInputs.size && workspace.runtime.some(runtime => runtime.id === oldest)) continue;
+      conversations.delete(oldest); views.get(oldest)?.nodes.clear(); cacheSize--;
+    }
     opening = false; renderMessages(true); renderChrome(); renderActivity(); renderContext(); $('prompt').focus();
     // Totals come from the transcript, so a reopened session shows its cost before the next turn ends.
     if (!result.passive) refreshStats(id);
@@ -1077,6 +1083,11 @@ async function handleShortcut(action) {
 api.onEvent(value => {
   switch (value.type) {
     case 'workspace': syncWorkspace(value.data); break;
+    case 'prompt-dispatched': {
+      const input = conversations.get(value.sessionId)?.pendingInputs.get(value.id);
+      if (input) input.workerRevision = value.revision;
+      break;
+    }
     case 'agent': {
       if (value.event.type === 'desktop_input_delivered') {
         void refreshRecoveredInput(value.sessionId).catch(() => {});

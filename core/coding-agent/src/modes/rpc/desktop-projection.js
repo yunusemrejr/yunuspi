@@ -147,19 +147,34 @@ export function desktopEvent(event) {
     return event;
 }
 
-/** The active assistant preview as of the latest record queued for desktop stdout. */
+/** The active message preview as of the latest record queued for desktop stdout. */
 export function createDesktopStreamingPreview() {
     let active = null;
+    let startedUser = null;
     let remaining = STREAM_PREVIEW_CHARACTERS;
+    const reset = () => { active = null; startedUser = null; };
     return {
+        get userMessage() { return startedUser; },
         observe(event) {
-            if (event.type === 'message_start' && event.message?.role === 'assistant') {
+            if (event.type === 'agent_start' || event.type === 'agent_end') {
+                reset();
+                return;
+            }
+            const role = event.message?.role;
+            if (role === 'user') {
+                // A user start can be published while message_end hooks still
+                // delay the transcript append. History must cover that frame.
+                if (event.type === 'message_start') startedUser = event.message;
+                else if (event.type === 'message_end') startedUser = null;
+                return;
+            }
+            if (event.type === 'message_start' && role === 'assistant') {
                 const { timestamp, provider, model } = event.message;
                 active = { role: 'assistant', content: [], timestamp, provider, model, stopReason: 'pending' };
                 remaining = STREAM_PREVIEW_CHARACTERS;
                 return;
             }
-            if (event.type === 'agent_start' || event.type === 'agent_end' || event.type === 'message_end' && event.message?.role === 'assistant') {
+            if (event.type === 'message_end' && role === 'assistant') {
                 active = null;
                 return;
             }
@@ -185,6 +200,6 @@ export function createDesktopStreamingPreview() {
             const content = Array.from(active.content, part => part ?? { type: 'thinking', thinking: '' });
             return desktopMessage({ ...active, content });
         },
-        reset() { active = null; },
+        reset,
     };
 }

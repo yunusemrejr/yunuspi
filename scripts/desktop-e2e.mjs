@@ -221,6 +221,12 @@ try {
   const steeredImage = await sendQueuedImage('blue', 'Enter');
   await page.getByText('Queued for after this turn', { exact: true }).waitFor();
   await page.getByText('Steering · read at the next step', { exact: true }).waitFor();
+  await open(first.id);
+  await open(imaging.id);
+  assert.equal(await page.getByText('Queued for after this turn', { exact: true }).count(), 1,
+    'a queued follow-up survives the first reattach to its worker');
+  assert.equal(await page.getByText('Steering · read at the next step', { exact: true }).count(), 1,
+    'a queued steer survives the first reattach to its worker');
   finishImageHold();
   await page.getByText('Checking the first delivered image.', { exact: true }).waitFor();
   assert.deepEqual(queuedImages, [steeredImage]);
@@ -234,7 +240,7 @@ try {
     [steeredImage, followUpImage]);
   await page.evaluate(id => window.yunuspi.sessionAction(id, 'close'), imaging.id);
   await open(first.id);
-  check('same-caption queued images follow their own delivery events and transcript order');
+  check('same-caption queued images survive switching sessions and follow their own delivery events');
   await page.evaluate(id => window.yunuspi.prompt(id, '/desktop-charge'), first.id);
   await page.waitForFunction(() => document.getElementById('usage-caption').textContent.includes('$~0.251000 total'));
   check('detached billing refreshes the live total while the session is idle');
