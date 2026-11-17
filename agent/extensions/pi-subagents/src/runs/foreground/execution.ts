@@ -83,7 +83,7 @@ import { clearStructuredOutputCaptures, MISSING_STRUCTURED_OUTPUT_CALL_ERROR, re
 import { formatMidToolExitError, formatProcessSignalError, isOrdinaryToolForMidToolExit, isUnexplainedProcessSignal } from "../shared/process-signal.ts";
 import { readChildToolDiagnosticError } from "../shared/tool-availability.ts";
 import { buildTimeoutRecoverySummary, collectTrackedMutationEvidence, snapshotTrackedMutations } from "../shared/mutation-evidence.ts";
-import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, hasSingleOutputChangedSinceSnapshot, injectOutputPathSystemPrompt, resolveSingleOutput, validateFileOnlyOutputMode, type SingleOutputSnapshot } from "../shared/single-output.ts";
+import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, hasSingleOutputChangedSinceSnapshot, injectOutputPathSystemPrompt, resolveSingleOutput, validateFileOnlyOutputMode } from "../shared/single-output.ts";
 import { formatSubagentModelVerificationError, isContextOverflow } from "../shared/session-model.ts";
 import { modelRouteCandidateAt, type ModelRouteCandidate } from "../../shared/model-route.ts";
 import { beginFreeRun, recoveryRoutes, recoveryRoutesEnv } from "../../../../lib/free-models.ts";
@@ -354,7 +354,11 @@ function structuredDelegationProgressChanged(
 }
 
 const AFTER_COMPACTION_SETTLEMENT = Symbol("afterCompactionSettlement");
-type AbortRecoverySingleResult = SingleResult & { [AFTER_COMPACTION_SETTLEMENT]?: true };
+const DISPATCHED_DURATION_MS = Symbol("dispatchedDurationMs");
+type ForegroundAttemptResult = SingleResult & {
+	[AFTER_COMPACTION_SETTLEMENT]?: true;
+	[DISPATCHED_DURATION_MS]?: number;
+};
 
 async function runSingleAttempt(
 	runtimeCwd: string,
@@ -374,7 +378,6 @@ async function runSingleAttempt(
 		artifactPaths?: ArtifactPaths;
 		transcriptWriter?: ChildTranscriptWriter;
 		attemptNotes: string[];
-		outputSnapshot?: SingleOutputSnapshot;
 		originalTask?: string;
 		taskDelivery?: SubagentTaskDelivery;
 		orcaProgressTab?: OrcaProgressTab;
@@ -383,7 +386,7 @@ async function runSingleAttempt(
 		progressEvidence: ReturnType<typeof createProgressEvidence>;
 		onLaunch: () => void;
 	},
-): Promise<SingleResult> {
+): Promise<ForegroundAttemptResult> {
 	const effectiveThinking = options.thinkingOverride;
 	const modelArg = applyThinkingSuffix(model, effectiveThinking, options.thinkingOverride !== undefined);
 	assertThinkingWithinCeiling({ model: modelArg, configThinking: effectiveThinking, ceiling: options.thinkingCeiling, agent: agent.name, runId: options.runId });
@@ -546,7 +549,7 @@ async function runSingleAttempt(
 		...(options.structuredOutput ? { structuredOutputSchema: options.structuredOutput.schema } : {}),
 		...(options.extensionBindings ? { extensionBindings: options.extensionBindings } : {}),
 	});
-	const result: SingleResult = withRunContext({
+	const result: ForegroundAttemptResult = withRunContext({
 		index: options.index ?? 0,
 		agent: agent.name,
 		task: shared.originalTask ?? task,
@@ -663,6 +666,7 @@ async function runSingleAttempt(
 	if (deadlineAt !== undefined && Date.now() >= deadlineAt) return releaseBeforeLaunch(timeoutMessage, "timed_out");
 	try { lease.markSpawning(); }
 	catch { return releaseBeforeLaunch("Subagent child admission could not record dispatch.", "unavailable"); }
+	const outputSnapshot = captureSingleOutputSnapshot(options.outputPath);
 	const attemptTimeout = resolveAttemptTimeout({ ...options, deadlineAt });
 	if (deadlineAt !== undefined && Date.now() >= deadlineAt) return releaseBeforeLaunch(timeoutMessage, "timed_out");
 	if (options.workflowChildPermitLaunch) {
@@ -683,6 +687,7 @@ async function runSingleAttempt(
 	let afterCompactionSettlement = false;
 	const exitCode = await new Promise<number>((resolve) => {
 		let proc: ChildProcessByStdio<null, Readable, Readable>;
+		const dispatchedAt = performance.now();
 		try {
 			proc = spawn(spawnSpec.command, spawnSpec.args, {
 				cwd: options.cwd ?? runtimeCwd,
@@ -873,6 +878,7 @@ async function runSingleAttempt(
 		const finish = (code: number) => {
 			if (lifecycleFinished) return;
 			lifecycleFinished = true;
+			result[DISPATCHED_DURATION_MS] = performance.now() - dispatchedAt;
 			finalizeChildUsage(result.usage);
 			clearFinalDrainTimers();
 			clearWatchdogTailTimer();
@@ -1563,7 +1569,7 @@ async function runSingleAttempt(
 	});
 	result.exitCode = exitCode;
 	if (afterCompactionSettlement) {
-		(result as AbortRecoverySingleResult)[AFTER_COMPACTION_SETTLEMENT] = true;
+		result[AFTER_COMPACTION_SETTLEMENT] = true;
 	}
 	if (interruptedByControl) {
 		result.exitCode = 0;
@@ -1678,7 +1684,7 @@ async function runSingleAttempt(
 		const timeoutMessage = formatTimeoutMessage(options.timeoutMs ?? 0);
 		let requiredOutputMissing: boolean | undefined;
 		if (options.outputMode === "file-only" && options.outputPath) {
-			const outputChanged = hasSingleOutputChangedSinceSnapshot(options.outputPath, shared.outputSnapshot);
+			const outputChanged = hasSingleOutputChangedSinceSnapshot(options.outputPath, outputSnapshot);
 			requiredOutputMissing = outputChanged === undefined ? undefined : !outputChanged;
 		} else if (options.structuredOutput) {
 			requiredOutputMissing = !existsSync(options.structuredOutput.outputPath);
@@ -1763,7 +1769,7 @@ async function runSingleAttempt(
 		}));
 	}
 		if (options.outputPath && result.exitCode === 0) {
-			const resolvedOutput = resolveSingleOutput(options.outputPath, fullOutput, shared.outputSnapshot, options.outputClaimPath);
+			const resolvedOutput = resolveSingleOutput(options.outputPath, fullOutput, outputSnapshot, options.outputClaimPath);
 			fullOutput = stripAcceptanceReport(resolvedOutput.fullOutput);
 			result.savedOutputPath = resolvedOutput.savedPath;
 			result.outputSaveError = resolvedOutput.saveError;
@@ -2076,7 +2082,6 @@ async function runSyncCompletionInner(
 			const recoveringAbort = abortRecoveryAttempted;
 			const attemptTask = nextAttemptTask;
 			const verifyModel = Boolean(candidate);
-			const outputSnapshot = captureSingleOutputSnapshot(options.outputPath);
 			let launched = false;
 			const onLaunch = () => {
 				launched = true;
@@ -2101,7 +2106,6 @@ async function runSyncCompletionInner(
 		modelCandidates,
 		modelRouteCandidates: candidates,
 				modelRouteCandidate: routeCandidate,
-				outputSnapshot,
 				originalTask: task,
 				taskDelivery: taskDeliveryOverride,
 				orcaProgressTab,
@@ -2132,7 +2136,7 @@ async function runSyncCompletionInner(
 			};
 			if (launched) modelAttempts.push(attempt);
 			if (!attemptSucceeded) {
-				const afterCompactionSettlement = (result as AbortRecoverySingleResult)[AFTER_COMPACTION_SETTLEMENT];
+				const afterCompactionSettlement = result[AFTER_COMPACTION_SETTLEMENT];
 				const abortRecovery = planAbortRecovery({
 					messages: result.messages ?? [],
 					error: result.error,
@@ -2176,14 +2180,15 @@ async function runSyncCompletionInner(
 			if (intercomDetached || result.timedOut) break modelAttemptsLoop;
 			if (attemptSucceeded) break modelAttemptsLoop;
 
-			const startupFailure = isRetryableSubagentStartupFailure({
+			const dispatchedDurationMs = result[DISPATCHED_DURATION_MS];
+			const startupFailure = launched && dispatchedDurationMs !== undefined && isRetryableSubagentStartupFailure({
 				exitCode: result.exitCode,
 				error: result.error,
 				finalOutput: result.finalOutput,
 				messageCount: result.messages?.length ?? 0,
 				toolCount: result.progressSummary?.toolCount ?? 0,
 				usage: result.usage,
-				durationMs: result.progressSummary?.durationMs ?? Number.POSITIVE_INFINITY,
+				durationMs: dispatchedDurationMs,
 				protocolError: result.protocolError,
 				processSignal: result.processSignal,
 				detached: result.detached,

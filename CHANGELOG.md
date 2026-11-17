@@ -1,6 +1,7 @@
 ## 0.56.17 — Cancellable child admission and hosted tool billing
 
 - Foreground and background subagents share an atomic process admission gate. Waiting leaves Stop, pause, and deadlines responsive. Requests stopped in the queue leave zero provider attempts.
+- Foreground children measure startup retries and output changes from dispatch so time and file writes during admission do not count as child work.
 - Resuming a background run waits asynchronously for the runner's startup handshake. Stop or an expired run deadline can prevent the inference writer from starting.
 - Responses counts distinct hosted tool actions. It estimates supported OpenAI API search fees at published rates, preserves reported totals, and marks unpriced hosted work as partial.
 

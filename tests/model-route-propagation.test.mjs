@@ -256,3 +256,53 @@ test("a foreground child waiting for admission stops or times out before launch 
   assert.equal(timedOut.usage.cost, 0);
   assert.deepEqual(lifecycle, ["stopped", "failed"]);
 });
+
+for (const retry of [false, true]) {
+  test(retry ? "a long admission wait leaves a quick child startup failure eligible for retry" : "the foreground output baseline excludes writes made while waiting for admission", { timeout: 10_000 }, async t => {
+    const directory = path.join(root, retry ? "retry-admission" : "output-admission");
+    const binary = path.join(root, retry ? "fixture-retry-pi" : "fixture-output-pi");
+    const outputPath = path.join(root, retry ? "retry-report.md" : "output-report.md");
+    const marker = path.join(root, "startup-retry-marker");
+    const childOutput = "The admitted child returned this synthetic report.";
+    const event = { type: "message_end", message: { role: "assistant", provider: model.provider, model: model.id, stopReason: "stop",
+      content: [{ type: "text", text: childOutput }], usage: { input: 2, output: 3 } } };
+    const failFirst = retry ? `const fs = require('node:fs');
+if (!fs.existsSync(${JSON.stringify(marker)})) { fs.writeFileSync(${JSON.stringify(marker)}, 'first'); process.exit(1); }
+` : "";
+    fs.writeFileSync(binary, `#!${process.execPath}\n${failFirst}console.log(${JSON.stringify(JSON.stringify(event))});\n`, { mode: 0o700 });
+    const env = { PI_SUBAGENT_ADMISSION_DIR: directory, PI_SUBAGENT_MAX_CONCURRENT: "1", PI_SUBAGENT_PI_BINARY: binary };
+    const prior = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
+    Object.assign(process.env, env);
+    t.after(() => {
+      for (const [key, value] of Object.entries(prior)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    });
+    const held = await acquireChildAdmission();
+    assert.equal(held.kind, "admitted");
+    t.after(() => held.lease.release());
+    const agentConfig = {
+      name: "admitted-fixture", description: "Synthetic queued child", source: "runtime",
+      filePath: path.join(root, "admitted-fixture.md"), systemPrompt: "", systemPromptMode: "replace",
+      inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false, completionGuard: false,
+    };
+    let admittedProcesses = 0;
+    const pending = runSync(root, [agentConfig], agentConfig.name, "Return the synthetic report.", {
+      outputPath, availableModels: registry, modelOverride: route, timeoutMs: 8000,
+      acceptance: { level: "none", reason: "Synthetic fixture." }, onProcessStarted: () => { admittedProcesses++; },
+    });
+    assert.equal(admittedProcesses, 0);
+    if (retry) {
+      const now = Date.now.bind(Date);
+      t.mock.method(Date, "now", () => now() + 2500);
+    } else {
+      fs.writeFileSync(outputPath, "An independent writer changed this path while admission was held.");
+    }
+    held.lease.release();
+    const result = await pending;
+    assert.equal(result.exitCode, 0, result.error);
+    assert.equal(admittedProcesses, retry ? 2 : 1);
+    assert.deepEqual(result.modelAttempts.map(attempt => attempt.success), retry ? [false, true] : [true]);
+    assert.equal(result.finalOutput, childOutput);
+    assert.equal(fs.readFileSync(outputPath, "utf8"), childOutput);
+    if (retry) assert.ok(result.progressSummary.durationMs >= 2500, "logical duration still includes the queued time");
+  });
+}
