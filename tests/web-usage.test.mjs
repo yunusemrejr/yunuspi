@@ -85,6 +85,73 @@ test('Datalab bills the final discounted cents once despite polling and local re
   assert.ok(calls.length >= 5);
 });
 
+test('a paid Datalab failure settles its source ledger after the SDK forks', async (t) => {
+  const { AgentSessionRuntime, DefaultResourceLoader, SessionManager, SettingsManager, createAgentSession } = await import('@yunuspi/coding-agent');
+  const { extractPDFViaDatalab } = await load('datalab-pdf-extract.ts');
+  const old = process.env.DATALAB_API_KEY;
+  process.env.DATALAB_API_KEY = 'synthetic-datalab-fork';
+  t.after(() => { if (old === undefined) delete process.env.DATALAB_API_KEY; else process.env.DATALAB_API_KEY = old; });
+  const cwd = fs.mkdtempSync(path.join(scratch, 'fork-'));
+  const submitted = Promise.withResolvers();
+  const response = Promise.withResolvers();
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    const route = new URL(url).pathname;
+    if (route.endsWith('/files/upload')) return Response.json({ file_id:'fixture', upload_url:'https://example.invalid/object' });
+    if (route === '/object' || init.method === 'DELETE') return new Response();
+    if (route.endsWith('/confirm')) return Response.json({ reference:'datalab://fixture' });
+    if (route.endsWith('/convert')) { submitted.resolve(); return response.promise; }
+    throw Error('Unexpected fixture fetch');
+  });
+  const model = { id:'fixture', name:'Fixture', api:'openai-completions', provider:'audit', baseUrl:'https://fixture.invalid',
+    input:['text'], reasoning:false, contextWindow:8192, maxTokens:2048, cost:{input:0, output:0, cacheRead:0, cacheWrite:0} };
+  const modelRuntime = { getModel:()=>model, getAvailable:()=>[model], hasConfiguredAuth:()=>true, isUsingSubscription:()=>false,
+    streamSimple(){ assert.fail('the fixture makes no model request'); } };
+  let onUsage;
+  async function create(sessionManager) {
+    const settingsManager = SettingsManager.inMemory();
+    const resourceLoader = new DefaultResourceLoader({ cwd, agentDir:cwd, settingsManager, noExtensions:true,
+      noSkills:true, noPromptTemplates:true, noThemes:true, noContextFiles:true, extensionFactories:[pi => {
+        pi.on('session_start', (_event, ctx) => { onUsage = bindWebUsage(pi, ctx, 'fetch_content'); });
+      }] });
+    await resourceLoader.reload();
+    const result = await createAgentSession({ cwd, agentDir:cwd, model, modelRuntime, settingsManager, resourceLoader, sessionManager, tools:[] });
+    await result.session.bindExtensions({mode:'print'});
+    return {...result, services:{cwd, agentDir:cwd}};
+  }
+  const manager = SessionManager.create(cwd, cwd);
+  manager.appendMessage({role:'user', content:'Convert a fixture PDF', timestamp:Date.now()});
+  manager.flush();
+  const original = await create(manager);
+  const sourceLeaf = manager.getLeafId();
+  const sourceFile = manager.getSessionFile();
+  const host = new AgentSessionRuntime(original.session, original.services, ({sessionManager}) => create(sessionManager));
+  t.after(() => host.dispose());
+  const saved = () => SessionManager.open(sourceFile, cwd).getEntries();
+  const earlier = startWebUsage({onUsage}, 'datalab', 'convert-fast');
+  earlier('completed', {cost:{total:0, source:'provider-reported'}});
+  const extraction = assert.rejects(extractPDFViaDatalab(new ArrayBuffer(1), {maxPages:1, title:'fixture PDF', mode:'balanced', onUsage}), /fixture failure/);
+  try {
+    await Promise.race([submitted.promise, extraction.then(() => { throw Error('the fixture failed before submitting the conversion'); })]);
+    assert.equal(collectSessionCost(saved()).pending, 1);
+    assert.equal((await host.fork(sourceLeaf, {position:'at'})).cancelled, false);
+  } finally {
+    response.resolve(Response.json({status:'failed', error:'fixture failure', cost_breakdown:{final_cost_cents:14}}));
+    await extraction;
+  }
+  const entries = saved();
+  const source = collectSessionCost(entries);
+  assert.equal(source.reported, .14);
+  assert.equal(source.pending, 0);
+  assert.equal(collectSessionCost([...entries, ...entries]).reported, .14);
+  const receipts = entries.filter(entry => entry.customType === 'auxiliary-model-usage-v1' && entry.data.model === 'convert-balanced');
+  assert.deepEqual(receipts.map(entry => [entry.parentId, entry.data.status]), [[sourceLeaf, 'pending'], [sourceLeaf, 'failed']]);
+  assert.equal(receipts[0].data.id, receipts[1].data.id);
+  const current = collectSessionCost(host.session.sessionManager.getEntries());
+  assert.equal(current.total, 0);
+  assert.equal(current.pending, 0);
+  assert.equal(current.formatted, '$0.000', 'the fork preserves previous settled zero evidence');
+});
+
 test('local-only PDF extraction keeps authenticated and background documents out of hosted conversion', async (t) => {
   const config = path.join(scratch, 'web-search.json');
   fs.writeFileSync(config, JSON.stringify({ pdf: { provider: 'datalab' }, datalabApiKey: 'synthetic-pdf-fixture' }));

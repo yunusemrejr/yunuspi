@@ -123,6 +123,9 @@ function buildEntryIndex(entries, byId) {
     return index;
 }
 const accountingReceiptTypes = new Set(["auxiliary-model-usage-v1", "subagent-cost-v1", "subagent-lifecycle-v1"]);
+const originalSessionPendingReceipts = new Set([
+    "jev", "project-memory", "project-memory-rerank", "web_search", "source_check", "fetch_content", "web_research",
+]);
 function isRecoveredChildCost(entry) {
     return entry.type === "custom" && entry.customType === "subagent-cost-v1" && typeof entry.data?.recoveredForSessionId === "string";
 }
@@ -1350,7 +1353,7 @@ export class SessionManager {
         const accountingEntries = this.getBranchAccountingEntries(path)
             // These requests settle in the original file even after a fork.
             .filter(entry => entry.customType === "auxiliary-model-usage-v1" &&
-                (entry.data?.status !== "pending" || !["jev", "project-memory", "project-memory-rerank"].includes(entry.data.owner))).map(entry => ({
+                (entry.data?.status !== "pending" || !originalSessionPendingReceipts.has(entry.data.owner))).map(entry => ({
             ...entry, parentId: pathEntryIds.has(entry.parentId) ? entry.parentId : null,
         }));
         const labelsToWrite = [];

@@ -573,12 +573,27 @@ async function askJevLocal(
   opts: JevAskOpts = {},
 ): Promise<JevAskResult> {
   const started = deps.now();
-  const fitted = fitJevState(state, questions, { protect: opts.protect });
-  let result = await askJevShared(site, fitted, questions, opts);
+  const budget = cascadeDeadline(opts);
+  const deadlineAt = performance.now() + budget;
+  const remaining = () => Math.ceil(deadlineAt - performance.now());
+  const deadline = new AbortController();
+  const signal = opts.signal ? AbortSignal.any([opts.signal, deadline.signal]) : deadline.signal;
+  const timer = setTimeout(() => deadline.abort(new DOMException("Jev caller deadline exceeded", "TimeoutError")), budget);
+  let result: JevAskResult;
   let consensus: "agree" | "split" | undefined;
-  if (result.ok && !opts.family) {
-    const second = await secondOpinion(site, fitted, questions, opts, result);
-    if (second) { result = second.result; consensus = second.split ? "split" : "agree"; }
+  try {
+    const fitted = fitJevState(state, questions, { protect: opts.protect });
+    const primaryBudget = remaining();
+    result = primaryBudget > 0
+      ? await askJevShared(site, fitted, questions, { ...opts, signal, timeoutMs: primaryBudget })
+      : { ok: false, skipped: "timeout" };
+    const secondBudget = remaining();
+    if (result.ok && !opts.family && secondBudget > 0 && !signal.aborted) {
+      const second = await secondOpinion(site, fitted, questions, { ...opts, signal, timeoutMs: secondBudget }, result);
+      if (second) { result = second.result; consensus = second.split ? "split" : "agree"; }
+    }
+  } finally {
+    clearTimeout(timer);
   }
   // Report every caller's result in its session scope, including admission
   // failures which never reached the transient transport/footer indicator.
@@ -643,7 +658,7 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
   // Disabled must never reach the network: fall through to boundedAsk would
   // still bill when PI_JEV=0 (askJevOnce used to accept only the literal "off").
   if (!jevEnabled()) return { ok: false, skipped: "disabled" };
-  if (opts.signal?.aborted) return { ok: false, skipped: "aborted" };
+  if (opts.signal?.aborted) return { ok: false, skipped: opts.signal.reason?.name === "TimeoutError" ? "timeout" : "aborted" };
   let identity: string;
   try {
     // The transport, validation and cache must refer to one immutable request.
@@ -658,14 +673,18 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
     [state, questions] = JSON.parse(serialized);
     identity = createHash('sha256').update(serialized).update(`\0${opts.family ?? ''}`).digest('hex');
   } catch { return {ok:false,skipped:'invalid-input'}; }
-  let entry=inflight.get(identity);
+  let entry = inflight.get(identity);
+  // A cancelled transport may still be running and billed. Keep its identity
+  // and concurrency slot until physical settlement so repeats cannot repay it.
+  if (entry?.controller.signal.aborted) return { ok: false, skipped: "busy" };
   const submittingWaiter = !entry;
   if (!entry) {
     if(inflight.size>=64)return {ok:false,skipped:'busy'};
     const controller=new AbortController();
     const accounting = bindDecisionAccounting(opts.pi, site);
     entry={controller,waiters:0,settled:false,promise:Promise.resolve({ok:false,skipped:'unavailable'})};
-    entry.promise=(async()=>{
+    // Register the work before entering transport or accounting callbacks.
+    entry.promise = Promise.resolve().then(async () => {
       try {
         const result = await boundedAsk(state,questions,{...opts,signal:controller.signal},accounting);
         if (result.ok && !result.usage.cached) ledger(opts.pi, { site, ...result.usage });
@@ -676,27 +695,24 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
         entry!.settled=true;
         if(inflight.get(identity)===entry)inflight.delete(identity);
       }
-    })();
+    });
     inflight.set(identity,entry);
   }
-  entry.waiters++;
-  let aborted=false;
-  let waiterReleased=false;
-  const releaseWaiter=()=>{
-    if(waiterReleased)return;
-    waiterReleased=true;
-    entry!.waiters=Math.max(0,entry!.waiters-1);
-    if(entry!.waiters===0&&!entry!.settled){
-      if(inflight.get(identity)===entry)inflight.delete(identity);
-      const timedOut = opts.signal?.reason?.name === 'TimeoutError';
-      entry!.controller.abort(new DOMException(timedOut ? 'Jev caller deadline exceeded' : 'All Jev callers cancelled', timedOut ? 'TimeoutError' : 'AbortError'));
+  const joined = entry;
+  joined.waiters++;
+  let waiterReleased = false;
+  const releaseWaiter = (signal?: AbortSignal) => {
+    if (waiterReleased) return;
+    waiterReleased = true;
+    joined.waiters--;
+    if (joined.waiters === 0 && !joined.settled) {
+      const timedOut = signal?.reason?.name === 'TimeoutError';
+      joined.controller.abort(new DOMException(timedOut ? 'Jev caller deadline exceeded' : 'All Jev callers cancelled', timedOut ? 'TimeoutError' : 'AbortError'));
     }
   };
   try {
-    const waited=await waitForInflight(entry,opts.signal,releaseWaiter);
-    aborted=waited.aborted;
-    if (aborted) return {ok:false,skipped:'aborted'};
-    const result=waited.result!;
+    const signal = opts.signal ? AbortSignal.any([opts.signal, joined.controller.signal]) : joined.controller.signal;
+    const result = await waitForInflight(joined, signal, releaseWaiter);
     if (!result.ok) return result;
     if (!result.usage.cached && submittingWaiter) return { ...result, answers: structuredClone(result.answers) };
     const { billingReceiptId: _receipt, costSource: _source, ...reused } = result.usage;
@@ -704,17 +720,23 @@ async function askJevShared(site: string, state: unknown, questions: Record<stri
     ledger(opts.pi,{site,...usage});
     return {ok:true,answers:structuredClone(result.answers),usage};
   } finally {
-    if(!waiterReleased)entry.waiters=Math.max(0,entry.waiters-1);
+    releaseWaiter();
   }
 }
 
-async function waitForInflight(entry: InflightEntry, signal?: AbortSignal, onAbort?:()=>void): Promise<{result?:JevAskResult;aborted:boolean}> {
-  if (!signal) return {result:await entry.promise,aborted:false};
-  if (signal.aborted) { onAbort?.(); return {aborted:true}; }
+async function waitForInflight(entry: InflightEntry, signal: AbortSignal, release: (signal: AbortSignal) => void): Promise<JevAskResult> {
+  const skipped = (): JevAskResult => {
+    release(signal);
+    return { ok: false, skipped: signal.reason?.name === "TimeoutError" ? "timeout" : "aborted" };
+  };
+  if (signal.aborted) return skipped();
   let abort!: () => void;
-  const cancelled=new Promise<{aborted:true}>(resolve=>{abort=()=>{onAbort?.();resolve({aborted:true});};signal.addEventListener('abort',abort,{once:true});});
-  try { return await Promise.race([entry.promise.then(result=>({result,aborted:false})),cancelled]); }
-  finally { signal.removeEventListener('abort',abort); }
+  const cancelled = new Promise<JevAskResult>(resolve => {
+    abort = () => resolve(skipped());
+    signal.addEventListener("abort", abort, { once: true });
+  });
+  try { return await Promise.race([entry.promise, cancelled]); }
+  finally { signal.removeEventListener("abort", abort); }
 }
 
 /** One deadline covers the entire alias cascade and discovery, not each

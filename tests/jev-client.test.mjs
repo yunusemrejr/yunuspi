@@ -36,6 +36,19 @@ function harness(fetchImpl) {
 const ANSWERS = { ping: { type: "noul", noul: 0.9 } };
 const decisionsOk = () => jsonOk({ answers: ANSWERS });
 const emptyModels = () => jsonOk({ data: [] });
+const tick = () => new Promise(resolve => setImmediate(resolve));
+function mockDeadline(t) {
+  t.mock.timers.enable({ apis: ['setTimeout', 'Date'] });
+  t.mock.method(performance, 'now', () => Date.now());
+}
+async function waitForGate(promise, label) {
+  let timer;
+  const deadline = new Promise((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`Jev test did not observe ${label}`)), 5000);
+  });
+  try { return await Promise.race([promise, deadline]); }
+  finally { clearTimeout(timer); }
+}
 
 test('equivalent JSON map order shares one in-flight judgment across hook callers',async()=>{
   let calls=0,finish;
@@ -113,6 +126,106 @@ test("a caller-selected deadline bounds the whole advisory call", async () => {
   const result = await jev.askJev("bounded-caller", "a slow judge decision", { ping: { type: "noul", instructions: "Affirmative?" } }, { timeoutMs: 40 });
   assert.ok(result.ok === false && ["timeout", "unavailable"].includes(result.skipped), `a short caller deadline fails open (${JSON.stringify(result)})`);
   assert.ok(Date.now() - started < 1_000, "the short caller deadline is honored instead of the full cascade deadline");
+});
+
+test('a caller deadline releases the waiter while a late physical charge keeps its original owner', async t => {
+  mockDeadline(t);
+  const reply = Promise.withResolvers();
+  let signal, sends = 0, answer;
+  const origin = harness(async (_url, options) => {
+    sends++;
+    signal = options.signal;
+    return reply.promise;
+  });
+  const otherRows = [];
+  const other = { appendEntry: (...entry) => otherRows.push(entry) };
+  const params = ['deadline-late-billing', 'synthetic evidence', { ping: { type: 'noul' } }];
+  const waiting = jev.askJev(...params, { pi: origin.pi, timeoutMs: 40 }).then(result => { answer = result; return result; });
+  try {
+    await tick();
+    assert.ok(signal);
+    t.mock.timers.tick(40);
+    await tick();
+    assert.deepEqual(answer, { ok: false, skipped: 'timeout' });
+    assert.equal(signal.aborted, true);
+    assert.equal(jev.jevHealth().routes.reduce((sum, route) => sum + route.active, 0), 1, 'transport retains its original lease until it settles');
+    let duplicate;
+    void jev.askJev(...params, { pi: other, timeoutMs: 40 }).then(result => { duplicate = result; });
+    await tick();
+    assert.deepEqual(duplicate, { ok: false, skipped: 'busy' });
+    assert.equal(sends, 1);
+    assert.deepEqual(otherRows, []);
+    assert.deepEqual(origin.receipts.map(row => row.data.status), ['pending']);
+  } finally {
+    reply.resolve(jsonOk({ answers: ANSWERS, usage: { cost: 0.037 } }));
+    await waiting;
+  }
+  await tick();
+  assert.deepEqual(origin.receipts.map(row => row.data.status), ['pending', 'timeout']);
+  assert.equal(origin.receipts[1].data.id, origin.receipts[0].data.id);
+  assert.deepEqual(origin.receipts[1].data.usage.cost, { total: 0.037, source: 'provider-reported', complete: true });
+  assert.equal(origin.ledger.length, 0, 'a late charge is not a delivered judgment');
+  assert.equal(sends, 1);
+  assert.ok(jev.jevHealth().routes.every(route => route.active === 0 && route.state === 'ready'));
+});
+
+test('a short coalesced deadline leaves the submitting caller and the shared route active', async t => {
+  mockDeadline(t);
+  const reply = Promise.withResolvers();
+  let signal, sends = 0, shortResult;
+  const owner = harness(async (_url, options) => { sends++; signal = options.signal; return reply.promise; });
+  const params = ['deadline-coalesced', 'synthetic evidence', { ping: { type: 'noul' } }];
+  const leader = jev.askJev(...params, { pi: owner.pi, timeoutMs: 100 });
+  const follower = jev.askJev(...params, { timeoutMs: 10 }).then(result => { shortResult = result; return result; });
+  try {
+    await tick();
+    assert.ok(signal);
+    t.mock.timers.tick(10);
+    await tick();
+    assert.deepEqual(shortResult, { ok: false, skipped: 'timeout' });
+    assert.equal(signal.aborted, false);
+    assert.equal(sends, 1);
+  } finally { reply.resolve(decisionsOk()); }
+  assert.equal((await leader).ok, true);
+  assert.equal((await follower).skipped, 'timeout');
+  assert.deepEqual(owner.receipts.map(row => row.data.status), ['pending', 'completed']);
+});
+
+test('an optional second opinion shares the caller deadline and a late rejection is settled', async t => {
+  mockDeadline(t);
+  const previous = process.env.PI_JEV_SECOND_OPINION;
+  delete process.env.PI_JEV_SECOND_OPINION;
+  const primary = Promise.withResolvers(), second = Promise.withResolvers();
+  let sends = 0, answer;
+  const owner = harness(async () => (++sends === 1 ? primary.promise : second.promise));
+  const first = { type: 'choice', choice: 'a', probabilities: { a: 0.4, b: 0.35, c: 0.25 } };
+  const questions = { rank: { type: 'choice', criteria: { a: 'a', b: 'b', c: 'c' } } };
+  const work = jev.askJev('deadline-opinion', 'synthetic', questions, { pi: owner.pi, timeoutMs: 100 }).then(result => { answer = result; });
+  try {
+    await tick();
+    assert.equal(sends, 1);
+    t.mock.timers.tick(20);
+    primary.resolve(jsonOk({ answers: { rank: first } }));
+    await tick();
+    assert.equal(sends, 2);
+    t.mock.timers.tick(80);
+    await tick();
+    assert.equal(answer?.ok, true);
+    assert.deepEqual(answer.answers.rank, first);
+    assert.deepEqual(owner.receipts.map(row => row.data.status), ['pending', 'completed', 'pending']);
+  } finally {
+    primary.resolve(jsonOk({ answers: { rank: first } }));
+    // Attach an observer even if a regression prevented the second dispatch.
+    void second.promise.catch(() => {});
+    second.reject(new Error('late synthetic transport rejection'));
+    await work;
+    if (previous === undefined) delete process.env.PI_JEV_SECOND_OPINION;
+    else process.env.PI_JEV_SECOND_OPINION = previous;
+  }
+  await tick();
+  assert.equal(sends, 2);
+  assert.deepEqual(owner.receipts.map(row => row.data.status), ['pending', 'completed', 'pending', 'timeout']);
+  assert.ok(jev.jevHealth().routes.every(route => route.active === 0 && route.state === 'ready'));
 });
 
 test("transport failure opens the breaker and admits a single real request after cooldown", async () => {
@@ -221,7 +334,7 @@ test("an in-flight judgment snapshots state and questions for validation and cac
   const questions = { ping: { type: 'noul', instructions: 'Affirmative?' } };
   const originalState = structuredClone(state), originalQuestions = structuredClone(questions);
   const first = jev.askJev('snapshot', state, questions);
-  await begun;
+  await waitForGate(begun, 'snapshot transport start');
   state.task = 'Inspect the changed request'; state.nested.revision = 2;
   questions.ping.type = 'score';
   release();
@@ -249,7 +362,7 @@ test("a surviving coalescer uses the answer while the submitting session owns th
   const abort = new AbortController();
   const questions = { ping: { type: "noul", instructions: "Affirmative?" } };
   const leader = jev.askJev("screen", "shared state", questions, { pi: leaderPi, signal: abort.signal });
-  await begun;
+  await waitForGate(begun, 'coalesced transport start');
   const follower = jev.askJev("rank", "shared state", questions, { pi: followerPi });
   abort.abort();
   assert.equal((await leader).skipped, "aborted");
@@ -301,17 +414,17 @@ test('last waiter cancellation settles the original billed response even when de
     return response.promise;
   });
   const rows = [];
-  const pi = { appendEntry(_type, data) { rows.push(data); if (data.status === 'cancelled') settled.resolve(); } };
+  const pi = { appendEntry(type, data) { rows.push(data); if (type === 'auxiliary-model-usage-v1' && data.status !== 'pending') settled.resolve(); } };
   const params = ['abandoned-bill','same evidence',{ping:{type:'noul'}}];
   const first = jev.askJev(...params,{pi,signal:controller.signal});
-  const networkSignal = await sent.promise;
+  const networkSignal = await waitForGate(sent.promise, 'cancelled transport start');
   const second = jev.askJev(...params,{pi,signal:controller.signal});
   controller.abort();
   assert.equal((await first).skipped,'aborted');
   assert.equal((await second).skipped,'aborted');
   assert.equal(networkSignal.aborted,true);
   response.resolve(jsonOk({ answers:ANSWERS, usage:{ cost:.037 } }));
-  await settled.promise;
+  await waitForGate(settled.promise, 'cancelled physical receipt');
   assert.equal(sends,1);
   assert.deepEqual(rows.map(row=>row.status),['pending','cancelled']);
   assert.equal(rows[0].id, rows[1].id);
@@ -325,12 +438,12 @@ test('an expired last caller records timeout and preserves unknown provider bill
     return new Promise((_resolve,reject)=>signal.addEventListener('abort',()=>reject(signal.reason),{once:true}));
   });
   const rows = [];
-  const pi = {appendEntry(_type,data){rows.push(data);if(data.status==='timeout')settled.resolve();}};
+  const pi = {appendEntry(type,data){rows.push(data);if(type==='auxiliary-model-usage-v1'&&data.status!=='pending')settled.resolve();}};
   const answer = jev.askJev('timeout','synthetic',{ping:{type:'noul'}},{pi,signal:controller.signal});
-  await sent.promise;
+  await waitForGate(sent.promise, 'expired transport start');
   controller.abort(new DOMException('Deadline expired','TimeoutError'));
   assert.equal((await answer).ok,false);
-  await settled.promise;
+  await waitForGate(settled.promise, 'expired physical receipt');
   assert.deepEqual(rows.map(row=>row.status),['pending','timeout']);
   assert.equal(rows[1].usage,undefined);
 });
@@ -378,7 +491,7 @@ test('a durable receipt settles in its submitting branch after the real SDK fork
   harness(async () => { sent.resolve(); return response.promise; });
   const answer = jev.askJev('fork-bill','synthetic evidence',{ping:{type:'noul'}},{pi:extension});
   try {
-    await sent.promise;
+    await waitForGate(sent.promise, 'forked session transport start');
     const saved = () => SessionManager.open(manager.getSessionFile(),cwd).getEntries();
     assert.equal(collectSessionCost(saved()).pending,1);
     manager.branch(rootId);

@@ -460,7 +460,10 @@ export class AgentSession {
     }
     /** Internal handler for agent events - shared by subscribe and reconnect */
     _handleAgentEvent = async (event) => {
-        const input = event.type === "message_end" && event.message.role === "user" ? event.message[DESKTOP_QUEUED_INPUT] : undefined;
+        const input = (event.type === "message_start" || event.type === "message_end") && event.message.role === "user"
+            ? event.message[DESKTOP_QUEUED_INPUT]
+            : undefined;
+        const desktopInputId = event.type === "message_start" ? input?.id : undefined;
         try { await this._guardian?.observeAgentEvent(event); }
         catch (error) { this._guardian?.quarantine(error); }
         // When a user message starts, check if it's from either queue and remove it BEFORE emitting
@@ -495,7 +498,8 @@ export class AgentSession {
   event.type === 'message_end' && event.message?.role === 'assistant' && event.message.usage?.cost &&
     (event.message.usage.cost.billing = this.modelRuntime.isUsingSubscription(event.message.provider) || isFlatPlanProvider(event.message.provider) ? 'subscription' : 'metered'), event));
         // Notify all listeners
-        this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
+        if (isDesktopInputId(desktopInputId)) this._emit({ ...event, desktopInputId });
+        else this._emit(event.type === "agent_end" ? { ...event, willRetry: this._willRetryAfterAgentEnd(event) } : event);
         // Handle session persistence
         if (event.type === "message_end") {
             // Check if this is a custom message from extensions
@@ -979,6 +983,7 @@ export class AgentSession {
                 ? `Guardian stats: ${JSON.stringify(guardianCommand.stats)} · ${state}`
                 : `Guardian ${guardianCommand.command} · ${state}${debugState}. Use /guardian on, /guardian off, /guardian status, /guardian stats, or /guardian debug.`;
             await this.sendCustomMessage({ customType: "guardian_status", content: [{ type: "text", text: summary }], display: true, excludeFromContext: true, details: { enabled: guardianCommand.enabled, debug: guardianCommand.debug, stats: guardianCommand.stats, kernel: guardianCommand.kernel, taskCount: guardianCommand.taskCount, ...(guardianCommand.activeTaskId ? { activeTaskId: guardianCommand.activeTaskId } : {}), ...(guardianCommand.guardianInstanceId ? { guardianInstanceId: guardianCommand.guardianInstanceId } : {}), ...(guardianCommand.debugInfo ? { debugInfo: guardianCommand.debugInfo } : {}) } }, { triggerTurn: false });
+            options?.preflightResult?.(true, "handled");
             return;
         }
         const inputAbortController = new AbortController();

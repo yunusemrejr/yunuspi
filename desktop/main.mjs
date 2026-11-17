@@ -404,7 +404,8 @@ async function dispatch(action, input = {}) {
       // During a run, Enter steers: the agent reads the message at its next step. Every message used to
       // wait for the whole run, so "you don't have to use Blender" arrived 49 minutes and a finished render
       // later. Alt+Enter still queues a message for after the run.
-      const result = await worker.request('prompt', { message, images, streamingBehavior: input.delivery === 'followUp' ? 'followUp' : 'steer' });
+      const result = await worker.request('prompt', { message, images, streamingBehavior: input.delivery === 'followUp' ? 'followUp' : 'steer',
+        desktopInputId: input.desktopInputId });
       if (workers.get(input.id) === worker) {
         const session = store.session(input.id);
         if (draft.trim() === message.trim() && session.draft === draft && session.updatedAt === updatedAt) store.setDraft(input.id, '');

@@ -316,13 +316,16 @@ export async function runRpcMode(runtimeHost) {
             // =================================================================
             case "prompt": {
                 const desktop = process.env.PI_DESKTOP_SESSION === "1";
+                const desktopInputId = command.desktopInputId;
                 const recoveryMessageId = command.recoveryMessageId;
+                if (desktopInputId !== undefined && (!desktop || !isDesktopInputId(desktopInputId)))
+                    throw new Error("Invalid desktop input ID.");
                 if (recoveryMessageId !== undefined && (!desktop || !isDesktopInputId(recoveryMessageId)))
                     throw new Error("Invalid desktop recovered message ID.");
                 const promptSession = session;
                 const desktopInput = desktop ? {
                     ...desktopInputPayload(command.message, command.images),
-                    id: recoveryMessageId ?? crypto.randomUUID(),
+                    id: recoveryMessageId ?? desktopInputId ?? crypto.randomUUID(),
                     recovered: recoveryMessageId !== undefined,
                 } : undefined;
                 if (recoveryMessageId !== undefined) {
@@ -341,14 +344,21 @@ export async function runRpcMode(runtimeHost) {
                     preflightResult: (didSucceed, disposition) => {
                         if (didSucceed) {
                             preflightSucceeded = true;
-                            let status = "pending";
-                            if (recoveryMessageId !== undefined && disposition === "handled") {
-                                try {
-                                    promptSession.finishDesktopInputCommand(recoveryMessageId);
-                                    status = "delivered";
-                                } catch { /* An accepted command remains uncertain if its receipt cannot be written. */ }
+                            let data;
+                            if (recoveryMessageId !== undefined) {
+                                let status = "pending";
+                                if (disposition === "handled") {
+                                    try {
+                                        promptSession.finishDesktopInputCommand(recoveryMessageId);
+                                        status = "delivered";
+                                    } catch { /* An accepted command remains uncertain if its receipt cannot be written. */ }
+                                }
+                                data = { recoveryMessageId, status };
                             }
-                            output(success(id, "prompt", recoveryMessageId === undefined ? undefined : { recoveryMessageId, status }));
+                            else if (desktopInputId !== undefined && disposition !== undefined) {
+                                data = { disposition };
+                            }
+                            output(success(id, "prompt", data));
                         }
                     },
                 })

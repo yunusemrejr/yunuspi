@@ -17,6 +17,8 @@ export type RpcCommand = {
     message: string;
     images?: ImageContent[];
     streamingBehavior?: "steer" | "followUp";
+    /** Live correlation UUID for desktop user submissions. */
+    desktopInputId?: string;
     recoveryMessageId?: string;
 } | {
     id?: string;
@@ -185,7 +187,8 @@ export type RpcResponse = {
     type: "response";
     command: "prompt";
     success: true;
-    data?: { recoveryMessageId: string; status: "pending" | "delivered" };
+    data?: { recoveryMessageId: string; status: "pending" | "delivered"; disposition?: never }
+        | { disposition: "handled" | "queued" | "started"; recoveryMessageId?: never; status?: never };
 } | {
     id?: string;
     type: "response";

@@ -1,4 +1,4 @@
-import { createConversation, prependConversation, recentTools, applyAgentEvent, messageText, imageParts, toolIcon, toolLine, toolTrouble, duration, workSummary, workBlocks, filesChanged } from './conversation.mjs';
+import { createConversation, prependConversation, recentTools, stagePendingInput, settlePendingInput, applyAgentEvent, messageText, imageParts, toolIcon, toolLine, toolTrouble, duration, workSummary, workBlocks, filesChanged } from './conversation.mjs';
 import { element, icon, markdown } from './markdown.mjs';
 import { readCommand, goalFromStatus } from './command-lens.mjs';
 import { PICKER_LIMIT, TEAM_ROLES, modelRow, rankModels, readTeam, teamOptions } from './team-settings.mjs';
@@ -178,6 +178,9 @@ async function openSession(id, reload = false) {
     if (result.messages) {
       state.historyBefore = result.before; state.historyAnchor = result.anchor; state.hasMore = result.hasMore;
       pendingView.savedGoal = result.goal ?? null;
+      if (!result.passive && result.revision === previous.historyRevision) {
+        for (const input of previous.pendingInputs.values()) stagePendingInput(state, input);
+      }
     }
     state.historyRevision = result.revision;
     Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming,
@@ -531,17 +534,18 @@ async function deliver(id, message, images, reading, restoreDraft, later = false
   const state = conversationOf(id);
   state.sending = true; state.error = '';
   const optimistic = { key: crypto.randomUUID(), kind: 'user', content: [{ type: 'text', text: message }, ...images.map(({ name, ...part }) => part)], optimistic: true, delivery: state.busy ? later ? 'Queued for after this turn' : 'Steering · read at the next step' : 'Sending…', revision: 0, ...(reading ? { command: reading } : {}) };
-  state.messages.push(optimistic); viewOf(id).pinned = true;
+  stagePendingInput(state, optimistic); viewOf(id).pinned = true;
   renderMessages();
   try {
-    await api.prompt(id, message, images.map(({ name, ...part }) => part), later ? 'followUp' : 'steer');
-    if (message.startsWith('/') && optimistic.optimistic) { optimistic.optimistic = false; optimistic.revision++; }
+    const result = await api.prompt(id, message, images.map(({ name, ...part }) => part), later ? 'followUp' : 'steer', optimistic.key);
+    if (result?.disposition === 'handled') settlePendingInput(conversations.get(id) ?? state, optimistic.key, 'handled');
   }
   catch (error) {
-    state.error = safeError(error);
-    const pending = state.messages.find(m => m.key === optimistic.key && m.optimistic);
-    if (pending) { pending.failed = true; pending.optimistic = false; pending.revision++; }
-    if (restoreDraft && !workspace.sessions.find(s => s.id === id)?.draft && !(attachments.get(id)?.length)) {
+    const owner = conversations.get(id) ?? state;
+    const failed = settlePendingInput(owner, optimistic.key, 'failed');
+    if (failed) owner.error = safeError(error);
+    const session = workspace.sessions.find(s => s.id === id);
+    if (failed && restoreDraft && session && !session.draft && !(attachments.get(id)?.length)) {
       setEditorDraft(id, message); attachments.set(id, images);
       if (activeId === id) renderAttachments();
     }

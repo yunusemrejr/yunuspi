@@ -24,6 +24,8 @@ fs.writeFileSync(path.join(alpha, 'sample.txt'), 'The desktop tool fixture is re
 const requests = [];
 const recoveryImage = { type: 'image', mimeType: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0dUAAAAASUVORK5CYII=' };
 let recoveredImageRequests = 0;
+const queuedImages = [];
+let finishImageHold, finishSteer;
 const server = http.createServer(async (req, res) => {
   if (req.method !== 'POST') { res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"data":[]}'); return; }
   let body = ''; for await (const chunk of req) body += chunk;
@@ -44,6 +46,22 @@ const server = http.createServer(async (req, res) => {
   if (prompt === 'Reattach during the blocked stream start') {
     chunk({ role: 'assistant', content: 'The streamed answer appears once.' });
     finish('stop'); return;
+  }
+  if (prompt === 'Hold for queued image fixture') {
+    chunk({ role: 'assistant', content: 'Waiting for two queued images.' });
+    finishImageHold = () => finish('stop');
+    return;
+  }
+  if (prompt === 'Same attachment caption') {
+    queuedImages.push(Array.isArray(user.content) ? user.content.find(part => part.type === 'image_url')?.image_url?.url : undefined);
+    if (queuedImages.length === 1) {
+      chunk({ role: 'assistant', content: 'Checking the first delivered image.' });
+      finishSteer = () => finish('stop');
+    } else {
+      chunk({ role: 'assistant', content: 'Both images arrived.' });
+      finish('stop');
+    }
+    return;
   }
   // A turn of several steps: narration and one read per request, the second read failing, then the answer.
   if (prompt.includes('STEPS')) {
@@ -178,6 +196,45 @@ try {
   await page.evaluate(id => window.yunuspi.sessionAction(id, 'close'), attaching.id);
   await open(first.id);
   check('fresh desktop attach waits for the ordered stream event and renders the answer once');
+  const imaging = await page.evaluate(projectId => window.yunuspi.createSession(projectId), pa.id);
+  await open(imaging.id);
+  await send('Hold for queued image fixture');
+  await page.getByText('Waiting for two queued images.', { exact: true }).waitFor();
+  const sendQueuedImage = async (color, keys) => {
+    await page.locator('#prompt').fill('Same attachment caption');
+    const url = await page.locator('#prompt').evaluate((node, shade) => {
+      const canvas = document.createElement('canvas'); canvas.width = 1; canvas.height = 1;
+      const brush = canvas.getContext('2d'); brush.fillStyle = shade; brush.fillRect(0, 0, 1, 1);
+      const dataUrl = canvas.toDataURL('image/png');
+      const bytes = Uint8Array.from(atob(dataUrl.split(',')[1]), value => value.charCodeAt(0));
+      const clipboardData = new DataTransfer();
+      clipboardData.items.add(new File([bytes], 'fixture.png', { type: 'image/png' }));
+      node.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }));
+      return dataUrl;
+    }, color);
+    await page.locator('#attachment-list img').waitFor();
+    await page.locator('#prompt').press(keys);
+    await page.waitForFunction(() => document.getElementById('session-caption').textContent !== 'Sending…');
+    return url;
+  };
+  const followUpImage = await sendQueuedImage('red', 'Alt+Enter');
+  const steeredImage = await sendQueuedImage('blue', 'Enter');
+  await page.getByText('Queued for after this turn', { exact: true }).waitFor();
+  await page.getByText('Steering · read at the next step', { exact: true }).waitFor();
+  finishImageHold();
+  await page.getByText('Checking the first delivered image.', { exact: true }).waitFor();
+  assert.deepEqual(queuedImages, [steeredImage]);
+  const queuedPreview = page.locator('#messages .message.user').filter({ hasText: 'Queued for after this turn' });
+  assert.equal(await queuedPreview.locator('img').getAttribute('src'), followUpImage);
+  finishSteer();
+  await page.getByText('Both images arrived.', { exact: true }).waitFor();
+  await done();
+  assert.deepEqual(queuedImages, [steeredImage, followUpImage]);
+  assert.deepEqual(await page.locator('#messages .message.user img').evaluateAll(images => images.map(image => image.getAttribute('src'))),
+    [steeredImage, followUpImage]);
+  await page.evaluate(id => window.yunuspi.sessionAction(id, 'close'), imaging.id);
+  await open(first.id);
+  check('same-caption queued images follow their own delivery events and transcript order');
   await page.evaluate(id => window.yunuspi.prompt(id, '/desktop-charge'), first.id);
   await page.waitForFunction(() => document.getElementById('usage-caption').textContent.includes('$~0.251000 total'));
   check('detached billing refreshes the live total while the session is idle');

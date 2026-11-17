@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { AgentWorker, jsonLines } from '../desktop/agent-worker.mjs';
-import { applyAgentEvent, createConversation, messageText, prependConversation, recentTools } from '../desktop/renderer/conversation.mjs';
+import { applyAgentEvent, createConversation, imageParts, messageText, prependConversation, recentTools, stagePendingInput, settlePendingInput } from '../desktop/renderer/conversation.mjs';
 
 function fixture(options = {}) {
   const child = new EventEmitter();
@@ -270,4 +270,29 @@ test('older pages retain the active assistant and hydrate tool records once in t
   assert.equal(shared.args.path, 'fixture.txt');
   applyAgentEvent(state, { type: 'tool_execution_end', toolCallId: 'earlier', result: { content: [{ type: 'text', text: 'Updated output' }] } });
   assert.deepEqual(recentTools(state).map(tool => tool.output), ['Final output', 'Updated output']);
+});
+
+test('the user event acknowledges its own queued image even when a steer overtakes a matching caption', () => {
+  const state = createConversation();
+  const image = data => ({ type: 'image', mimeType: 'image/png', data });
+  const prompt = (key, data) => ({ key, kind: 'user', optimistic: true, revision: 0,
+    content: [{ type: 'text', text: 'Shared caption' }, image(data)] });
+  const followUp = prompt('first', 'YQ=='), steer = prompt('second', 'Yg==');
+  stagePendingInput(state, followUp);
+  stagePendingInput(state, steer);
+
+  applyAgentEvent(state, { type: 'message_start', desktopInputId: 'second',
+    message: { role: 'user', content: 'Shared caption' } });
+  assert.equal(followUp.optimistic, true);
+  assert.equal(steer.optimistic, false);
+  assert.equal(imageParts(steer)[0].data, 'Yg==', 'the original image survives a clipped projection');
+  assert.equal(settlePendingInput(state, 'second', 'failed'), undefined);
+  applyAgentEvent(state, { type: 'message_start',
+    message: { role: 'user', content: 'Shared caption' } });
+  assert.equal(followUp.optimistic, true, 'a message authored outside the composer cannot claim a queued input');
+  applyAgentEvent(state, { type: 'message_start', desktopInputId: 'first',
+    message: { role: 'user', content: 'Shared caption' } });
+  assert.equal(followUp.optimistic, false);
+  assert.deepEqual(state.messages.filter(message => imageParts(message).length).map(message => message.key), ['second', 'first']);
+  assert.equal(state.pendingInputs.size, 0);
 });

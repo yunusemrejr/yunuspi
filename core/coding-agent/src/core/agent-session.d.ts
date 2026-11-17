@@ -38,8 +38,11 @@ export interface ParsedSkillBlock {
 export declare function parseSkillBlock(text: string): ParsedSkillBlock | null;
 /** Session-specific events that extend the core AgentEvent */
 export type AgentSessionEvent = Exclude<AgentEvent, {
-    type: "agent_end";
-}> | {
+    type: "agent_end" | "message_start";
+}> | (Extract<AgentEvent, { type: "message_start" }> & {
+    /** Correlates a desktop user submission with the actual delivered start. */
+    desktopInputId?: string;
+}) | {
     type: "agent_end";
     messages: AgentMessage[];
     aborted?: boolean;

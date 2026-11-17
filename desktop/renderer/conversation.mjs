@@ -173,10 +173,30 @@ function appendActivity(state, message) {
   return entry;
 }
 export function createConversation(messages = [], streamingMessage) {
-  const state = { messages: [], toolByCall: new Map(), streaming: null, busy: false, error: '', stats: null };
+  const state = { messages: [], toolByCall: new Map(), pendingInputs: new Map(), streaming: null, busy: false, error: '', stats: null };
   for (const message of messages) appendMessage(state, message);
   if (streamingMessage?.role === 'assistant') state.streaming = appendMessage(state, streamingMessage);
   return state;
+}
+export function stagePendingInput(state, input) {
+  state.pendingInputs.set(input.key, input);
+  state.messages.push(input);
+}
+export function settlePendingInput(state, id, disposition) {
+  const input = state.pendingInputs.get(id);
+  if (!input) return undefined;
+  state.pendingInputs.delete(id);
+  input.optimistic = false;
+  input.revision++;
+  if (disposition === 'failed') input.failed = true;
+  // A steer can be delivered before an earlier submitted follow-up. Move the
+  // same bubble to the position of its authoritative event in the transcript.
+  if (disposition === 'delivered' && state.messages.at(-1) !== input) {
+    const index = state.messages.indexOf(input);
+    if (index >= 0) state.messages.splice(index, 1);
+    state.messages.push(input);
+  }
+  return input;
 }
 export function prependConversation(state, messages) {
   const earlier = createConversation(messages), merged = new Set();
@@ -210,6 +230,11 @@ function ensureTool(state, id, name = 'tool', args = {}) {
   }
   return tool;
 }
+function applyUserGoal(state, entry, message) {
+  const goal = goalMessage(messageText(message));
+  if (goal?.type === 'kickoff') { state.goals ??= new Set(); if (state.goals.has(goal.id)) goal.resumed = true; state.goals.add(goal.id); }
+  if (goal) entry.goal = goal;
+}
 function appendMessage(state, message) {
   if (!message) return;
   if (message.role === 'toolResult') {
@@ -222,11 +247,7 @@ function appendMessage(state, message) {
     const entry = { key: key(), kind: message.role, content: structuredClone(message.content ?? []), revision: 0 };
     if (Number.isFinite(message.timestamp)) entry.at = message.timestamp;
     if (message.role === 'assistant') entry.error = message.errorMessage || '';
-    else {
-      const goal = goalMessage(messageText(message));
-      if (goal?.type === 'kickoff') { state.goals ??= new Set(); if (state.goals.has(goal.id)) goal.resumed = true; state.goals.add(goal.id); }
-      if (goal) entry.goal = goal;
-    }
+    else applyUserGoal(state, entry, message);
     state.messages.push(entry);
     if (Array.isArray(message.content)) for (const part of message.content) if (part?.type === 'toolCall') ensureTool(state, part.id, part.name, part.arguments);
     return entry;
@@ -240,8 +261,12 @@ export function applyAgentEvent(state, event) {
     case 'agent_end': state.busy = false; state.streaming = null; break;
     case 'message_start': {
       if (event.message?.role === 'user') {
-        const pending = state.messages.find(m => m.optimistic && messageText(m) === messageText(event.message));
-        if (pending) { pending.optimistic = false; pending.revision++; break; }
+        const pending = settlePendingInput(state, event.desktopInputId, 'delivered');
+        if (pending) {
+          if (Number.isFinite(event.message.timestamp)) pending.at = event.message.timestamp;
+          applyUserGoal(state, pending, event.message);
+          break;
+        }
       }
       const message = appendMessage(state, event.message);
       if (event.message?.role === 'assistant' && message) state.streaming = message;

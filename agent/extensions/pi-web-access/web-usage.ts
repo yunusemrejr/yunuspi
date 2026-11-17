@@ -38,7 +38,13 @@ export function startWebUsage(options: WebUsageOptions, provider: string, model:
 }
 
 /** Capture the original owner before work can outlive a curator or turn. */
-export function bindWebUsage(pi: Pick<ExtensionAPI, "appendEntry">, ctx: Pick<ExtensionContext, "sessionManager">, owner: string): WebUsageSink | undefined {
+export function bindWebUsage(pi: Pick<ExtensionAPI, "appendEntry" | "bindAuxiliaryUsage">, ctx: Pick<ExtensionContext, "sessionManager">, owner: string): WebUsageSink | undefined {
+	if (pi.bindAuxiliaryUsage) {
+		try {
+			const append = pi.bindAuxiliaryUsage();
+			return receipt => { append({ ...receipt, owner }); };
+		} catch { return undefined; }
+	}
 	const manager = ctx.sessionManager;
 	const session = manager?.getSessionId?.();
 	if (!session) return undefined;

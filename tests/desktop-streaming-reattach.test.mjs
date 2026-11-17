@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +18,7 @@ const prefix = 'Earlier content slot.';
 // extension that provides a deterministic publication barrier are fixtures.
 const child = `
 import { AssistantMessageEventStream } from './core/ai/src/utils/event-stream.js';
+import { convertMessages } from './core/ai/src/api/openai-completions.js';
 import { createAgentSession } from './core/coding-agent/src/core/sdk.js';
 import { DefaultResourceLoader } from './core/coding-agent/src/core/resource-loader.js';
 import { SessionManager } from './core/coding-agent/src/core/session-manager.js';
@@ -47,7 +49,7 @@ const resourceLoader = new DefaultResourceLoader({ cwd, agentDir: cwd, settingsM
 });
 await resourceLoader.reload();
 const model = { id: 'fixture', name: 'Fixture', provider: 'fixture', api: 'openai-completions',
-  baseUrl: 'https://example.invalid', reasoning: false, input: ['text'],
+  baseUrl: 'https://example.invalid', reasoning: false, input: ['text', 'image'],
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 32000, maxTokens: 1024 };
 const assistant = (content, stopReason, timestamp) => ({ role: 'assistant', api: model.api, provider: model.provider,
   model: model.id, content, stopReason, timestamp, usage: { input: 1, output: 1, totalTokens: 2,
@@ -57,10 +59,19 @@ if (!manager.getLeafEntry()) {
   manager.appendMessage({ role: 'user', content: 'Previous fixture prompt.', timestamp: 1 });
   manager.appendMessage(assistant([{ type: 'text', text: ${JSON.stringify(previous)} }], 'stop', 2));
 }
+let streamCount = 0;
 const modelRuntime = {
   getModel: () => model, getAvailable: () => [model], hasConfiguredAuth: () => true,
   isUsingSubscription: () => false, getAuth: async () => ({ auth: { apiKey: 'synthetic' } }),
-  streamSimple() {
+  streamSimple(_model, context) {
+    if (stage === 'queued-input') {
+      const messages = convertMessages(model, context, {});
+      const user = messages.findLast(message => message.role === 'user');
+      const image = Array.isArray(user?.content) && user.content.find(part => part.type === 'image_url');
+      process.send({ type: 'provider-input', imageChars: image ? image.image_url.url.split(',')[1].length : 0,
+        imageSuffix: image ? image.image_url.url.slice(-4) : null,
+        hasDesktopInputId: Object.hasOwn(user, 'desktopInputId') || Object.hasOwn(context.messages.at(-1), 'desktopInputId') });
+    }
     const partial = assistant([], 'pending', Date.now());
     const source = new AssistantMessageEventStream();
     source.push({ type: 'start', partial });
@@ -93,7 +104,7 @@ const modelRuntime = {
         send = undefined;
       }
     };
-    if (stage === 'message_end') send('finish');
+    if (stage === 'message_end' || stage === 'queued-input' && ++streamCount > 1) send('finish');
     return source;
   },
 };
@@ -220,4 +231,51 @@ test('desktop reattach appends identical deltas, expires old fork cursors and re
   const restored = (await history(restarted)).data;
   assert.equal(restored.streamingMessage, null);
   assert.deepEqual(savedAssistants(restored), [previous, completeText]);
+});
+
+test('desktop RPC acknowledges the exact queued input when steering overtakes matching slash text and image previews differ', { timeout: 30_000 }, async t => {
+  const cwd = mkdtempSync(path.join(tmpdir(), 'pi-queued-input-'));
+  const { worker, events, waitFor } = startWorker(t, cwd, 'queued-input');
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const [initialId, followUpId, steerId, guardianId] = Array.from({ length: 4 }, () => randomUUID());
+  const observations = [], providerDone = Promise.withResolvers();
+  worker.child.on('message', evidence => {
+    if (evidence?.type !== 'provider-input') return;
+    observations.push(evidence);
+    if (observations.length === 3) providerDone.resolve();
+  });
+  const initialAck = await worker.request('prompt', { message: 'Current fixture prompt.', desktopInputId: initialId });
+  await waitFor(textDelta);
+
+  const message = '/literal-fixture details';
+  const image = data => ({ type: 'image', mimeType: 'image/png', data });
+  const largeData = 'A'.repeat(4 * 1024 * 1024 + 4);
+  const followUpAck = await worker.request('prompt', { message, images: [image('Yg==')], streamingBehavior: 'followUp', desktopInputId: followUpId });
+  const steerAck = await worker.request('prompt', { message, images: [image(largeData)], streamingBehavior: 'steer', desktopInputId: steerId });
+  worker.child.send('finish');
+  await waitFor(settled);
+  await providerDone.promise;
+
+  const userStarts = events.map(item => item.event).filter(event => event.type === 'message_start' && event.message.role === 'user');
+  assert.deepEqual(userStarts.map(event => event.desktopInputId), [initialId, steerId, followUpId]);
+  assert.ok(userStarts.every(event => !Object.hasOwn(event.message, 'desktopInputId')));
+  assert.equal(userStarts[1].message.content.some(part => part.type === 'image'), false);
+  assert.match(messageText(userStarts[1].message), /omitted from this desktop preview/i);
+  assert.equal(userStarts[2].message.content.find(part => part.type === 'image')?.data, 'Yg==');
+  assert.deepEqual(observations.map(({ imageChars, imageSuffix, hasDesktopInputId }) => [imageChars, imageSuffix, hasDesktopInputId]), [
+    [0, null, false], [largeData.length, 'AAAA', false], [4, 'Yg==', false],
+  ]);
+  assert.deepEqual(initialAck, { disposition: 'started' });
+  assert.deepEqual(followUpAck, { disposition: 'queued' });
+  assert.deepEqual(steerAck, { disposition: 'queued' });
+  await assert.rejects(worker.request('prompt', { message: 'Invalid correlation ID', desktopInputId: 'invalid' }), /desktop input ID/i);
+  assert.deepEqual(await worker.request('prompt', { message: '/guardian status', desktopInputId: guardianId }), { disposition: 'handled' });
+  assert.equal(await worker.request('prompt', { message: '/guardian status' }), undefined);
+  const recoveryMessageId = randomUUID();
+  const recovered = () => worker.request('prompt', { message: '/guardian status', recoveryMessageId });
+  assert.deepEqual(await recovered(), { recoveryMessageId, status: 'delivered' });
+  assert.deepEqual(await recovered(), { recoveryMessageId, status: 'delivered' });
+  assert.deepEqual(await worker.request('desktop_input_status', { recoveryMessageId: steerId }), { status: 'missing' });
+  const transcript = readFileSync(path.join(cwd, 'fixture.jsonl'), 'utf8');
+  for (const id of [initialId, followUpId, steerId, guardianId]) assert.equal(transcript.includes(id), false);
 });
