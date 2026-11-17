@@ -5,6 +5,7 @@ import { raceWithAbortSignal } from '@yunuspi/ai/utils/abort';
 import { needleEmbed, needleWarmup } from './needle-runtime.ts';
 import { needlePolicy } from './needle-policy.ts';
 import { openRouterKey } from './jev-client.ts';
+import { readCostEvidence } from './cost-evidence.ts';
 import { redactSecrets } from './memory-redaction.ts';
 import { sessionObservability } from './session-observability.ts';
 import type { EmbeddingSpace } from './project-vector-store.ts';
@@ -15,6 +16,7 @@ export const MEMORY_EMBEDDINGS_URL = 'https://openrouter.ai/api/v1/embeddings';
 export const MEMORY_EMBED_BATCH = 16;
 export const MEMORY_EMBED_CHARS = 2000;
 export const MEMORY_EMBED_MAX_TEXTS = 64;
+const usdAmount = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 export interface EmbeddingOptions { inputType?: 'query' | 'document'; signal?: AbortSignal; compatible?: ReadonlySet<string> }
 export interface MemoryEmbedding { space: EmbeddingSpace; vectors: number[][] }
 export type EmbeddingReceipt = { id: string; owner: 'project-memory'; provider: 'openrouter'; model: string; status: 'pending' | 'completed' | 'failed' | 'cancelled' | 'timeout'; usage?: Record<string, unknown> };
@@ -183,12 +185,22 @@ export function openRouterMemoryEmbedder(options: { model?: string; env?: Record
               if (bytes > 8 * 1024 * 1024) { await reader.cancel(); throw Error('response-budget'); } chunks.push(part.value); }
           } finally { reader.releaseLock(); }
           const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-          const used = body.usage?.prompt_tokens ?? body.usage?.total_tokens;
+          const rawUsage = body.usage;
+          const used = rawUsage?.prompt_tokens ?? rawUsage?.total_tokens;
           if (Number.isSafeInteger(used) && used >= 0) tokens += used;
-          const cost = body.usage?.cost;
-          if (typeof cost === 'number' && Number.isFinite(cost) && cost >= 0) costUsd += cost;
+          const routerCost = rawUsage?.cost;
+          const byok = rawUsage?.is_byok === true;
+          const upstreamCost = rawUsage?.cost_details?.upstream_inference_cost;
+          // The Embeddings API separates the OpenRouter and upstream sides of BYOK.
+          // https://github.com/OpenRouterTeam/typescript-sdk/blob/main/src/models/operations/createembeddings.ts
+          const cost = usdAmount(routerCost) || byok ? {
+            source: 'provider-reported',
+            ...(usdAmount(routerCost) ? { total: routerCost } : {}),
+            ...(byok ? { byok: true, ...(usdAmount(upstreamCost) ? { upstreamInferenceCost: upstreamCost } : {}) } : {}),
+          } : undefined;
           receipt.usage = { ...(Number.isSafeInteger(used) && used >= 0 ? { input: used, output: 0 } : {}),
-            ...(typeof cost === 'number' && Number.isFinite(cost) && cost >= 0 ? { cost: { total: cost, source: 'provider-reported' } } : {}) };
+            ...(cost ? { cost } : {}) };
+          costUsd += readCostEvidence(receipt.usage, receipt.provider).reported;
           // A completed provider response can carry a charge even when its
           // vectors are too late for the requesting session to apply.
           signal.throwIfAborted();

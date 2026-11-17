@@ -48,10 +48,13 @@ export class OutputAccumulator {
     capturedBytes = 0;
     maxCaptureBytes;
     captureError;
+    captureCancelled = false;
     headText = "";
     headBytesRemaining;
     outputMode;
     pendingDrain;
+    settleDrain;
+    settleFlush;
     constructor(options = {}) {
         this.maxLines = options.maxLines ?? DEFAULT_MAX_LINES;
         this.maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
@@ -67,6 +70,7 @@ export class OutputAccumulator {
             throw new Error("Cannot append to a finished output accumulator");
         }
         this.appendDecodedText(this.decoder.append(data, source));
+        if (this.captureCancelled) return;
         if (typeof data === "string") data = Buffer.from(data, "utf8");
         this.totalRawBytes += data.length;
         if (this.tempFileStream || this.shouldUseTempFile()) {
@@ -163,14 +167,24 @@ export class OutputAccumulator {
             const done = () => {
                 clearTimeout(timer);
                 stream.off("error", done); stream.off("finish", done); stream.off("close", done);
+                this.settleFlush = undefined;
                 resolve();
             };
             const timer = setTimeout(() => { this.failCapture("capture flush timed out", stream); done(); }, 30000);
+            this.settleFlush = done;
             stream.once("error", done); stream.once("finish", done); stream.once("close", done);
             if (stream.destroyed || stream.writableFinished) done();
             else stream.end();
         });
         if (this.tempFileStream === stream) this.tempFileStream = undefined;
+    }
+    cancelCapture() {
+        this.captureCancelled = true;
+        this.rawChunks = [];
+        const stream = this.tempFileStream;
+        if (stream && !stream.writableFinished) {
+            this.failCapture("capture cancelled", stream);
+        }
     }
     getLastLineBytes() {
         return this.currentLineBytes;
@@ -245,6 +259,10 @@ export class OutputAccumulator {
         if (this.tempFilePath || this.captureError) {
             return;
         }
+        if (this.captureCancelled) {
+            this.captureError = "Full output unavailable: capture cancelled";
+            return;
+        }
         this.tempFilePath = defaultTempFilePath(this.tempFilePrefix);
         const stream = createWriteStream(this.tempFilePath, { flags: "wx", mode: 0o600 });
         stream.once("open", () => { this.tempFileOpened = true; });
@@ -257,15 +275,28 @@ export class OutputAccumulator {
         this.rawChunks = [];
     }
     failCapture(reason, stream) {
+        if (this.tempFileStream !== stream) return;
         this.captureError ??= `Full output unavailable: ${reason}`;
-        if (this.tempFileStream === stream) this.tempFileStream = undefined;
+        this.tempFileStream = undefined;
+        // A cancelled filesystem write may defer the stream's close event.
+        // Pipe and tool completion must no longer wait for that write.
+        this.settleDrain?.();
+        this.settleFlush?.();
         stream.destroy();
         // Never advertise a partial file as complete evidence.
         if (this.tempFilePath) {
             // EEXIST/EACCES can fail before opening. Such a path is not ours.
-            // Check at close, since destroy can race the asynchronous open.
-            const remove = () => { if (this.tempFileOpened) unlink(this.tempFilePath, () => {}); };
-            if (stream.closed) remove(); else stream.once("close", remove);
+            // Unlink an owned file even while pending writes keep its descriptor
+            // open. Retry on close if the filesystem requires it.
+            const path = this.tempFilePath;
+            const remove = () => { if (this.tempFileOpened) unlink(path, () => {}); };
+            if (this.tempFileOpened && !stream.closed) {
+                unlink(path, error => {
+                    if (!error || error.code === "ENOENT") return;
+                    if (stream.closed) remove(); else stream.once("close", remove);
+                });
+            } else if (stream.closed) remove();
+            else stream.once("close", remove);
         }
     }
     waitForDrain(stream) {
@@ -274,9 +305,11 @@ export class OutputAccumulator {
             const done = () => {
                 clearTimeout(timer);
                 for (const event of ["drain", "error", "close"]) stream.off(event, done);
+                this.settleDrain = undefined;
                 resolve();
             };
             const timer = setTimeout(() => { this.failCapture("capture drain timed out", stream); done(); }, 30000);
+            this.settleDrain = done;
             for (const event of ["drain", "error", "close"]) stream.once(event, done);
             if (stream.destroyed || !stream.writableNeedDrain) done();
         });

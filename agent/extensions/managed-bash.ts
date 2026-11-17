@@ -77,6 +77,7 @@ interface Job {
 	timeoutSeconds?: number;
 	exitCode?: number | null;
 	signal?: NodeJS.Signals | null;
+	cancelOutput?: () => void;
 	out: Tail;
 	err: Tail;
 }
@@ -169,6 +170,7 @@ function killJob(job: Job, force: boolean): void {
 	if (job.state !== "running" || !job.pid) return;
 	job.state = "killed";
 	job.endedAt = Date.now();
+	job.cancelOutput?.();
 	if (force) {
 		killTree(job.pid);
 		return;
@@ -228,7 +230,7 @@ function resolveTimeoutMs(timeout: number | undefined): number | undefined {
  */
 function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 	return {
-		async exec(command, cwd, { onData, signal, timeout, env }) {
+		async exec(command, cwd, { onData, onOutputCancelled, signal, timeout, env }) {
 			const timeoutMs = resolveTimeoutMs(timeout);
 			if (signal?.aborted) throw new Error("aborted");
 			try {
@@ -278,6 +280,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 				startedAt: Date.now(),
 				timeoutSeconds: timeout,
 				deadline: timeoutMs === undefined ? undefined : Date.now() + timeoutMs,
+				cancelOutput: onOutputCancelled,
 				out: new Tail(TAIL_CAP),
 				err: new Tail(TAIL_CAP),
 			};
@@ -300,12 +303,17 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 					const task = Promise.resolve(pending).catch(error => {
 						outputError ??= error;
 						if (child.pid) killTree(child.pid);
+						job.cancelOutput?.();
 					}).finally(() => {
 						pendingOutput.delete(task);
 						if (pendingOutput.size === 0) { child.stdout?.resume(); child.stderr?.resume(); }
 					});
 					pendingOutput.add(task);
-				} catch (error) { outputError ??= error; if (child.pid) killTree(child.pid); }
+				} catch (error) {
+					outputError ??= error;
+					if (child.pid) killTree(child.pid);
+					job.cancelOutput?.();
+				}
 			};
 
 			// Keeps watching after detach: a backgrounded runaway writer is the same danger.
@@ -316,6 +324,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 				job.state = "failed";
 				job.endedAt = Date.now();
 				if (child.pid) killTree(child.pid);
+				job.cancelOutput?.();
 			});
 
 			const feed = (data: Buffer) => {
@@ -336,6 +345,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			// one registered listener per bash call until the session signal fires.
 			const handleAbort = () => {
 				if (detached) return;
+				job.cancelOutput?.();
 				if (child.pid) {
 					if (cancelGraceMs > 0) {
 						const pid = child.pid;
@@ -355,6 +365,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 
 			const detach = () => {
 				detached = true;
+				job.cancelOutput = undefined;
 				signal?.removeEventListener("abort", handleAbort);
 				if (graceMs <= GRACE_MS) ownProcessGroup(job.pid);
 				const tail = (t: Tail, name: string) => {
@@ -379,6 +390,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			return await new Promise<{ exitCode: number | null }>((resolve, reject) => {
 				let settled = false;
 				const onExit = (code: number | null, sig: NodeJS.Signals | null) => {
+					job.cancelOutput = undefined;
 					stopDiskWatch();
 					if (deadlineTimer) clearTimeout(deadlineTimer);
 					if (graceTimer) clearTimeout(graceTimer);
@@ -440,6 +452,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 					await Promise.all(pendingOutput);
 					onExit(code, child.signalCode);
 				}).catch((err) => {
+					job.cancelOutput = undefined;
 					stopDiskWatch();
 					if (deadlineTimer) clearTimeout(deadlineTimer);
 					if (graceTimer) clearTimeout(graceTimer);
@@ -461,6 +474,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 						job.state = "timed_out";
 						job.endedAt = Date.now();
 						if (child.pid) killTree(child.pid);
+						job.cancelOutput?.();
 					}, timeoutMs);
 				}
 				// WHY setTimeout not Promise.race: detach has side effects (listener removal, watchdog) and must run exactly once.
@@ -624,6 +638,7 @@ export default function (pi: ExtensionAPI) {
 			if (job.state === "running" && job.pid) {
 				job.state = "killed";
 				job.endedAt = Date.now();
+				job.cancelOutput?.();
 				try {
 					process.kill(-job.pid, "SIGTERM");
 				} catch {

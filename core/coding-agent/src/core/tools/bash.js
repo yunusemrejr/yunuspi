@@ -38,7 +38,7 @@ export const bashToolSystemPromptContribution = {
 /** Shared process execution used by the built-in shell tools. */
 export function createLocalShellOperations(shellName, resolveShellConfig) {
     return {
-        exec: async (command, cwd, { onData, signal, timeout, env }) => {
+        exec: async (command, cwd, { onData, onOutputCancelled, signal, timeout, env }) => {
             const timeoutMs = resolveTimeoutMs(timeout);
             if (signal?.aborted) {
                 throw new Error("aborted");
@@ -72,10 +72,13 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
             let timedOut = false;
             let diskGuardReason;
             let timeoutHandle;
+            const stopProcess = () => {
+                if (child.pid) killProcessTree(child.pid);
+                onOutputCancelled?.();
+            };
             const stopDiskWatch = watchDisk(cwd, diskLimits, (reason) => {
                 diskGuardReason = reason;
-                if (child.pid)
-                    killProcessTree(child.pid);
+                stopProcess();
             });
             const pendingOutput = new Set();
             let outputError;
@@ -86,7 +89,7 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
                     child.stdout?.pause(); child.stderr?.pause();
                     const task = Promise.resolve(pending).catch(error => {
                         outputError ??= error;
-                        if (child.pid) killProcessTree(child.pid);
+                        stopProcess();
                     }).finally(() => {
                         pendingOutput.delete(task);
                         if (pendingOutput.size === 0) { child.stdout?.resume(); child.stderr?.resume(); }
@@ -94,20 +97,15 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
                     pendingOutput.add(task);
                 } catch (error) {
                     outputError ??= error;
-                    if (child.pid) killProcessTree(child.pid);
+                    stopProcess();
                 }
-            };
-            const onAbort = () => {
-                if (child.pid)
-                    killProcessTree(child.pid);
             };
             try {
                 // Set timeout if provided.
                 if (timeoutMs !== undefined) {
                     timeoutHandle = setTimeout(() => {
                         timedOut = true;
-                        if (child.pid)
-                            killProcessTree(child.pid);
+                        stopProcess();
                     }, timeoutMs);
                 }
                 // Stream stdout and stderr.
@@ -116,9 +114,9 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
                 // Handle abort signal by killing the entire process tree.
                 if (signal) {
                     if (signal.aborted)
-                        onAbort();
+                        stopProcess();
                     else
-                        signal.addEventListener("abort", onAbort, { once: true });
+                        signal.addEventListener("abort", stopProcess, { once: true });
                 }
                 // Handle shell spawn errors and wait for the process to terminate without hanging
                 // on inherited stdio handles held by detached descendants.
@@ -146,7 +144,7 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
                 if (timeoutHandle)
                     clearTimeout(timeoutHandle);
                 if (signal)
-                    signal.removeEventListener("abort", onAbort);
+                    signal.removeEventListener("abort", stopProcess);
             }
         },
     };
@@ -286,11 +284,15 @@ export function createShellToolDefinition(cwd, config, options) {
                 return { text, details };
             };
             const appendStatus = (text, status) => `${text ? `${text}\n\n` : ""}${status}`;
+            const cancelCapture = () => output.cancelCapture();
+            if (signal?.aborted) cancelCapture();
+            else signal?.addEventListener("abort", cancelCapture, { once: true });
             try {
                 let exitCode;
                 try {
                     const result = await ops.exec(spawnContext.command, spawnContext.cwd, {
                         onData: handleData,
+                        onOutputCancelled: cancelCapture,
                         signal,
                         timeout,
                         env: spawnContext.env,
@@ -317,6 +319,9 @@ export function createShellToolDefinition(cwd, config, options) {
                     throw err;
                 }
                 const snapshot = await finishOutput();
+                if (signal?.aborted) {
+                    throw new Error(appendStatus(formatOutput(snapshot, "").text, "Command aborted"));
+                }
                 const { text: outputText, details } = formatOutput(snapshot);
                 if (exitCode === null) {
                     throw new Error(appendStatus(outputText, "Command terminated by signal"));
@@ -330,6 +335,7 @@ export function createShellToolDefinition(cwd, config, options) {
                 } };
             }
             finally {
+                signal?.removeEventListener("abort", cancelCapture);
                 clearUpdateTimer();
             }
         },

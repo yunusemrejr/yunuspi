@@ -53,6 +53,8 @@ export declare class OutputAccumulator {
     }): OutputSnapshot;
     private headTailPreview;
     closeTempFile(): Promise<void>;
+    /** Release blocked capture waits while keeping the accumulated output preview. */
+    cancelCapture(): void;
     getLastLineBytes(): number;
     private appendDecodedText;
     private trimTail;
@@ -63,8 +65,11 @@ export declare class OutputAccumulator {
     private waitForDrain;
     private bytePrefix;
     private captureError;
+    private captureCancelled;
     private headText;
     private headBytesRemaining;
     private outputMode;
     private pendingDrain;
+    private settleDrain;
+    private settleFlush;
 }

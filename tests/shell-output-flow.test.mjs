@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Writable } from 'node:stream';
 import { syncBuiltinESMExports } from 'node:module';
+import { setTimeout as delay } from 'node:timers/promises';
 import childProcess from 'node:child_process';
 import {createHash} from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -173,6 +174,91 @@ test('capture disk failure stays explicit without crashing, hanging or claiming 
   assert.match(interactive.output,/ END\n\n\[Full output unavailable: ENOSPC\]$/);
  }finally{fs.createWriteStream=original;syncBuiltinESMExports();}
 });
+
+for (const kind of ['builtin', 'managed', 'interactive']) {
+ test(`${kind} Bash Stop releases stalled capture without waiting for the write`, {timeout: 20000}, async () => {
+  const original = fs.createWriteStream;
+  const controller = new AbortController();
+  const started = Promise.withResolvers();
+  const flushing = Promise.withResolvers();
+  const release = Promise.withResolvers();
+  const waitForFlush = kind === 'interactive';
+  let capturePath;
+  let result;
+  let phaseDeadline;
+
+  // The interactive command exits naturally. Stop reaches it during final
+  // flush, after the shell backend has already removed its signal listener.
+  const script = "process.stdout.write('x'.repeat(100000)+' LAST DIAGNOSTIC\\n');" +
+   (waitForFlush ? '' : 'setInterval(()=>{},1000);');
+  const input = command(script);
+  const {default: register} = await import('../agent/extensions/managed-bash.ts');
+  const tools = new Map();
+  register({registerTool: tool => tools.set(tool.name, tool), on() {}});
+  fs.createWriteStream = (file, options) => {
+   capturePath = file;
+   fs.writeFileSync(file, 'incomplete spill', {flag: options.flags, mode: options.mode});
+   const sink = new Writable({
+    highWaterMark: waitForFlush ? 1024 * 1024 : 1,
+    write(_chunk, _encoding, callback) {
+     started.resolve(this);
+     void release.promise.then(() => callback());
+    },
+    destroy(error, callback) { void release.promise.then(() => callback(error)); },
+   });
+   queueMicrotask(() => sink.emit('open'));
+   const end = sink.end.bind(sink);
+   sink.end = (...args) => { flushing.resolve(); return end(...args); };
+   return sink;
+  };
+  syncBuiltinESMExports();
+  try {
+   const tool = kind === 'managed' ? tools.get('bash') : createBashToolDefinition(scratch);
+   const execution = waitForFlush
+    ? executeBashWithOperations(input, scratch, createLocalBashOperations(), {signal: controller.signal})
+    : tool.execute('blocked-write', {command: input, maxOutputBytes: 1024, timeout: 12}, controller.signal, undefined, context);
+   result = execution.then(value => ({value}), error => ({error}));
+   const phase = await Promise.race([
+    waitForFlush ? flushing.promise : started.promise,
+    result.then(outcome => { throw new Error(`Bash exited before capture stalled: ${outcome.error ?? outcome.value}`); }),
+   ]);
+   assert.equal(fs.existsSync(capturePath), true);
+   if (!waitForFlush) assert.equal(phase.writableNeedDrain, true);
+
+   controller.abort();
+   phaseDeadline = new AbortController();
+   const outcome = await Promise.race([
+    result,
+    delay(3000, undefined, {signal: phaseDeadline.signal}).then(() => {
+     throw new Error('Stop waited for the blocked capture write');
+    }),
+   ]);
+   if (waitForFlush) {
+    assert.equal(outcome.value?.cancelled, true);
+    assert.equal(outcome.value.fullOutputPath, undefined);
+    assert.match(outcome.value.output, /LAST DIAGNOSTIC/);
+    assert.match(outcome.value.output, /Full output unavailable: capture cancelled/);
+   } else {
+    assert.match(outcome.error?.message, /Command aborted/);
+    assert.match(outcome.error.message, /x{100}/);
+    assert.match(outcome.error.message, /Full output unavailable: capture cancelled/);
+    assert.doesNotMatch(outcome.error.message, /Full output: /);
+   }
+   // The private filename is removed even though the synthetic write and
+   // its eventual stream close still cannot finish.
+   for (let attempt = 0; attempt < 100 && fs.existsSync(capturePath); attempt++) await delay(20);
+   assert.equal(fs.existsSync(capturePath), false);
+  } finally {
+   phaseDeadline?.abort();
+   controller.abort();
+   release.resolve();
+   await result;
+   fs.createWriteStream = original;
+   syncBuiltinESMExports();
+   if (capturePath) fs.rmSync(capturePath, {force: true});
+  }
+ });
+}
 
 test('legacy producers ignoring backpressure cannot grow the capture queue indefinitely',async()=>{
  const original=fs.createWriteStream;let sink;

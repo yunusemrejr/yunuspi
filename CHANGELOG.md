@@ -1,3 +1,11 @@
+## 0.56.22 — Recover abandoned slots, cancel stalled capture, and protect file writes
+
+- Reclaim unstarted runner and workflow slots after verifying the Linux launcher died. Interrupted revivals restore their prior reservation, and stale owners cannot mutate the restored slot.
+- Require accepted workflow status and a durable startup marker before dispatching children.
+- Stop releases stalled Bash output capture after child cleanup and keeps the available preview. Successful captures still flush the full output.
+- Project memory includes separately reported upstream charges for OpenRouter embedding requests made with a personal provider key. Missing charge evidence keeps the footer partial.
+- Native edits and writes reject named pipes promptly. Edits check the file revision before committing, and a replacement path stays protected when it changes during a write.
+
 ## 0.56.21 — Late child charges, hosted tool meters, and concurrent reminders
 
 - Verified private workflow charges reach the parent footer after the waiter returns, including when reopening the session. Accounting does not wake the parent or charge the same child twice.

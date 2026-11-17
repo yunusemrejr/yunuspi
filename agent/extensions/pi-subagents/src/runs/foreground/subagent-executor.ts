@@ -5008,8 +5008,6 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				deps.state.workflowControllers ??= new Map();
 				deps.state.workflowChildStops ??= new Map();
 				deps.state.workflowControllers.set(workflowRunId, controller);
-				workflowCapacity?.markWorkflowStarted();
-				if (workflowCapacity) deps.state.activeAsyncCapacity = getActiveAsyncCapacitySnapshot(currentSessionId, resolveMaxActiveAsyncRunsPerSession(deps.config.maxActiveAsyncRunsPerSession), { liveWorkflowRunIds: new Set(deps.state.workflowControllers.keys()), abandonedSlotReleaseAfterMs: resolveAbandonedSlotReleaseAfterMs(deps.config.capacity?.abandonedSlotReleaseAfterMs) });
 				let status: AsyncStatus = {
 					runId: workflowRunId,
 					toolCallId,
@@ -5178,13 +5176,26 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 				deps.state.fleetJobs.set(workflowRunId, workflowJob);
 				try {
 					persist();
+					if (!lastStatusWriteAccepted) throw new Error("Initial workflow status was superseded.");
+					if (workflowCapacity) deps.state.activeAsyncCapacity = workflowCapacity.reconcile(new Set(deps.state.workflowControllers.keys()));
+					// This durable marker must succeed before the local controller can schedule work.
+					workflowCapacity?.markWorkflowStarted();
 				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error);
 					deps.state.workflowControllers?.delete(workflowRunId);
 					deps.state.asyncJobs.delete(workflowRunId);
 					deps.state.fleetJobs?.delete(workflowRunId);
-					workflowCapacity?.rollback();
 					indexPersistence.dispose();
-					return { content: [{ type: "text", text: `Failed to create async workflow storage: ${error instanceof Error ? error.message : String(error)}` }], isError: true, details: { mode: "workflow", results: [] } };
+					try { workflowCapacity?.rollback(); }
+					catch (rollbackError) { console.error("Failed to roll back async workflow capacity:", rollbackError); }
+					if (lastStatusWriteAccepted) {
+						try {
+							const endedAt = Date.now();
+							persistGuardedStatus(statusPath, { ...status, state: "failed", endedAt, lastUpdate: endedAt, error: message });
+							if (lastStatusWriteAccepted) updateActiveRunIndex(asyncDir, "failed", status.toolCallId);
+						} catch (statusError) { console.error("Failed to record async workflow startup failure:", statusError); }
+					}
+					return { content: [{ type: "text", text: `Failed to create async workflow storage: ${message}` }], isError: true, details: { mode: "workflow", results: [] } };
 				}
 				appendWorkflowEvent({ type: "subagent.workflow.started" });
 				const { workflowScript, async: _workflowAsync, chatProgress: _chatProgress, ...workflowRequest } = requestParams;

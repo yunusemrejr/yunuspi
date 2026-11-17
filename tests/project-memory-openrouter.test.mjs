@@ -372,6 +372,40 @@ test('embedding charges use the existing auxiliary ledger, including paid malfor
   assert.equal(usage.rows.reduce((sum,r) => sum+r.evidence.reported, 0), 0.000002);
 });
 
+test('OpenRouter embedding receipts retain separately billed BYOK charges and missing sides', async () => {
+  const { collectSessionCost } = await import('../core/coding-agent/src/core/session-accounting.js');
+  const fixtures = [
+    {usage:{cost:.125, is_byok:true, cost_details:{upstream_inference_cost:.25}}, total:.375, label:'$0.375000'},
+    {usage:{cost:0, is_byok:true}, total:0, label:'$0.000+?'},
+    {usage:{is_byok:true, cost_details:{upstream_inference_cost:.25}}, total:.25, label:'$0.250000+?'},
+    {usage:{cost:0, is_byok:true, cost_details:{upstream_inference_cost:0}}, total:0, label:'$0.000'},
+    {usage:{cost:.125, is_byok:false, cost_details:{upstream_inference_cost:.25}}, total:.125, label:'$0.125000'},
+    {usage:{cost:.125, is_byok:true, cost_details:{upstream_inference_cost:'0.25'}}, total:.125, label:'$0.125000+?'},
+    {usage:{cost:.125, is_byok:true, cost_details:{upstream_inference_cost:.25}}, total:.375, label:'$0.375000', malformed:true},
+  ];
+  for (const fixture of fixtures) {
+    const receipts = [];
+    let posts = 0;
+    const e = remote(async (url, options) => {
+      assert.equal(url, 'https://openrouter.ai/api/v1/embeddings');
+      assert.equal(options.method, 'POST');
+      assert.equal(options.redirect, 'error');
+      posts++;
+      return response(fixture.malformed ? [] : [[1,0]], undefined, {prompt_tokens:10, total_tokens:10, ...fixture.usage});
+    }, {accounting:() => receipt => receipts.push(receipt)});
+    assert.deepEqual(await e.embed(['Synthetic paid memory']), fixture.malformed ? null : [[1,0]]);
+    assert.equal(posts, 1);
+    assert.deepEqual(receipts.map(row=>row.status), ['pending', fixture.malformed ? 'failed' : 'completed']);
+    assert.equal(receipts[0].id, receipts[1].id);
+    const entries = JSON.parse(JSON.stringify(receipts.map(data => ({type:'custom', customType:'auxiliary-model-usage-v1', data}))));
+    const cost = collectSessionCost([...entries, ...entries]);
+    assert.equal(cost.formatted, fixture.label);
+    assert.equal(cost.reported, fixture.total);
+    assert.equal(cost.pending, 0);
+    assert.equal(e.status().costUsd, fixture.total);
+  }
+});
+
 test('OpenRouter billing received after cancellation survives without caching the stale vectors', async () => {
   const controller = new AbortController(), entered = Promise.withResolvers(), released = Promise.withResolvers();
   const receipts = [];

@@ -1,10 +1,10 @@
 import { constants } from "fs";
-import { access as fsAccess, readFile as fsReadFile, writeFile as fsWriteFile } from "fs/promises";
 import { Type } from "typebox";
 import { splitBom } from "../../utils/text.js";
 import { getExperimentalToolSampling } from "../experimental.js";
 import { applyEditsWithOriginalLineEndings, decodeEditText, generateDiffString, generateUnifiedPatch, normalizeToLF, } from "./edit-diff.js";
 import { withFileMutationQueue } from "./file-mutation-queue.js";
+import { withNativeFileMutation } from "./native-file-mutation.js";
 import { resolveToCwd } from "./path-utils.js";
 import { missingPathHint, withHint } from "./path-hints.js";
 import { editRenderers } from "./renderers/edit.js";
@@ -37,11 +37,6 @@ function isSingleEditInput(value) {
     const edit = value;
     return typeof edit.oldText === "string" && typeof edit.newText === "string";
 }
-const defaultEditOperations = {
-    readFile: (path) => fsReadFile(path),
-    writeFile: (path, content) => fsWriteFile(path, content, "utf-8"),
-    access: (path) => fsAccess(path, constants.R_OK | constants.W_OK),
-};
 function prepareEditArguments(input) {
     if (!input || typeof input !== "object") {
         return input;
@@ -80,7 +75,7 @@ function validateEditInput(input) {
     return { path: input.path, edits: input.edits };
 }
 export function createEditToolDefinition(cwd, options) {
-    const ops = options?.operations ?? defaultEditOperations;
+    const ops = options?.operations;
     return {
         name: "edit",
         label: "edit",
@@ -103,47 +98,62 @@ export function createEditToolDefinition(cwd, options) {
                         throw new Error("Operation aborted");
                 };
                 throwIfAborted();
-                // Check if file exists.
-                try {
-                    await ops.access(absolutePath);
-                }
-                catch (error) {
+                const accessError = error => {
                     throwIfAborted();
                     const errorMessage = error instanceof Error && "code" in error ? `Error code: ${error.code}` : String(error);
                     const missing = error?.code === "ENOENT" || error?.code === "ENOTDIR";
-                    throw new Error(withHint(`Could not edit file: ${path}. ${errorMessage}.`, missing && !options?.operations ? missingPathHint(path, absolutePath, ctx?.cwd || cwd) : ""));
-                }
-                throwIfAborted();
-                // Read the file.
-                const buffer = await ops.readFile(absolutePath);
-                throwIfAborted();
-                const rawContent = decodeEditText(buffer);
-                // Strip BOM before matching. The model will not include an invisible BOM in oldText.
-                const { bom, text: content } = splitBom(rawContent);
-                const normalizedContent = normalizeToLF(content);
-                const beforeHash = __piContentHash(normalizedContent);
-                if (typeof input.expectedHash === "string" && input.expectedHash && input.expectedHash !== beforeHash) {
-                    throw new Error(`Edits rejected: ${path} changed since it was last read (optimistic-concurrency conflict; expected hash ${input.expectedHash}, current ${beforeHash}). No file was changed. ${__piEditConflictHelp(normalizedContent, edits)}`);
-                }
-                let result;
-                try { result = applyEditsWithOriginalLineEndings(content, normalizedContent, edits, path); }
-                catch (error) { throw new Error(`${error.message}\nNo file was changed. Current content hash: ${beforeHash}. ${__piEditConflictHelp(normalizedContent, edits)}`, { cause: error }); }
-                const { baseContent, newContent, writeContent } = result;
-                const afterHash = __piContentHash(newContent);
-                throwIfAborted();
-                const finalContent = bom + writeContent;
-                await ops.writeFile(absolutePath, finalContent);
-                const diffResult = generateDiffString(baseContent, newContent);
-                const patch = generateUnifiedPatch(path, baseContent, newContent);
-                return {
-                    content: [
-                        {
-                            type: "text",
-                            text: `Successfully replaced ${edits.length} block(s) in ${path} (hash ${afterHash}).`,
-                        },
-                    ],
-                    details: { diff: diffResult.diff, patch, optimisticConcurrency: { before: beforeHash, after: afterHash }, firstChangedLine: diffResult.firstChangedLine, documentMutation: documentMutationEvidence(absolutePath, rawContent, finalContent) },
+                    return new Error(withHint(`Could not edit file: ${path}. ${errorMessage}.`, missing && !ops ? missingPathHint(path, absolutePath, ctx?.cwd || cwd) : ""));
                 };
+                const apply = async (buffer, commit) => {
+                    throwIfAborted();
+                    const rawContent = decodeEditText(buffer);
+                    // Strip BOM before matching. The model will not include an invisible BOM in oldText.
+                    const { bom, text: content } = splitBom(rawContent);
+                    const normalizedContent = normalizeToLF(content);
+                    const beforeHash = __piContentHash(normalizedContent);
+                    if (typeof input.expectedHash === "string" && input.expectedHash && input.expectedHash !== beforeHash) {
+                        throw new Error(`Edits rejected: ${path} changed since it was last read (optimistic-concurrency conflict; expected hash ${input.expectedHash}, current ${beforeHash}). No file was changed. ${__piEditConflictHelp(normalizedContent, edits)}`);
+                    }
+                    let result;
+                    try { result = applyEditsWithOriginalLineEndings(content, normalizedContent, edits, path); }
+                    catch (error) { throw new Error(`${error.message}\nNo file was changed. Current content hash: ${beforeHash}. ${__piEditConflictHelp(normalizedContent, edits)}`, { cause: error }); }
+                    const { baseContent, newContent, writeContent } = result;
+                    const afterHash = __piContentHash(newContent);
+                    throwIfAborted();
+                    const finalContent = bom + writeContent;
+                    await commit(finalContent);
+                    const diffResult = generateDiffString(baseContent, newContent);
+                    const patch = generateUnifiedPatch(path, baseContent, newContent);
+                    return {
+                        content: [
+                            {
+                                type: "text",
+                                text: `Successfully replaced ${edits.length} block(s) in ${path} (hash ${afterHash}).`,
+                            },
+                        ],
+                        details: { diff: diffResult.diff, patch, optimisticConcurrency: { before: beforeHash, after: afterHash }, firstChangedLine: diffResult.firstChangedLine, documentMutation: documentMutationEvidence(absolutePath, rawContent, finalContent) },
+                    };
+                };
+                if (ops) {
+                    try { await ops.access(absolutePath); }
+                    catch (error) { throw accessError(error); }
+                    throwIfAborted();
+                    return apply(await ops.readFile(absolutePath), content => ops.writeFile(absolutePath, content));
+                }
+                let opened = false;
+                try {
+                    return await withNativeFileMutation(absolutePath, constants.O_RDWR, async (file, commit) => {
+                        opened = true;
+                        throwIfAborted();
+                        return apply(await file.readFile({ signal }), commit);
+                    }, throwIfAborted);
+                }
+                catch (error) {
+                    if (!opened && (error?.code === "ENOENT" || error?.code === "ENOTDIR" || error?.code === "EACCES" || error?.code === "EPERM")) {
+                        throw accessError(error);
+                    }
+                    throw error;
+                }
             });
         },
         ...editRenderers,

@@ -25,39 +25,48 @@ export async function executeBashWithOperations(command, cwd, operations, option
         return pending;
     };
 
-    let exitCode;
+    const signal = options?.signal;
+    const cancelCapture = () => output.cancelCapture();
+    if (signal?.aborted) cancelCapture();
+    else signal?.addEventListener("abort", cancelCapture, { once: true });
     try {
-        ({ exitCode } = await operations.exec(command, cwd, {
-            onData: (data, source) => acceptingOutput ? append(decoder.append(data, source)) : undefined,
-            signal: options?.signal,
-        }));
-    }
-    catch (error) {
-        if (!options?.signal?.aborted) {
-            acceptingOutput = false;
-            await output.closeTempFile();
-            throw error;
+        let exitCode;
+        try {
+            ({ exitCode } = await operations.exec(command, cwd, {
+                onData: (data, source) => acceptingOutput ? append(decoder.append(data, source)) : undefined,
+                onOutputCancelled: cancelCapture,
+                signal,
+            }));
         }
+        catch (error) {
+            if (!signal?.aborted) {
+                acceptingOutput = false;
+                await output.closeTempFile();
+                throw error;
+            }
+        }
+        finally {
+            acceptingOutput = false;
+        }
+        try {
+            const remaining = decoder.finish();
+            if (remaining) await append(remaining);
+            output.finish();
+        }
+        finally {
+            await output.closeTempFile();
+        }
+        const snapshot = output.snapshot();
+        const cancelled = signal?.aborted ?? false;
+        return {
+            output: snapshot.captureError ? `${snapshot.content}\n\n[${snapshot.captureError}]` : snapshot.content,
+            exitCode: cancelled ? undefined : (exitCode ?? undefined),
+            cancelled,
+            truncated: snapshot.truncation.truncated,
+            fullOutputPath: snapshot.fullOutputPath,
+        };
     }
     finally {
-        acceptingOutput = false;
+        signal?.removeEventListener("abort", cancelCapture);
     }
-
-    try {
-        const remaining = decoder.finish();
-        if (remaining) await append(remaining);
-        output.finish();
-    }
-    finally {
-        await output.closeTempFile();
-    }
-    const snapshot = output.snapshot();
-    const cancelled = options?.signal?.aborted ?? false;
-    return {
-        output: snapshot.captureError ? `${snapshot.content}\n\n[${snapshot.captureError}]` : snapshot.content,
-        exitCode: cancelled ? undefined : (exitCode ?? undefined),
-        cancelled,
-        truncated: snapshot.truncation.truncated,
-        fullOutputPath: snapshot.fullOutputPath,
-    };
 }

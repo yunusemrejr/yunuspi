@@ -37,6 +37,8 @@ export interface BashOperations {
     exec: (command: string, cwd: string, options: {
         /** Supply the pipe source when forwarding chunks from independent streams. */
         onData: (data: Buffer, source?: ShellOutputSource) => void | Promise<void>;
+        /** Release output capture when the operation stops before a normal exit. */
+        onOutputCancelled?: () => void;
         signal?: AbortSignal;
         timeout?: number;
         env?: NodeJS.ProcessEnv;

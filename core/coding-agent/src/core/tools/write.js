@@ -1,8 +1,10 @@
-import { mkdir as fsMkdir, writeFile as fsWriteFile } from "fs/promises";
+import { constants } from "node:fs";
+import { mkdir } from "node:fs/promises";
 import { dirname } from "path";
 import { Type } from "typebox";
 import { getExperimentalToolSampling } from "../experimental.js";
 import { withFileMutationQueue } from "./file-mutation-queue.js";
+import { withNativeFileMutation } from "./native-file-mutation.js";
 import { resolveToCwd } from "./path-utils.js";
 import { writeRenderers } from "./renderers/write.js";
 import { wrapToolDefinition } from "./tool-definition-wrapper.js";
@@ -15,12 +17,8 @@ export const writeToolSystemPromptContribution = {
     snippet: "Create or overwrite files",
     guidelines: ["Use write only for new files or complete rewrites."],
 };
-const defaultWriteOperations = {
-    writeFile: (path, content) => fsWriteFile(path, content, "utf-8"),
-    mkdir: (dir) => fsMkdir(dir, { recursive: true }).then(() => { }),
-};
 export function createWriteToolDefinition(cwd, options) {
-    const ops = options?.operations ?? defaultWriteOperations;
+    const ops = options?.operations;
     return {
         name: "write",
         label: "write",
@@ -44,10 +42,12 @@ export function createWriteToolDefinition(cwd, options) {
                 };
                 throwIfAborted();
                 // Create parent directories if needed.
-                await ops.mkdir(dir);
+                if (ops) await ops.mkdir(dir);
+                else await mkdir(dir, { recursive: true });
                 throwIfAborted();
                 // Write the file contents.
-                await ops.writeFile(absolutePath, content);
+                if (ops) await ops.writeFile(absolutePath, content);
+                else await withNativeFileMutation(absolutePath, constants.O_WRONLY | constants.O_CREAT, (_file, commit) => commit(content), throwIfAborted);
                 const documentMutation = documentMutationEvidence(absolutePath, undefined, content);
                 return {
                     content: [{ type: "text", text: `Successfully wrote to ${path}` }],
