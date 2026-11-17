@@ -67,7 +67,7 @@ import {
 	resolveChildMaxSubagentDepth,
 } from "../../shared/types.ts";
 import { nestedResultsPath, nestedSummaryFromAsyncStatus, resolveInheritedNestedRouteFromEnv, resolveNestedParentAddressFromEnv, writeNestedEvent } from "../shared/nested-events.ts";
-import { resultFilePath } from "./result-files.ts";
+import { resultFilePath, workflowAwaitedAsyncResultPath } from "./result-files.ts";
 import { validateToolBudgetConfig } from "../shared/tool-budget.ts";
 import { usageBudgetState } from "../shared/usage-budget.ts";
 import type { ImportedAsyncRoot } from "./chain-root-attachment.ts";
@@ -1488,9 +1488,7 @@ export async function executeAsyncChain(
 /**
  * Execute a single agent asynchronously
  */
-export function workflowAwaitedAsyncResultPath(asyncDir: string): string {
-	return path.join(asyncDir, "workflow-result.json");
-}
+export { workflowAwaitedAsyncResultPath } from "./result-files.ts";
 
 export async function executeAsyncSingle(
 	id: string,
@@ -1808,6 +1806,7 @@ export async function executeAsyncSingle(
 	let spawnResult: SpawnRunnerResult = {};
 	const initialStatusAt = Date.now();
 	const initialCompletionOwnerId = ctx.completionOwnerId ?? currentCompletionOwnerId();
+	const workflowOwnsResult = params.parentWorkflowRunId !== undefined && (params.revivalLease !== undefined || params.workflowAwaitAsync === true);
 	try {
 		spawnResult = await spawnRunner(
 			{
@@ -1871,7 +1870,7 @@ export async function executeAsyncSingle(
 						...(lane ? { lane } : {}),
 					},
 				],
-				resultPath: params.parentWorkflowRunId !== undefined && (params.revivalLease !== undefined || params.workflowAwaitAsync === true)
+				resultPath: workflowOwnsResult
 					? workflowAwaitedAsyncResultPath(asyncDir)
 					: inheritedNestedRoute ? nestedResultsPath(inheritedNestedRoute.rootRunId, id) : resultFilePath(DIRS.results, id),
 				cwd: runnerCwd,
@@ -1921,6 +1920,7 @@ export async function executeAsyncSingle(
 				runId: id,
 				...(ctx.currentSessionId ? { sessionId: ctx.currentSessionId } : {}),
 				...(initialCompletionOwnerId ? { completionOwnerId: initialCompletionOwnerId } : {}),
+				...(workflowOwnsResult ? { resultDelivery: "workflow" as const } : {}),
 				mode: "single",
 				state: "running",
 				startedAt: initialStatusAt,
@@ -1997,6 +1997,7 @@ export async function executeAsyncSingle(
 			pid: spawnResult.pid,
 			sessionId: ctx.currentSessionId,
 			completionOwnerId: ctx.completionOwnerId ?? currentCompletionOwnerId(),
+			...(workflowOwnsResult ? { resultDelivery: "workflow" as const } : {}),
 			mode: "single",
 			agent,
 			task: task?.trim() ? PROMPT_REDACTED : undefined,

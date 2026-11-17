@@ -93,9 +93,6 @@ import { sessionObservability } from './lib/session-observability.ts';
  * reminder surfaces as an activity indicator. No inference, no timers.
  */
 import { randomUUID } from "node:crypto";
-import * as fs from "node:fs";
-import * as os from "node:os";
-import * as path from "node:path";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
@@ -116,8 +113,8 @@ import {
 import { replayFromBranch } from "./rpiv-todo/state/replay.ts";
 import {
 	MANUAL_INTERVAL_MS,
+	pruneStaleReminders,
 	readRemindersState,
-	remindersStateFile,
 	type ManualReminder,
 	type ReminderState,
 	writeRemindersState,
@@ -130,8 +127,6 @@ import {
 	workspaceGitDrift,
 	type WorkspaceGitState,
 } from "./lib/workspace-write-lease.ts";
-
-const STATE_DIR = path.join(os.homedir(), ".pi", "reminders");
 
 // Drift / todo tuning — the anti-nag knobs.
 const TODO_IDLE_MS = 8 * 60_000; // open todos, no mutation this long -> nudge
@@ -185,7 +180,6 @@ export function isMutatingToolResult(
 	return false;
 }
 
-const STATE_TTL_MS = 30 * 24 * 3600_000; // stale state files pruned
 
 export type { ManualReminder, ReminderState } from "./lib/reminders-state.ts";
 
@@ -440,27 +434,6 @@ export function reminderText(
 
 const readState = readRemindersState;
 const writeState = writeRemindersState;
-function cleanupStale(currentSid: string): void {
-	try {
-		const cutoff = Date.now() - STATE_TTL_MS;
-		const currentFile = remindersStateFile(currentSid);
-		for (const name of fs.readdirSync(STATE_DIR)) {
-			if (!/^state-[A-Za-z0-9_-]+\.json$/.test(name)) continue;
-			const p = path.join(STATE_DIR, name);
-			if (p === currentFile) continue;
-			const stat = fs.lstatSync(p);
-			if (!stat.isFile() || stat.mtimeMs >= cutoff) continue;
-			// Idle time is not consent to clear the user's recurring instructions.
-			// Require explicit cleared state; scheduler validation drops invalid records.
-			let manual: unknown;
-			try { manual = JSON.parse(fs.readFileSync(p, "utf8"))?.manual; }
-			catch { continue; }
-			if (Array.isArray(manual) && manual.every((reminder) => reminder?.active === false)) fs.unlinkSync(p);
-		}
-	} catch {
-		/* no dir yet — fine */
-	}
-}
 
 // ---------------------------------------------------------------- helpers
 
@@ -675,7 +648,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		loop = createLoopTracker();
 		try {
 			const sid = sidOf(ctx);
-			if (event.reason === "startup" || event.reason === "new") cleanupStale(sid);
+			if (event.reason === "startup" || event.reason === "new") pruneStaleReminders(sid);
 			const st = load(sid, ctx);
 			if (sid) {
 				const { state } = acquireWorkspaceWriterLease(ctx.cwd, sid);

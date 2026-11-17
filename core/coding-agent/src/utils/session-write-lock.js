@@ -55,7 +55,7 @@ function reclaimOrphan(lock) {
     catch { return false; }
 }
 /** Short synchronous transactions; no live owner can lose its lock by age. */
-export function withSessionWriteLock(file, transaction) {
+export function withSessionWriteLock(file, transaction, { wait = true } = {}) {
     let canonical;
     try { canonical = realpathSync(file); }
     catch (error) {
@@ -64,7 +64,7 @@ export function withSessionWriteLock(file, transaction) {
     }
     const lock = `${canonical}.write-lock`;
     const ownerFile = join(lock, `owner-${process.pid}-${randomUUID()}`);
-    const deadline = performance.now() + 250;
+    const deadline = performance.now() + (wait ? 250 : 0);
     for (;;) {
         try { mkdirSync(lock, { mode: 0o700 }); break; }
         catch (error) {

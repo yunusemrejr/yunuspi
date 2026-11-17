@@ -1220,7 +1220,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /prompt-workflow — [`agent/extensions/pi-subagents/src/slash/prompt-workflows.ts`](../agent/extensions/pi-subagents/src/slash/prompt-workflows.ts) (line 257)
 - /provider — [`agent/extensions/provider-cmd.ts`](../agent/extensions/provider-cmd.ts) (line 653)
 - /provider-health — [`agent/extensions/provider-gate.ts`](../agent/extensions/provider-gate.ts) (line 522)
-- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1161)
+- /reminder — [`agent/extensions/reminders.ts`](../agent/extensions/reminders.ts) (line 1134)
 - /run — [`agent/extensions/pi-subagents/src/slash/slash-commands.ts`](../agent/extensions/pi-subagents/src/slash/slash-commands.ts) (line 825)
 - /search — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3390)
 - /self — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1715)

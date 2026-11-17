@@ -76,6 +76,33 @@ test("Git drift reports a moved HEAD between observations", () => {
 	}
 });
 
+test("starting a nested checkout moves attribution and releases the former checkout lease", (t) => {
+	const parent = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-nested-checkout-"));
+	t.after(() => fs.rmSync(parent, { recursive: true, force: true }));
+	const child = path.join(parent, "nested");
+	fs.mkdirSync(child);
+	fs.writeFileSync(path.join(child, "asset.txt"), "fixture");
+	const init = (cwd, branch) => {
+		git(cwd, "init", "-qb", branch);
+		git(cwd, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture");
+	};
+	init(parent, "outer");
+	const writer = "writer-moving-to-nested-repo";
+	assert.equal(readWorkspaceGitState(child).root, parent);
+	assert.equal(recordWorkspaceMutation(child, writer, "asset.txt", "edit").path, "nested/asset.txt");
+	assert.equal(attributeWorkspacePath(parent, "observer", "nested/asset.txt").status, "another_session");
+
+	init(child, "inner");
+	const observed = readWorkspaceGitState(child);
+	assert.equal(observed.root, git(child, "rev-parse", "--show-toplevel"));
+	assert.equal(observed.branch, "inner");
+	assert.equal(recordWorkspaceMutation(child, writer, "asset.txt", "edit").path, "asset.txt");
+	assert.equal(attributeWorkspacePath(parent, "observer", "nested/asset.txt").status, "unattributed");
+	assert.equal(attributeWorkspacePath(child, "observer", "asset.txt").sessionId, writer);
+	releaseWorkspaceWriterLease(child, writer);
+	assert.equal(attributeWorkspacePath(child, "observer", "asset.txt").status, "unattributed");
+});
+
 test("sibling worktrees sharing a common Git directory own different files", () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-writer-worktrees-"));
 	try {

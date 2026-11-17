@@ -1695,6 +1695,7 @@ export interface AsyncStartedEvent {
 	pid?: number;
 	sessionId?: string;
 	completionOwnerId?: string;
+	resultDelivery?: "workflow";
 	mode?: SubagentRunMode;
 	agent?: string;
 	agents?: string[];
@@ -1838,6 +1839,8 @@ export interface AsyncStatus {
 	revision?: number;
 	/** Parent Pi process/window that owns local completion delivery. */
 	completionOwnerId?: string;
+	/** The waiting workflow owns a run-local result instead of a session completion notification. */
+	resultDelivery?: "workflow";
 	/** Host tool-call id retained when it differs from the internal run id. */
 	toolCallId?: string;
 	sessionId?: string;
@@ -2032,6 +2035,7 @@ export interface AsyncJobState {
 	pid?: number;
 	sessionId?: string;
 	completionOwnerId?: string;
+	resultDelivery?: "workflow";
 	activityState?: ActivityState;
 	lastActivityAt?: number;
 	currentTool?: string;

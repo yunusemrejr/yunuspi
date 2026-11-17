@@ -1,5 +1,5 @@
-import { open } from "node:fs/promises";
-const IMAGE_TYPE_SNIFF_BYTES = 4100;
+import { withRegularReadFile } from "@yunuspi/agent-core/node";
+export const IMAGE_TYPE_SNIFF_BYTES = 4100;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
 export function detectSupportedImageMimeType(buffer) {
     if (startsWith(buffer, [0xff, 0xd8, 0xff])) {
@@ -20,15 +20,11 @@ export function detectSupportedImageMimeType(buffer) {
     return null;
 }
 export async function detectSupportedImageMimeTypeFromFile(filePath) {
-    const fileHandle = await open(filePath, "r");
-    try {
+    return withRegularReadFile(filePath, undefined, async file => {
         const buffer = Buffer.alloc(IMAGE_TYPE_SNIFF_BYTES);
-        const { bytesRead } = await fileHandle.read(buffer, 0, IMAGE_TYPE_SNIFF_BYTES, 0);
+        const { bytesRead } = await file.read(buffer, 0, IMAGE_TYPE_SNIFF_BYTES, 0);
         return detectSupportedImageMimeType(buffer.subarray(0, bytesRead));
-    }
-    finally {
-        await fileHandle.close();
-    }
+    });
 }
 function isPng(buffer) {
     return (buffer.length >= 16 && readUint32BE(buffer, PNG_SIGNATURE.length) === 13 && startsWithAscii(buffer, 12, "IHDR"));

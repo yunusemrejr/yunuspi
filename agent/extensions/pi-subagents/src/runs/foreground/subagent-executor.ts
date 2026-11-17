@@ -2137,7 +2137,6 @@ async function resumeAsyncRun(input: {
 		} finally {
 			input.signal?.removeEventListener("abort", stopOnAbort);
 		}
-		fs.rmSync(resultPath, { force: true });
 		const usage = importedAsyncRootUsage(completed);
 		const childResult: SingleResult = {
 			index: 0,
@@ -3158,13 +3157,14 @@ function importedAsyncRootUsage(completed: Awaited<ReturnType<typeof waitForImpo
 		cacheWrite: 0,
 		cost: totalCost?.costUsd ?? 0,
 		turns: 0,
+		...(totalCost?.costDetails ? { costDetails: totalCost.costDetails } : {}),
 	};
 }
 
 async function waitForWorkflowAsyncSingleResult(
 	params: SubagentParamsLike,
 	launchResult: AgentToolResult<Details>,
-	options: { runId: string; task: string; signal?: AbortSignal; state: SubagentState; kill?: ExecutorDeps["kill"] },
+	options: { runId: string; task: string; signal?: AbortSignal; abortedAt: () => number | undefined; state: SubagentState; kill?: ExecutorDeps["kill"] },
 ): Promise<AgentToolResult<Details>> {
 	if (params.workflowAwaitAsync !== true || !launchResult.details.asyncDir) return launchResult;
 	const asyncDir = launchResult.details.asyncDir;
@@ -3176,12 +3176,12 @@ async function waitForWorkflowAsyncSingleResult(
 	try {
 		completed = await waitForImportedAsyncRoot({ runId: options.runId, asyncDir, resultPath, index: 0 }, omitUndefinedProperties({
 			shouldAbort: () => options.signal?.aborted === true,
+			abortedAt: options.abortedAt,
 			timeoutMessage: "Workflow stopped before async child completed.",
 		}));
 	} finally {
 		options.signal?.removeEventListener("abort", stopOnAbort);
 	}
-	fs.rmSync(resultPath, { force: true });
 	const usage = importedAsyncRootUsage(completed);
 	const childResult: SingleResult = omitUndefinedProperties({
 		index: 0,
@@ -3388,9 +3388,17 @@ async function runAsyncPath(data: ExecutionContextData, deps: ExecutorDeps): Pro
 			workflowAwaitAsync: params.workflowAwaitAsync,
 		});
 		data.childLaunchAttempted = true;
-		const asyncResult = await executeAsyncSingle(id, launchOptions);
-		if (!asyncResult.isError) data.childProcessStarted = true;
-		return waitForWorkflowAsyncSingleResult(params, asyncResult, { runId: id, task: params.task ?? "", signal: data.signal, state: deps.state, kill: deps.kill });
+		const workflowSignal = params.workflowAwaitAsync === true ? data.signal : undefined;
+		let abortedAt: number | undefined;
+		const recordAbort = () => { abortedAt = Date.now(); };
+		if (!workflowSignal?.aborted) workflowSignal?.addEventListener("abort", recordAbort, { once: true });
+		try {
+			const asyncResult = await executeAsyncSingle(id, launchOptions);
+			if (!asyncResult.isError) data.childProcessStarted = true;
+			return await waitForWorkflowAsyncSingleResult(params, asyncResult, { runId: id, task: params.task ?? "", signal: data.signal, abortedAt: () => abortedAt, state: deps.state, kill: deps.kill });
+		} finally {
+			workflowSignal?.removeEventListener("abort", recordAbort);
+		}
 	}
 
 	return null;

@@ -214,12 +214,34 @@ async function responseText(response: Response, signal?: AbortSignal): Promise<s
   } finally { signal?.removeEventListener("abort", abort); await reader.cancel().catch(() => {}); reader.releaseLock(); }
 }
 
-async function postJson(apiUrl: string, key: string, endpoint: string, body: unknown, signal: AbortSignal | undefined, timeoutMs: number): Promise<any> {
+type ImageBillingRoute = "openai" | "openrouter";
+type NativeImageReply = { payload: any; route?: ImageBillingRoute };
+
+function imageBillingRoute(requestUrl: string, response: Response): ImageBillingRoute | undefined {
+  if (response.redirected) return undefined;
+  try {
+    const url = new URL(requestUrl);
+    if (response.url && new URL(response.url).href !== url.href) return undefined;
+    if (url.href === "https://openrouter.ai/api/v1/images") return "openrouter";
+    if (url.href === "https://api.openai.com/v1/images/generations" || url.href === "https://api.openai.com/v1/images/edits") return "openai";
+  } catch { /* Unknown origin has no pricing contract. */ }
+  return undefined;
+}
+
+async function nativeImageReply(response: Response, requestUrl: string, signal: AbortSignal): Promise<NativeImageReply> {
+  const text = await responseText(response, signal);
+  if (!response.ok) throw new Error(`Image backend refused (${response.status}): ${redactSecrets(text).slice(0, 400)}`);
+  try { return { payload: JSON.parse(text), route: imageBillingRoute(requestUrl, response) }; }
+  catch { throw new Error("Image backend returned a non-JSON payload"); }
+}
+
+async function postJson(apiUrl: string, key: string, endpoint: string, body: unknown, signal: AbortSignal | undefined, timeoutMs: number): Promise<NativeImageReply> {
   const deadline = AbortSignal.timeout(timeoutMs);
   const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
+  const url = `${apiUrl}${endpoint}`;
   let response: Response;
   try {
-    response = await fetch(`${apiUrl}${endpoint}`, {
+    response = await fetch(url, {
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
       body: JSON.stringify(body),
@@ -228,13 +250,7 @@ async function postJson(apiUrl: string, key: string, endpoint: string, body: unk
   } catch (error: any) {
     throw new Error(`Image backend unreachable: ${redactSecrets(String(error?.message ?? error)).slice(0, 300)}`);
   }
-  const text = await responseText(response, bounded);
-  if (!response.ok) throw new Error(`Image backend refused (${response.status}): ${redactSecrets(text).slice(0, 400)}`);
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error("Image backend returned a non-JSON payload");
-  }
+  return nativeImageReply(response, url, bounded);
 }
 
 async function imageBytesFromPayload(payload: any, signal: AbortSignal | undefined): Promise<Buffer> {
@@ -260,42 +276,88 @@ const retainedDownloadError = (error: unknown, checkpoint: DownloadCheckpoint, c
 const backendKey = (backend: BackendStatus, env: Record<string, string | undefined>, runtime: ImageRuntime) =>
   env.PI_IMAGE_API_KEY ?? (backend.name === "openrouter" ? env.OPENROUTER_API_KEY ?? runtime.providerKey : env.OPENAI_API_KEY) ?? "";
 
-/** Native HTTP counters use different names from the SDK journal. Preserve
- * reported billing/cache evidence without inventing a zero charge. */
-export function imageUsage(raw: any) {
+type ImageBillingEvidence = { route?: ImageBillingRoute; model?: string; additionalUsage?: boolean };
+const tokenCount = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+const usdAmount = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0;
+const currencyIsUsd = (value: unknown) => value == null || value === "USD";
+const standardOpenAIImages = new Set(["gpt-image-2.6-sunburst", "gpt-image-2.6-flare", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare"]);
+
+function imageTokenSplit(total: unknown, details: any) {
+  const text = tokenCount(details?.text_tokens) ? details.text_tokens as number : undefined;
+  const image = tokenCount(details?.image_tokens) ? details.image_tokens as number : undefined;
+  const accounted = (text ?? 0) + (image ?? 0);
+  if (!tokenCount(total) || accounted > total) return { complete: false };
+  const malformed = (details?.text_tokens != null && text === undefined) || (details?.image_tokens != null && image === undefined);
+  return { text, image, complete: !malformed && accounted === total };
+}
+
+function estimateOpenAIImageUsage(raw: any, cached: unknown, written: unknown, evidence: ImageBillingEvidence) {
+  if (!standardOpenAIImages.has(evidence.model ?? "")) return undefined;
+  const input = imageTokenSplit(raw.input_tokens, raw.input_tokens_details);
+  const output = imageTokenSplit(raw.output_tokens, raw.output_tokens_details);
+  // Direct Images reports text/image input buckets and does not document a
+  // cache meter. A positive or malformed cache claim leaves input unpriced.
+  // https://developers.openai.com/api/reference/resources/images/methods/generate
+  // https://developers.openai.com/api/docs/pricing#multimodal-models
+  const cacheUnclear = (cached != null && cached !== 0) || (written != null && written !== 0);
+  const inputCost = cacheUnclear ? 0 : ((input.text ?? 0) * 5 + (input.image ?? 0) * 8) / 1e6;
+  const outputCost = (output.image ?? 0) * 30 / 1e6;
+  const complete = !cacheUnclear && input.complete && output.complete && (output.text ?? 0) === 0 &&
+    !evidence.additionalUsage && (raw.total_tokens == null || raw.total_tokens === raw.input_tokens + raw.output_tokens);
+  if (inputCost + outputCost === 0 && !complete) return undefined;
+  const imageTokenCounts = {
+    ...(input.text !== undefined ? { inputText: input.text } : {}),
+    ...(input.image !== undefined ? { inputImage: input.image } : {}),
+    ...(output.text !== undefined ? { outputText: output.text } : {}),
+    ...(output.image !== undefined ? { outputImage: output.image } : {}),
+  };
+  return { input: inputCost, output: outputCost, cacheRead: 0, cacheWrite: 0, total: inputCost + outputCost,
+    source: "estimate", complete, priceBasis: "openai-images-standard-token-rates", imageTokenCounts };
+}
+
+/** Map native and compatible gateway counters to the session ledger. */
+export function imageUsage(raw: any, evidence: ImageBillingEvidence = {}) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
-  if (raw.input !== undefined || raw.output !== undefined) return raw;
-  const count = (n: unknown) => Number.isSafeInteger(n) && Number(n) >= 0;
-  const prompt = raw.prompt_tokens ?? raw.input_tokens, output = raw.completion_tokens ?? raw.output_tokens;
+  const prompt = raw.prompt_tokens ?? raw.input_tokens, output = raw.completion_tokens ?? raw.output_tokens ?? raw.output;
   const details = raw.prompt_tokens_details ?? raw.input_tokens_details;
-  const cached = details?.cached_tokens, written = details?.cache_write_tokens;
-  const cacheRead = count(cached) ? cached : 0, cacheWrite = count(written) ? written : 0;
-  const usage: Record<string, unknown> = { cacheReadReported: count(cached) && (!count(prompt) || cacheRead <= prompt) };
-  if (count(prompt) && cacheRead + cacheWrite <= prompt) usage.input = prompt - cacheRead - cacheWrite;
-  if (count(output)) usage.output = output;
-  if (count(cached)) usage.cacheRead = cached;
-  if (count(written)) usage.cacheWrite = written;
-  if (count(raw.total_tokens)) usage.totalTokens = raw.total_tokens;
-  if (count(raw.completion_tokens_details?.reasoning_tokens)) usage.reasoning = raw.completion_tokens_details.reasoning_tokens;
-  if (typeof raw.cost === "number" && Number.isFinite(raw.cost) && raw.cost >= 0) {
+  const cached = details?.cached_tokens ?? raw.cacheRead, written = details?.cache_write_tokens ?? raw.cacheWrite;
+  const cacheRead = tokenCount(cached) ? cached : 0, cacheWrite = tokenCount(written) ? written : 0;
+  const usableCache = !tokenCount(prompt) || cacheRead + cacheWrite <= prompt;
+  const usage: Record<string, unknown> = { cacheReadReported: tokenCount(cached) && usableCache };
+  if (tokenCount(prompt) && usableCache) usage.input = prompt - cacheRead - cacheWrite;
+  else if (prompt == null && tokenCount(raw.input)) usage.input = raw.input;
+  if (tokenCount(output)) usage.output = output;
+  if (tokenCount(cached) && usableCache) usage.cacheRead = cached;
+  if (tokenCount(written) && usableCache) usage.cacheWrite = written;
+  const totalTokens = raw.total_tokens ?? raw.totalTokens;
+  const reasoning = raw.completion_tokens_details?.reasoning_tokens ?? raw.reasoning;
+  if (tokenCount(totalTokens)) usage.totalTokens = totalTokens;
+  if (tokenCount(reasoning)) usage.reasoning = reasoning;
+  // Only the documented native OpenRouter field carries an authoritative USD total.
+  // https://openrouter.ai/blog/tutorials/image-generation/
+  if (evidence.route === "openrouter" && usdAmount(raw.cost) && currencyIsUsd(raw.currency) && currencyIsUsd(raw.cost_currency)) {
     const upstream = raw.cost_details?.upstream_inference_cost;
     usage.cost = { total: raw.cost, source: "provider-reported", complete: true,
       ...(raw.is_byok === true ? { byok: true } : {}),
-      ...(typeof upstream === "number" && Number.isFinite(upstream) && upstream >= 0 ? { upstreamInferenceCost: upstream } : {}) };
+      ...(usdAmount(upstream) && currencyIsUsd(raw.cost_details?.currency) ? { upstreamInferenceCost: upstream } : {}) };
+  } else if (evidence.route === "openai") {
+    const cost = estimateOpenAIImageUsage(raw, cached, written, evidence);
+    if (cost) usage.cost = cost;
   }
-  else if (raw.cost && typeof raw.cost === "object") usage.cost = raw.cost;
   return usage;
 }
 
-async function nativeImage(runtime: ImageRuntime, signal: AbortSignal | undefined, request: (active: AbortSignal) => Promise<any>, recovery: { cwd: string; brief: GenerationBrief; params: any; backend: BackendStatus; extra?: Record<string, unknown> }) {
+async function nativeImage(runtime: ImageRuntime, signal: AbortSignal | undefined, request: (active: AbortSignal) => Promise<NativeImageReply>, recovery: { cwd: string; brief: GenerationBrief; params: any; backend: BackendStatus; extra?: Record<string, unknown> }) {
   const active = signal ? AbortSignal.any([signal, AbortSignal.timeout(240000)]) : AbortSignal.timeout(240000);
   active.throwIfAborted();
-  let payload: any, completed = false, checkpoint: DownloadCheckpoint | undefined;
+  let usage: ReturnType<typeof imageUsage>, completed = false, checkpoint: DownloadCheckpoint | undefined;
   runtime.onUsage?.(undefined, "pending");
   try {
-    payload = await request(active);
+    const { payload, route } = await request(active);
     const datum = payload?.data?.[0], url = !datum?.b64_json && !datum?.b64Json && typeof datum?.url === 'string' ? datum.url : undefined;
-    const usage = imageUsage(payload.usage);
+    const configuredModel = recovery.backend.model;
+    const model = typeof payload?.model !== "string" || payload.model === configuredModel ? configuredModel : undefined;
+    usage = imageUsage(payload?.usage, { route, model, additionalUsage: payload?.svg_usage != null || payload?.output_format === "svg" });
     if (url) {
       // The generation POST has finished; a later GET/cancellation must not
       // discard an expiring paid URL or misreport generation as cancelled.
@@ -316,9 +378,9 @@ async function nativeImage(runtime: ImageRuntime, signal: AbortSignal | undefine
     // Complete bytes are a paid result. Storage owns recovery if cancellation
     // arrives now; discarding this response would encourage another charge.
     if (!completed) { completed = true; try { runtime.onUsage?.(usage, 'completed'); } catch { /* preserve received pixels */ } }
-    return { bytes, usage: usage ?? null, rawUsage: payload.usage ?? null, checkpoint };
+    return { bytes, usage: usage ?? null, checkpoint };
   } catch (error) {
-    if (!completed) runtime.onUsage?.(imageUsage(payload?.usage), active.aborted ? active.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : "failed");
+    if (!completed) runtime.onUsage?.(usage, active.aborted ? active.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : "failed");
     if (checkpoint) throw retainedDownloadError(error, checkpoint, recovery.cwd);
     throw error;
   }
@@ -579,10 +641,9 @@ export async function imageEditRun(
   if (maskFile && maskBytes) form.set("mask", new Blob([maskBytes], { type: "image/png" }), path.basename(maskFile));
   const key = env.PI_IMAGE_API_KEY ?? env.OPENAI_API_KEY ?? "";
   const { bytes, usage, checkpoint } = await nativeImage(runtime, signal, async active => {
-    const response = await fetch(`${backend.apiUrl}/images/edits`, { method: "POST", headers: { authorization: `Bearer ${key}` }, body: form, signal: active });
-    const text = await responseText(response, active);
-    if (!response.ok) throw new Error(`Image backend refused (${response.status}): ${redactSecrets(text).slice(0, 400)}`);
-    try { return JSON.parse(text); } catch { throw new Error("Image backend returned a non-JSON payload"); }
+    const url = `${backend.apiUrl}/images/edits`;
+    const response = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${key}` }, body: form, signal: active });
+    return nativeImageReply(response, url, active);
   }, { cwd, brief, params, backend, extra });
   return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { ...extra, usage }, checkpoint);
 }

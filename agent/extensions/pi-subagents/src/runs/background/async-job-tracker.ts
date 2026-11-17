@@ -426,6 +426,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 					pid: job.pid,
 					sessionId: job.sessionId,
 					completionOwnerId: job.completionOwnerId,
+					resultDelivery: job.resultDelivery,
 					mode: job.mode,
 					agents: job.agents,
 					chainStepCount: job.chainStepCount,
@@ -451,6 +452,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 				else runningJobIds.delete(job.asyncId);
 				if (job.status !== "complete" && job.status !== "failed" && job.status !== "paused" && job.status !== "stopped") cancelCleanup(job.asyncId);
 				job.sessionId = status.sessionId ?? job.sessionId;
+				job.resultDelivery = status.resultDelivery ?? job.resultDelivery;
 				job.activityState = status.activityState;
 				job.lastActivityAt = status.lastActivityAt ?? job.lastActivityAt;
 				job.currentTool = status.currentTool;
@@ -686,6 +688,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 			pid: typeof info.pid === "number" ? info.pid : undefined,
 			...(typeof info.sessionId === "string" ? { sessionId: info.sessionId } : {}),
 			...(typeof info.completionOwnerId === "string" ? { completionOwnerId: info.completionOwnerId } : {}),
+			...(info.resultDelivery === "workflow" ? { resultDelivery: "workflow" } : {}),
 			mode: info.mode ?? (info.chain ? "chain" : "single"),
 			description: info.goal ?? info.task,
 			agents,

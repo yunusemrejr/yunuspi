@@ -54,6 +54,32 @@ export function resultFilePath(resultsDir: string, runId: string): string {
 	return path.join(resultsDir, resultFileName(runId));
 }
 
+/** This receipt belongs to the waiting workflow and stays with its run artifacts. */
+export function workflowAwaitedAsyncResultPath(asyncDir: string): string {
+	return path.join(asyncDir, "workflow-result.json");
+}
+
+export function readWorkflowAwaitedAsyncResult(asyncDir: string, runId: string, sessionId: string): { path: string; data: Record<string, unknown> } | undefined {
+	for (const file of [workflowAwaitedAsyncResultPath(asyncDir), ...resultPendingPaths(asyncDir, sessionId, runId)]) {
+		try {
+			const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+			let data: Record<string, unknown> | null;
+			try {
+				if (!fs.fstatSync(fd).isFile()) continue;
+				data = JSON.parse(fs.readFileSync(fd, "utf8"));
+			} finally { fs.closeSync(fd); }
+			if (!data || typeof data !== "object" || Array.isArray(data) || data.sessionId !== sessionId) continue;
+			if ((data.runId ?? data.id) !== runId || (data.id !== undefined && data.id !== runId)) continue;
+			if (typeof data.success !== "boolean" && (typeof data.state !== "string" || !["complete", "failed", "partial", "paused", "stopped", "rejected"].includes(data.state))) continue;
+			return { path: file, data };
+		} catch (error) {
+			const code = (error as NodeJS.ErrnoException).code;
+			if (code !== "ENOENT" && code !== "ENOTDIR" && code !== "ELOOP" && !isUnaddressableResultCandidate(error) && !(error instanceof SyntaxError)) throw error;
+		}
+	}
+	return undefined;
+}
+
 function sessionIndexDir(resultsDir: string, sessionId: string): string {
 	return path.join(resultsDir, RESULT_INDEX_DIR, SESSION_INDEX_DIR, encodeSegment(sessionId));
 }
@@ -189,7 +215,10 @@ export function writeAsyncResultFileIfAbsent(resultPath: string, data: Record<st
 	const sessionId = nonEmptyString(data.sessionId);
 	if (!sessionId) throw new Error(`Cannot write async result '${resultPath}' without a sessionId.`);
 	const resultsDir = path.dirname(resultPath);
-	if (resultPayloadPathForSessionRun(resultsDir, sessionId, runId) || existingResultFile(resultPath)) return false;
+	const existing = resultPath === workflowAwaitedAsyncResultPath(resultsDir)
+		? readWorkflowAwaitedAsyncResult(resultsDir, runId, sessionId)
+		: resultPayloadPathForSessionRun(resultsDir, sessionId, runId);
+	if (existing || existingResultFile(resultPath)) return false;
 	fs.mkdirSync(resultsDir, { recursive: true });
 	const staged = path.join(resultsDir, `.repair-${randomUUID()}.tmp`);
 	try {

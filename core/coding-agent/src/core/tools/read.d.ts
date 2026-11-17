@@ -15,6 +15,8 @@ export declare const readToolSystemPromptContribution: {
 export type ReadToolInput = Static<typeof readSchema>;
 export interface ReadToolDetails {
     truncation?: TruncationResult;
+    fullOutputPath?: string;
+    captureError?: string;
     documentRead?: DocumentReadEvidence;
 }
 /**

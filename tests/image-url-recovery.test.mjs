@@ -13,7 +13,7 @@ const { imageGenerateRun, imageEditRun, imageRecoverRun }=await import(pathToFil
 const { encodeImage }=await import(pathToFileURL(path.join(agent,'extensions/lib/design-studio.ts')));
 const env={PI_IMAGE_BACKEND:'openai-compatible',PI_IMAGE_API_URL:'https://fixture.invalid/v1',PI_IMAGE_API_KEY:'TEST_url_recovery_only',PI_IMAGE_MODEL:'fixture/image'};
 
-test('paid URL-only image results survive cancellation and failed downloads and recover through GET only', {timeout:30_000}, async t=>{
+test('URL-only image results survive cancellation and failed downloads and recover through GET only', {timeout:30_000}, async t=>{
   const cwd=await fs.mkdtemp(path.join(os.tmpdir(),'image-url-recovery-'));
   const bytes=await encodeImage({width:8,height:8,data:new Uint8Array(8*8*4).fill(255)},'png');
   let downloads=0, status=200;
@@ -32,7 +32,8 @@ test('paid URL-only image results survive cancellation and failed downloads and 
     assert.deepEqual(statuses,['pending','completed']);
     assert.equal((await fs.stat(receipt)).mode&0o777,0o600);
     const saved=JSON.parse(await fs.readFile(receipt,'utf8'));
-    assert.equal(saved.url,url);assert.equal(saved.decodeVerified,false);assert.equal(saved.usage.cost.total,.01);
+    assert.equal(saved.url,url);assert.equal(saved.decodeVerified,false);
+    assert.equal(saved.usage.input,10);assert.equal(saved.usage.output,4);assert.equal(saved.usage.cost,undefined);
     assert.doesNotMatch(JSON.stringify(saved),/TEST_url_recovery_only/);
     const marker=path.join(path.dirname(receipt),'caller-note.txt');await fs.writeFile(marker,'keep');
     const before=generations, recovered=await imageRecoverRun({path:receipt},cwd);

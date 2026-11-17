@@ -1,3 +1,10 @@
+## 0.56.20 — Safer file reads and durable workflow costs
+
+- Native and sandboxed reads and CLI attachments reject named pipes and other special files without blocking filesystem workers. A truncated read still returns its preview and continuation when temporary storage is unavailable.
+- Awaited workflow children keep results and usage in their private receipt. Recovery and Stop preserve verified usage and respect the workflow’s cancellation outcome.
+- The session footer estimates supported direct GPT Image 2.5 and 2.6 raster charges from reported token categories. It preserves verified OpenRouter USD charges and marks unsupported gateway or currency evidence as unknown.
+- Startup retention serializes with reminder writes. Workspace attribution detects newly created nested checkouts and reuses Git checkout discovery across sibling directories.
+
 ## 0.56.19 — Google tool billing and duplicate dispatch prevention
 
 - Gemini Developer API and Vertex include separately reported URL Context input tokens in session accounting. Google Search attempts retain usage evidence, and the total stays partial when the project’s charge is unknown.

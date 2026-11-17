@@ -41,10 +41,14 @@ test('GPT Image requests keep exact models and reject unsupported or contradicto
   assert.throws(() => image.imageBackendEnvironment(env, false, ''), /nonempty exact/);
   assert.deepEqual(image.routerImageOptions({ size: '1024x1024', response_format: 'b64_json' }, { aspectRatio: '16:9', resolution: '2K' }, true), { aspect_ratio: '16:9', resolution: '2K' });
   assert.throws(() => image.routerImageOptions({}, { aspectRatio: '16:9', size: '1024x1024' }, true), /conflicting/);
-  const billed = image.imageUsage({ prompt_tokens: 100, completion_tokens: 50, total_tokens: 150, prompt_tokens_details: { cached_tokens: 20 }, cost: .05296 });
+  const billed = image.imageUsage({ prompt_tokens: 100, completion_tokens: 50, total_tokens: 150, prompt_tokens_details: { cached_tokens: 20 }, cost: .05296 }, { route: 'openrouter' });
   assert.equal(billed.input, 80); assert.equal(billed.cacheRead, 20); assert.equal(billed.cacheReadReported, true);
   assert.equal(billed.cost.total, .05296); assert.equal(billed.cost.source, 'provider-reported');
   assert.equal(image.imageUsage({ input_tokens: 12, output_tokens: 8 }).cost, undefined);
+  const compatible = image.imageUsage({ input: 80, cacheRead: 20, output: 50, cost: { total: .5, source: 'provider-reported' } });
+  assert.equal(compatible.input, 80, 'a compatible uncached input bucket already excludes cache reads');
+  assert.equal(compatible.cacheRead, 20);
+  assert.equal(compatible.cost, undefined);
 });
 
 test('native Images API discovery, references and failure accounting work without paid retries', async t => {

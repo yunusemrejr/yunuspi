@@ -1,7 +1,7 @@
 import { addUsageCost } from "../../shared/cost-accounting.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { resultFilePath, resultPayloadPathForSessionRun } from "./result-files.ts";
+import { readWorkflowAwaitedAsyncResult, resultFilePath, resultPayloadPathForSessionRun, workflowAwaitedAsyncResultPath } from "./result-files.ts";
 import type { AcceptanceLedger, ArtifactPaths, AsyncStatus, CostSummary, EffectsProjection, ExecutionProjection, ModelAttempt, Usage } from "../../shared/types.ts";
 import { readStatus } from "../../shared/utils.ts";
 
@@ -49,6 +49,7 @@ interface AsyncResultFile {
 	error?: string;
 	timedOut?: boolean;
 	stopped?: boolean;
+	timestamp?: number;
 	results?: Array<{
 		agent?: string;
 		sessionName?: string;
@@ -110,6 +111,11 @@ function readResultFile(resultPath: string): AsyncResultFile | undefined {
 }
 
 function readImportedResultFile(root: ImportedAsyncRoot, status: AsyncStatus | null): AsyncResultFile | undefined {
+	if (root.resultPath === workflowAwaitedAsyncResultPath(root.asyncDir)) {
+		return status?.runId === root.runId && status.sessionId
+			? readWorkflowAwaitedAsyncResult(root.asyncDir, root.runId, status.sessionId)?.data
+			: undefined;
+	}
 	const direct = readResultFile(root.resultPath);
 	if (direct || !status?.sessionId) return direct;
 	const indexedPath = resultPayloadPathForSessionRun(path.dirname(root.resultPath), status.sessionId, root.runId);
@@ -174,9 +180,12 @@ function outputFromTerminalStatus(root: ImportedAsyncRoot, status: AsyncStatus, 
 	};
 }
 
-function outputFromTimeout(root: ImportedAsyncRoot, status: AsyncStatus | null, message: string): ImportedAsyncRootResult {
+function outputFromTimeout(root: ImportedAsyncRoot, status: AsyncStatus | null, message: string, settled?: ImportedAsyncRootResult): ImportedAsyncRootResult {
 	const step = selectedStatusStep(status, root.index);
-	const usage = usageFromAttempts(step?.modelAttempts);
+	const usage = settled?.usage ?? usageFromAttempts(step?.modelAttempts);
+	const model = settled?.model ?? step?.model;
+	const attempts = settled?.modelAttempts ?? step?.modelAttempts;
+	const totalCost = settled?.totalCost ?? step?.totalCost;
 	return {
 		agent: step?.agent ?? status?.steps?.[root.index]?.agent ?? "subagent",
 		output: message,
@@ -186,11 +195,11 @@ function outputFromTimeout(root: ImportedAsyncRoot, status: AsyncStatus | null, 
 		timedOut: true,
 		...(step?.sessionName ? { sessionName: step.sessionName } : {}),
 		...(step?.sessionFile ?? status?.sessionFile ? { sessionFile: step?.sessionFile ?? status?.sessionFile } : {}),
-		...(step?.model ? { model: step.model } : {}),
+		...(model ? { model } : {}),
 		...(step?.attemptedModels ? { attemptedModels: step.attemptedModels } : {}),
-		...(step?.modelAttempts ? { modelAttempts: step.modelAttempts } : {}),
+		...(attempts ? { modelAttempts: attempts } : {}),
 		...(step?.contextOverflow ? { contextOverflow: true } : {}),
-		...(step?.totalCost ? { totalCost: step.totalCost } : {}),
+		...(totalCost ? { totalCost } : {}),
 		...(usage ? { usage } : {}),
 		...(step?.transcriptPath ? { transcriptPath: step.transcriptPath } : {}),
 	};
@@ -202,8 +211,9 @@ function buildImportedResult(root: ImportedAsyncRoot, status: AsyncStatus | null
 	const state = resultState(result, child);
 	const agent = child?.agent ?? step?.agent ?? status?.steps?.[root.index]?.agent ?? "subagent";
 	const output = child?.output ?? result.summary ?? "";
-	const timedOut = child?.timedOut === true || step?.timedOut === true || result.timedOut === true || status?.timedOut === true;
-	const stopped = child?.stopped === true || step?.stopped === true || result.stopped === true || status?.stopped === true || state === "stopped";
+	const useStatusOutcome = state === undefined || root.resultPath !== workflowAwaitedAsyncResultPath(root.asyncDir);
+	const timedOut = child?.timedOut === true || result.timedOut === true || (useStatusOutcome && (step?.timedOut === true || status?.timedOut === true));
+	const stopped = child?.stopped === true || result.stopped === true || state === "stopped" || (useStatusOutcome && (step?.stopped === true || status?.stopped === true));
 	const success = state === "complete" && !timedOut && !stopped;
 	const error = child?.error ?? (success ? undefined : stopped ? "Subagent stopped by user." : result.error ?? result.summary ?? status?.error ?? `Attached async root ${root.runId} did not complete successfully.`);
 	const execution = state ? { status: state === "complete" ? "completed" as const : state, success, exitCode: success ? 0 : 1, ...(error ? { error } : {}) } : undefined;
@@ -240,7 +250,7 @@ function buildImportedResult(root: ImportedAsyncRoot, status: AsyncStatus | null
 
 export async function waitForImportedAsyncRoot(
 	root: ImportedAsyncRoot,
-	options: { pollIntervalMs?: number; terminalResultGraceMs?: number; now?: () => number; shouldAbort?: () => boolean; timeoutMessage?: string } = {},
+	options: { pollIntervalMs?: number; terminalResultGraceMs?: number; now?: () => number; shouldAbort?: () => boolean; abortedAt?: () => number | undefined; timeoutMessage?: string } = {},
 ): Promise<ImportedAsyncRootResult> {
 	const pollIntervalMs = options.pollIntervalMs ?? 500;
 	const terminalResultGraceMs = options.terminalResultGraceMs ?? 1_000;
@@ -248,9 +258,12 @@ export async function waitForImportedAsyncRoot(
 	let terminalSince: number | undefined;
 	for (;;) {
 		const status = readStatus(root.asyncDir);
-		if (options.shouldAbort?.()) return outputFromTimeout(root, status, options.timeoutMessage ?? "Subagent timed out.");
 		const result = readImportedResultFile(root, status);
-		if (result) return buildImportedResult(root, status, result);
+		const aborted = options.shouldAbort?.() === true;
+		const abortedAt = aborted ? options.abortedAt?.() : undefined;
+		const settled = result ? buildImportedResult(root, status, result) : undefined;
+		if (settled && (!aborted || (abortedAt !== undefined && typeof result?.timestamp === "number" && result.timestamp <= abortedAt))) return settled;
+		if (aborted) return outputFromTimeout(root, status, options.timeoutMessage ?? "Subagent timed out.", settled);
 		if (isTerminalStatus(status, root.index)) {
 			terminalSince ??= now();
 			if (now() - terminalSince >= terminalResultGraceMs) {

@@ -1,13 +1,14 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { constants, createReadStream, createWriteStream } from "node:fs";
-import { access, appendFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, writeFile, } from "node:fs/promises";
+import { constants, createWriteStream } from "node:fs";
+import { access, appendFile, lstat, mkdir, mkdtemp, readdir, realpath, rename, rm, writeFile, } from "node:fs/promises";
 import { homedir, constants as osConstants, tmpdir } from "node:os";
 import { basename, isAbsolute, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { ExecutionError, err, FileError, ok, toError, } from "../types.js";
 import { OutputCapture } from "../utils/output-capture.js";
+import { withRegularReadFile } from "./regular-read-file.js";
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
 const EXIT_STDIO_GRACE_MS = 100;
@@ -568,10 +569,10 @@ export class NodeExecutionEnv {
         if (aborted)
             return aborted;
         try {
-            return ok(await readFile(resolved, { encoding: "utf8", signal }));
+            return ok(await withRegularReadFile(resolved, signal, file => file.readFile({ encoding: "utf8", signal })));
         }
         catch (error) {
-            return err(toFileError(error, resolved));
+            return abortResult(signal, resolved) ?? err(toFileError(error, resolved));
         }
     }
     async readTextLines(path, options, context) {
@@ -582,31 +583,29 @@ export class NodeExecutionEnv {
             return aborted;
         if (options?.maxLines !== undefined && options.maxLines <= 0)
             return ok([]);
-        let stream;
-        let lineReader;
         try {
-            stream = createReadStream(resolved, { encoding: "utf8", signal });
-            lineReader = createInterface({ input: stream, crlfDelay: Infinity });
-            const lines = [];
-            for await (const line of lineReader) {
-                const loopAbort = abortResult(signal, resolved);
-                if (loopAbort)
-                    return loopAbort;
-                lines.push(line);
-                if (options?.maxLines !== undefined && lines.length >= options.maxLines)
-                    break;
-            }
-            const afterReadAbort = abortResult(signal, resolved);
-            if (afterReadAbort)
-                return afterReadAbort;
+            const lines = await withRegularReadFile(resolved, signal, async file => {
+                const stream = file.createReadStream({ encoding: "utf8", signal, autoClose: false });
+                const reader = createInterface({ input: stream, crlfDelay: Infinity });
+                try {
+                    const output = [];
+                    for await (const line of reader) {
+                        signal?.throwIfAborted();
+                        output.push(line);
+                        if (options?.maxLines !== undefined && output.length >= options.maxLines)
+                            break;
+                    }
+                    return output;
+                }
+                finally {
+                    reader.close();
+                    stream.destroy();
+                }
+            });
             return ok(lines);
         }
         catch (error) {
-            return err(toFileError(error, resolved));
-        }
-        finally {
-            lineReader?.close();
-            stream?.destroy();
+            return abortResult(signal, resolved) ?? err(toFileError(error, resolved));
         }
     }
     async readBinaryFile(path, context) {
@@ -616,10 +615,10 @@ export class NodeExecutionEnv {
         if (aborted)
             return aborted;
         try {
-            return ok(await readFile(resolved, { signal }));
+            return ok(await withRegularReadFile(resolved, signal, file => file.readFile({ signal })));
         }
         catch (error) {
-            return err(toFileError(error, resolved));
+            return abortResult(signal, resolved) ?? err(toFileError(error, resolved));
         }
     }
     async writeFile(path, content, context) {

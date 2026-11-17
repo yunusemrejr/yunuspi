@@ -34,16 +34,21 @@ test('a named output folder is created inside the workspace and never outside it
 
 test('received image bytes survive cancellation after provider completion with usage and recovery', async t => {
   const cwd = await workspace(t), bytes = await picture(), original = globalThis.fetch;
+  const routed = { ...env, PI_IMAGE_BACKEND: 'openrouter', PI_IMAGE_API_URL: 'https://openrouter.ai/api/v1' };
   t.after(() => { globalThis.fetch = original; });
   let calls = 0;
-  globalThis.fetch = async () => { calls++; return Response.json({ data: [{ b64_json: bytes.toString('base64') }], usage: { input_tokens: 10, output_tokens: 4, cost: .01 } }); };
+  globalThis.fetch = async url => {
+    assert.equal(String(url), 'https://openrouter.ai/api/v1/images');
+    calls++;
+    return Response.json({ data: [{ b64_json: bytes.toString('base64') }], usage: { input_tokens: 10, output_tokens: 4, cost: .01 } });
+  };
   for (const mode of ['generate', 'edit']) {
     const controller = new AbortController(), statuses = [];
     const runtime = { onUsage: (_usage, status) => { statuses.push(status); if (status === 'completed') controller.abort(new Error('Fixture cancelled after response')); } };
     await fs.writeFile(path.join(cwd, 'reference.png'), bytes);
     const operation = mode === 'generate'
-      ? imageGenerateRun({ prompt: 'Authored fixture' }, cwd, controller.signal, undefined, env, runtime)
-      : imageEditRun({ path: 'reference.png', prompt: 'Authored fixture edit' }, cwd, controller.signal, undefined, env, runtime);
+      ? imageGenerateRun({ prompt: 'Authored fixture', transport: 'images' }, cwd, controller.signal, undefined, routed, runtime)
+      : imageEditRun({ path: 'reference.png', prompt: 'Authored fixture edit', transport: 'images' }, cwd, controller.signal, undefined, routed, runtime);
     await assert.rejects(operation, /Decoded image retained.*do not repeat generation/s);
     assert.deepEqual(statuses, ['pending', 'completed'], 'provider completed even though local completion was interrupted');
   }

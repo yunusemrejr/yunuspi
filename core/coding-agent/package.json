@@ -1,6 +1,6 @@
 {
   "name": "@yunuspi/coding-agent",
-  "version": "0.56.19",
+  "version": "0.56.20",
   "description": "Coding agent CLI with read, bash, edit, write tools and session management",
   "type": "module",
   "piConfig": {
@@ -22,6 +22,10 @@
     "./session-accounting": {
       "types": "./dist/core/session-accounting.d.ts",
       "import": "./dist/core/session-accounting.js"
+    },
+    "./session-write-lock": {
+      "types": "./dist/utils/session-write-lock.d.ts",
+      "import": "./dist/utils/session-write-lock.js"
     }
   },
   "files": [
@@ -35,10 +39,10 @@
     "build": "node ../../scripts/build-core.mjs"
   },
   "dependencies": {
-    "@yunuspi/chord": "0.56.19",
-    "@yunuspi/agent-core": "0.56.19",
-    "@yunuspi/ai": "0.56.19",
-    "@yunuspi/tui": "0.56.19",
+    "@yunuspi/chord": "0.56.20",
+    "@yunuspi/agent-core": "0.56.20",
+    "@yunuspi/ai": "0.56.20",
+    "@yunuspi/tui": "0.56.20",
     "@silvia-odwyer/photon-node": "0.3.4",
     "chalk": "5.6.2",
     "cross-spawn": "7.0.6",

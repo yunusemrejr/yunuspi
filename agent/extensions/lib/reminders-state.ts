@@ -24,8 +24,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
+import { withSessionWriteLock } from "@yunuspi/coding-agent/session-write-lock";
 
 export const REMINDERS_STATE_DIR = path.join(os.homedir(), ".pi", "reminders");
+const STATE_TTL_MS = 30 * 24 * 3600_000;
 
 /** Fixed manual-reminder cadence. First fire at createdAt + this, then every
  * this on the same anchored grid (whole-interval advancement only). */
@@ -181,9 +183,11 @@ export function writeRemindersState(
 	let tmp: string | undefined;
 	try {
 		fs.mkdirSync(REMINDERS_STATE_DIR, { recursive: true, mode: 0o700 });
-		tmp = `${remindersStateFile(sidOrEmpty)}.${process.pid}.${randomUUID()}.tmp`;
+		const file = remindersStateFile(sidOrEmpty);
+		tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
 		fs.writeFileSync(tmp, JSON.stringify(st), { flag: "wx", mode: 0o600 });
-		fs.renameSync(tmp, remindersStateFile(sidOrEmpty));
+		const staged = tmp;
+		withSessionWriteLock(file, () => fs.renameSync(staged, file));
 		tmp = undefined;
 		return true;
 	} catch (error) {
@@ -198,6 +202,33 @@ export function writeRemindersState(
 		if (tmp) {
 			try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
 		}
+	}
+}
+
+/** Prune old, cleared state while excluding concurrent reminder publishers. */
+export function pruneStaleReminders(currentSid: string): void {
+	let files: fs.Dirent[];
+	try { files = fs.readdirSync(REMINDERS_STATE_DIR, { withFileTypes: true }); }
+	catch { return; }
+	const cutoff = Date.now() - STATE_TTL_MS;
+	const currentFile = remindersStateFile(currentSid);
+	const eligible = (file: string) => {
+		const stat = fs.lstatSync(file);
+		return stat.isFile() && stat.mtimeMs < cutoff;
+	};
+	for (const entry of files) {
+		if (!entry.isFile() || !/^state-[A-Za-z0-9_-]+\.json$/.test(entry.name)) continue;
+		const file = path.join(REMINDERS_STATE_DIR, entry.name);
+		if (file === currentFile) continue;
+		try {
+			if (!eligible(file)) continue;
+			withSessionWriteLock(file, () => {
+				// A writer may have replaced the old inode before we acquired the lock.
+				if (!eligible(file)) return;
+				const manual: unknown = JSON.parse(fs.readFileSync(file, "utf8"))?.manual;
+				if (Array.isArray(manual) && manual.every(reminder => reminder?.active === false)) fs.unlinkSync(file);
+			}, { wait: false });
+		} catch { /* Busy, unreadable, or removed by another startup. */ }
 	}
 }
 

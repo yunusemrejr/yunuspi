@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { updateGuardedStatus } from "../shared/status-revision.ts";
-import { resultFilePath, resultPayloadPathForSessionRun, writeAsyncResultFileIfAbsent } from "./result-files.ts";
+import { readWorkflowAwaitedAsyncResult, resultFilePath, resultPayloadPathForSessionRun, workflowAwaitedAsyncResultPath, writeAsyncResultFileIfAbsent } from "./result-files.ts";
 import { readCompletionReplay } from "./completion-replay.ts";
 import { updateActiveRunIndex } from "./active-run-index.ts";
 import { readStatus } from "../../shared/utils.ts";
@@ -21,6 +21,7 @@ interface StartedRunMetadata {
 	pid?: number;
 	sessionId?: string;
 	completionOwnerId?: string;
+	resultDelivery?: "workflow";
 	mode?: SubagentRunMode;
 	agents?: string[];
 	chainStepCount?: number;
@@ -204,6 +205,7 @@ function buildStartedStatus(asyncDir: string, startedRun: StartedRunMetadata, no
 		runId: startedRun.runId || path.basename(asyncDir),
 		...(startedRun.sessionId ? { sessionId: startedRun.sessionId } : {}),
 		...(startedRun.completionOwnerId ? { completionOwnerId: startedRun.completionOwnerId } : {}),
+		...(startedRun.resultDelivery === "workflow" ? { resultDelivery: "workflow" as const } : {}),
 		mode: startedRun.mode ?? "single",
 		state: "running",
 		pid: startedRun.pid,
@@ -284,11 +286,23 @@ function buildFailedRepair(status: AsyncStatus, asyncDir: string, now: number): 
 	};
 }
 
-function findResultPath(status: AsyncStatus, resultsDir: string, resultPath: string): string | undefined {
+function locateResult(status: AsyncStatus, asyncDir: string, resultsDir: string, resultPath: string, verifiedDead = false): {
+	directory: string;
+	target: string;
+	existing?: string;
+	workflow: boolean;
+	privateReceipt?: Record<string, unknown>;
+} {
+	const privateResult = status.sessionId && (status.resultDelivery === "workflow" || status.parentWorkflowRunId || (verifiedDead && status.mode === "single"))
+		? readWorkflowAwaitedAsyncResult(asyncDir, status.runId, status.sessionId)
+		: undefined;
+	if (privateResult || status.resultDelivery === "workflow") {
+		return { directory: asyncDir, target: workflowAwaitedAsyncResultPath(asyncDir), workflow: true, existing: privateResult?.path, privateReceipt: privateResult?.data };
+	}
 	const indexed = status.sessionId
 		? resultPayloadPathForSessionRun(resultsDir, status.sessionId, status.runId || path.basename(resultPath, ".json"))
 		: undefined;
-	return indexed ?? (regularFileExists(resultPath) ? resultPath : undefined);
+	return { directory: resultsDir, target: resultPath, workflow: false, existing: indexed ?? (regularFileExists(resultPath) ? resultPath : undefined) };
 }
 
 function repairFromObservedOutcome(input: {
@@ -309,18 +323,20 @@ function repairFromObservedOutcome(input: {
 		outcome.status = current.displayDismissedAt === undefined ? current : null;
 		if (current.runId !== observed.runId || current.sessionId !== observed.sessionId || !outcome.status) return undefined;
 
+		let location = locateResult(current, asyncDir, resultsDir, resultPath, verifiedDead);
 		const recoverExisting = () => {
-			const existing = findResultPath(current, resultsDir, resultPath);
-			if (existing) outcome.resultPath = existing;
+			outcome.resultPath = location.existing ?? (location.workflow ? undefined : location.target);
 			if (current.state !== "running" && current.state !== "queued") return undefined;
-			const receipt = existing ? readResultRepairData(existing) : undefined;
+			const receipt = location.privateReceipt && location.existing ? parseResultRepairData(location.privateReceipt, location.existing)
+				: location.existing ? readResultRepairData(location.existing) : undefined;
 			const replay = !receipt && current.sessionId
-				? readCompletionReplay(resultsDir, current.runId, { sessionId: current.sessionId, now })
+				? readCompletionReplay(location.directory, current.runId, { sessionId: current.sessionId, now })
 				: undefined;
 			if (!receipt && !replay) return undefined;
 			outcome.message = receipt ? "Existing async result file was used to repair stale running status."
 				: "Delivered async completion replay was used to repair stale running status.";
-			return terminalStatusFromResult(current, receipt ?? parseResultRepairData(replay!.completion, replay!.archivePath), now);
+			const status = terminalStatusFromResult(current, receipt ?? parseResultRepairData(replay!.completion, replay!.archivePath), now);
+			return location.workflow ? { ...status, resultDelivery: "workflow" as const } : status;
 		};
 
 		const existing = recoverExisting();
@@ -332,13 +348,18 @@ function repairFromObservedOutcome(input: {
 		// The pending/public receipt and replay were re-observed after death and
 		// under the status lock. Publish only as a fallback. If publication wins
 		// but the status write is interrupted, the next pass recovers from it.
-		if (current.sessionId && !writeAsyncResultFileIfAbsent(resultPath, repair.result)) {
+		let published = false;
+		if (current.sessionId) published = writeAsyncResultFileIfAbsent(location.target, repair.result);
+		if (current.sessionId && !published) {
+			location = locateResult(current, asyncDir, resultsDir, resultPath, verifiedDead);
 			const winner = recoverExisting();
 			if (winner) return outcome.status = winner;
-			return undefined;
+			// A conflicting run-local file cannot be adopted, removed or replaced.
+			// The private waiter can still settle from the verified-dead status.
+			if (!location.workflow) return undefined;
 		}
 		synthetic = true;
-		outcome = { status: repair.status, repaired: false, ...(current.sessionId ? { resultPath } : {}), message: repair.message };
+		outcome = { status: repair.status, repaired: false, ...(published ? { resultPath: location.target } : {}), message: repair.message };
 		return repair.status;
 	}, { initial });
 	if (!guarded.written || !outcome.status) return outcome;
@@ -444,25 +465,26 @@ export function reconcileAsyncRun(asyncDir: string, options: ReconcileAsyncRunOp
 	const resultsDir = options.resultsDir ?? DIRS.results;
 	const resultPath = resultFilePath(resultsDir, runId);
 	if (effectiveStatus.displayDismissedAt !== undefined) {
-		return { status: null, repaired: false, resultPath };
+		return { status: null, repaired: false, ...(effectiveStatus.resultDelivery !== "workflow" ? { resultPath } : {}) };
 	}
-	const existingResultPath = findResultPath(effectiveStatus, resultsDir, resultPath);
+	const location = locateResult(effectiveStatus, asyncDir, resultsDir, resultPath);
+	const missingResultPath = location.workflow ? undefined : location.target;
 	const recovery = { asyncDir, observed: effectiveStatus, initial: startedStatus, resultsDir, resultPath, now };
-	if (existingResultPath) {
+	if (location.existing) {
 		if (effectiveStatus.state === "running" || effectiveStatus.state === "queued") {
 			return repairFromObservedOutcome({ ...recovery, verifiedDead: false });
 		}
-		return { status: effectiveStatus, repaired: false, resultPath: existingResultPath };
+		return { status: effectiveStatus, repaired: false, resultPath: location.existing };
 	}
 
 	if (effectiveStatus.state !== "running" || typeof effectiveStatus.pid !== "number") {
-		return { status: status ?? null, repaired: false, resultPath };
+		return { status: status ?? null, repaired: false, resultPath: missingResultPath };
 	}
 
 	if (!status) {
 		const startedAt = options.startedRun?.startedAt ?? effectiveStatus.startedAt;
 		if (now - startedAt < (options.missingStatusGraceMs ?? 1000)) {
-			return { status: null, repaired: false, resultPath };
+			return { status: null, repaired: false, resultPath: missingResultPath };
 		}
 	}
 
@@ -470,9 +492,9 @@ export function reconcileAsyncRun(asyncDir: string, options: ReconcileAsyncRunOp
 	if (liveness !== "dead") {
 		const staleAfterMs = options.staleAlivePidMs ?? 24 * 60 * 60 * 1000;
 		const lastUpdate = effectiveStatus.lastUpdate ?? effectiveStatus.startedAt;
-		if (now - lastUpdate <= staleAfterMs) return { status: status ?? null, repaired: false, resultPath };
+		if (now - lastUpdate <= staleAfterMs) return { status: status ?? null, repaired: false, resultPath: missingResultPath };
 		const message = `Async runner process ${effectiveStatus.pid} has no confirmed exit and its status has not updated for ${now - lastUpdate}ms.`;
-		return { status: status ?? null, repaired: false, resultPath, message };
+		return { status: status ?? null, repaired: false, resultPath: missingResultPath, message };
 	}
 
 	return repairFromObservedOutcome({ ...recovery, verifiedDead: true });

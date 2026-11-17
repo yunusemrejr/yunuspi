@@ -1,9 +1,9 @@
 import { withFileMutationQueue } from "./file-mutation-queue.js";
-import { constants } from "fs";
-import { access as fsAccess, readFile as fsReadFile } from "fs/promises";
+import { withRegularReadFile } from "@yunuspi/agent-core/node";
+import { access } from "node:fs/promises";
 import { Type } from "typebox";
 import { processImage } from "../../utils/image-process.js";
-import { detectSupportedImageMimeTypeFromFile } from "../../utils/mime.js";
+import { detectSupportedImageMimeType, IMAGE_TYPE_SNIFF_BYTES } from "../../utils/mime.js";
 import { getExperimentalToolSampling } from "../experimental.js";
 import { resolveReadPathAsync, resolveToCwd } from "./path-utils.js";
 import { annotatePathError } from "./path-hints.js";
@@ -21,11 +21,6 @@ export const readToolSystemPromptContribution = {
     snippet: "Read file contents",
     guidelines: ["Use read to examine files instead of cat or sed."],
 };
-const defaultReadOperations = {
-    readFile: (path) => fsReadFile(path),
-    access: (path) => fsAccess(path, constants.R_OK),
-    detectImageMimeType: detectSupportedImageMimeTypeFromFile,
-};
 function getNonVisionImageNote(model, path) {
     if (!model || model.input.includes("image")) {
         return undefined;
@@ -34,7 +29,7 @@ function getNonVisionImageNote(model, path) {
 }
 export function createReadToolDefinition(cwd, options) {
     const autoResizeImages = options?.autoResizeImages ?? true;
-    const ops = options?.operations ?? defaultReadOperations;
+    const ops = options?.operations;
     return {
         name: "read",
         label: "read",
@@ -60,17 +55,27 @@ export function createReadToolDefinition(cwd, options) {
                         const absolutePath = await resolveReadPathAsync(path, ctx?.cwd || cwd);await withFileMutationQueue(absolutePath, async () => { /* PI_NATIVE_READ_MUTATION_QUEUE */
                         if (aborted)
                             return;
-                        // Check if file exists and is readable.
-                        await ops.access(absolutePath);
+                        let buffer;
+                        let mimeType;
+                        if (ops) {
+                            await ops.access(absolutePath);
+                            if (aborted)
+                                return;
+                            mimeType = await ops.detectImageMimeType?.(absolutePath);
+                            if (aborted)
+                                return;
+                            buffer = await ops.readFile(absolutePath);
+                        }
+                        else {
+                            buffer = await withRegularReadFile(absolutePath, signal, file => file.readFile({ signal }));
+                            mimeType = detectSupportedImageMimeType(buffer.subarray(0, IMAGE_TYPE_SNIFF_BYTES));
+                        }
                         if (aborted)
                             return;
-                        const mimeType = ops.detectImageMimeType ? await ops.detectImageMimeType(absolutePath) : undefined;
                         let content;
                         let details;
                         const nonVisionImageNote = getNonVisionImageNote(ctx?.model, absolutePath);
                         if (mimeType) {
-                            // Read image as binary.
-                            const buffer = await ops.readFile(absolutePath);
                             const processed = await processImage(buffer, mimeType, { autoResizeImages });
                             if (!processed.ok) {
                                 let textNote = `Read image file [${mimeType}]\n${processed.message}`;
@@ -91,8 +96,6 @@ export function createReadToolDefinition(cwd, options) {
                             }
                         }
                         else {
-                            // Read text content.
-                            const buffer = await ops.readFile(absolutePath);
                             const textContent = buffer.toString("utf-8");
                             const allLines = textContent.split("\n");
                             const totalFileLines = allLines.length;
@@ -135,9 +138,17 @@ export function createReadToolDefinition(cwd, options) {
                                     outputText += `\n\n[Showing lines ${startLineDisplay}-${endLineDisplay} of ${totalFileLines} (${formatSize(DEFAULT_MAX_BYTES)} limit). Use offset=${nextOffset} to continue.]`;
                                 }
                                 // Full raw output stays retrievable instead of vanishing at the byte cap.
-                                const fullOutputPath = spillToolOutput("pi-read", selectedContent);
-                                details = { truncation, fullOutputPath };
-                                outputText += `\n\n[Full untruncated output: ${fullOutputPath}]`;
+                                try {
+                                    const fullOutputPath = spillToolOutput("pi-read", selectedContent);
+                                    details = { truncation, fullOutputPath };
+                                    outputText += `\n\n[Full untruncated output: ${fullOutputPath}]`;
+                                }
+                                catch (error) {
+                                    const reason = typeof error?.code === "string" ? ` (${error.code})` : "";
+                                    const captureError = `Could not save full read output${reason}.`;
+                                    details = { truncation, captureError };
+                                    outputText += `\n\n[${captureError}]`;
+                                }
                             }
                             else if (userLimitedLines !== undefined && startLine + userLimitedLines < allLines.length) {
                                 // User-specified limit stopped early, but the file still has more content.
@@ -159,12 +170,20 @@ export function createReadToolDefinition(cwd, options) {
                         resolve({ content, details });}); /* PI_NATIVE_READ_QUEUE_END */
                     }
                     catch (error) {
+                        let failure = error;
+                        // Preserve the missing-path diagnostic while keeping successful reads on the verified descriptor.
+                        if (!aborted && !ops && error?.syscall === "open" && (error.code === "ENOENT" || error.code === "ENOTDIR")) {
+                            try { await access(error.path); }
+                            catch (accessError) {
+                                if (accessError?.code === error.code) failure = accessError;
+                            }
+                        }
                         signal?.removeEventListener("abort", onAbort);
                         if (!aborted) {
                             // Local filesystem only: custom operations (remote hosts) have no local listing to hint from.
-                            if (!options?.operations && typeof path === "string")
-                                annotatePathError(error, path, resolveToCwd(path, ctx?.cwd || cwd), ctx?.cwd || cwd);
-                            reject(error);
+                            if (!ops && typeof path === "string")
+                                annotatePathError(failure, path, resolveToCwd(path, ctx?.cwd || cwd), ctx?.cwd || cwd);
+                            reject(failure);
                         }
                     }
                 })();

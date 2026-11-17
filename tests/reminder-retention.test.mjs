@@ -10,16 +10,19 @@ const release = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(release, 'agent'), path.resolve(release, '..'), path.resolve(release, '../..')]
  .find(dir => fs.existsSync(path.join(dir, 'extensions/reminders.ts')));
 const temporaryHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-reminder-retention-'));
-const previousHome = process.env.HOME;
-process.env.HOME = temporaryHome;
+const previousHome = os.homedir;
+os.homedir = () => temporaryHome;
+syncBuiltinESMExports();
 const {default: reminders} = await import(pathToFileURL(path.join(agent, 'extensions/reminders.ts')));
 const {defaultRemindersState, remindersStateFile, writeRemindersState, readRemindersRestore} = await import(pathToFileURL(path.join(agent, 'extensions/lib/reminders-state.ts')));
 
-test('state cleanup preserves active manual reminders across long idle periods', async t => {
- t.after(() => {
-  if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
-  fs.rmSync(temporaryHome, {recursive: true, force: true});
- });
+test.after(() => {
+ os.homedir = previousHome;
+ syncBuiltinESMExports();
+ fs.rmSync(temporaryHome, {recursive: true, force: true});
+});
+
+test('state cleanup preserves active manual reminders across long idle periods', async () => {
  const old = Date.now() - 31 * 24 * 60 * 60 * 1000;
  const age = file => fs.utimesSync(file, new Date(old), new Date(old));
  const makeState = (sid, manual = []) => {
@@ -70,15 +73,48 @@ test('state cleanup preserves active manual reminders across long idle periods',
 test('reentrant reminder writers never rename another writer\'s temporary bytes',()=>{
  const sid='concurrent-writers',first=defaultRemindersState(),second=defaultRemindersState();
  first.promptCount=1;second.promptCount=2;
- const originalRename=fs.renameSync;let nested=false,nestedResult;
- fs.renameSync=(from,to)=>{
-  if(!nested){nested=true;nestedResult=writeRemindersState(sid,second);}
-  return originalRename(from,to);
+ const originalWrite=fs.writeFileSync;let nested=false,nestedResult;
+ fs.writeFileSync=(file,...args)=>{
+  if(!nested && String(file).endsWith('.tmp')){nested=true;nestedResult=writeRemindersState(sid,second);}
+  return originalWrite(file,...args);
  };
  syncBuiltinESMExports();
  try{
   const firstResult=writeRemindersState(sid,first);
   assert.equal(nestedResult,true);assert.equal(firstResult,true);
   assert.equal(JSON.parse(fs.readFileSync(remindersStateFile(sid),'utf8')).promptCount,1,'the last renaming writer persists its own bytes');
- }finally{fs.renameSync=originalRename;syncBuiltinESMExports();}
+ }finally{fs.writeFileSync=originalWrite;syncBuiltinESMExports();}
+});
+
+test('startup pruning and reminder publication serialize across the read-to-unlink boundary', async () => {
+ const sid = 'prune-publish-race';
+ const file = remindersStateFile(sid);
+ assert.equal(writeRemindersState(sid, defaultRemindersState()), true);
+ const aged = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000);
+ fs.utimesSync(file, aged, aged);
+ const next = defaultRemindersState();
+ next.manual = [{id: 'kept', text: 'A freshly registered reminder', active: true,
+  createdAt: Date.now(), nextFireAt: Date.now(), delivered: 0}];
+ const hooks = [];
+ reminders({on(name, handler) { if (name === 'session_start') hooks.push(handler); },
+  registerCommand() {}, getActiveTools: () => [], sendMessage() {}});
+
+ const originalRead = fs.readFileSync;
+ let publishDuringPrune;
+ fs.readFileSync = (candidate, ...args) => {
+  const bytes = originalRead(candidate, ...args);
+  if (candidate === file && publishDuringPrune === undefined) publishDuringPrune = writeRemindersState(sid, next);
+  return bytes;
+ };
+ syncBuiltinESMExports();
+ try {
+  for (const hook of hooks) await hook({reason: 'new'}, {cwd: temporaryHome,
+   sessionManager: {getSessionId: () => 'prune-caller', getBranch: () => []}, ui: {notify() {}}});
+ } finally {
+  fs.readFileSync = originalRead;
+  syncBuiltinESMExports();
+ }
+ assert.equal(publishDuringPrune, false, 'even a reentrant writer cannot replace the proved-empty inode');
+ assert.equal(writeRemindersState(sid, next), true, 'a later attempt can acquire the released lock');
+ assert.deepEqual(readRemindersRestore(sid).custom, ['A freshly registered reminder']);
 });

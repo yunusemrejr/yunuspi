@@ -15,6 +15,7 @@ import * as path from "node:path";
 const LEASE_DIR_NAME = "yunuspi-writer-leases";
 const LEASE_VERSION = 1;
 const MAX_PATHS = 128;
+const MAX_CHECKOUTS = 128;
 
 export interface WorkspaceGitState {
 	root: string;
@@ -72,13 +73,25 @@ function inside(root: string, candidate: string): boolean {
 	return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
-// This runs on tool-result paths, so it must not spawn git per call (the old
-// form ran up to six `git rev-parse` processes, ~40-120ms per tool step).
-// Repository identity (root/commonDir/gitDir) cannot move for a live cwd, so
-// it is resolved once per cwd; HEAD, branch and ref values are then read
-// straight from the .git files, which are always fresh. Any filesystem miss
-// falls back to the spawning form below.
-const repoIdentityCache = new Map<string, { root: string; commonDir: string; gitDir: string }>();
+type GitIdentity = { root: string; commonDir: string; gitDir: string };
+const repoIdentityCache = new Map<string, { marker: string; identity: GitIdentity }>();
+
+function nearestCheckout(cwd: string): { root: string; marker: string } | undefined {
+	try {
+		let dir = fs.realpathSync(cwd);
+		for (;;) {
+			const stat = fs.statSync(path.join(dir, ".git"), { bigint: true, throwIfNoEntry: false });
+			if (stat) {
+				// Gitfiles can be rewritten in place when a linked checkout moves.
+				const revision = stat.isDirectory() ? "" : stat.ctimeNs;
+				return { root: dir, marker: `${stat.dev}:${stat.ino}:${revision}` };
+			}
+			const parent = path.dirname(dir);
+			if (parent === dir) return undefined;
+			dir = parent;
+		}
+	} catch { return undefined; }
+}
 
 function readRefSha(commonDir: string, gitDir: string, ref: string): string | undefined {
 	for (const base of [gitDir, commonDir]) {
@@ -119,9 +132,7 @@ function readUpstreamRef(commonDir: string, branch: string): string | undefined 
 	return `${remote}/${merge.slice("refs/heads/".length)}`;
 }
 
-function readWorkspaceGitStateFromFiles(cwd: string): WorkspaceGitState | undefined {
-	const identity = repoIdentityCache.get(cwd);
-	if (!identity) return undefined;
+function readWorkspaceGitStateFromFiles(identity: GitIdentity): WorkspaceGitState | undefined {
 	const { root, commonDir, gitDir } = identity;
 	let headFile: string;
 	try {
@@ -143,39 +154,33 @@ function readWorkspaceGitStateFromFiles(cwd: string): WorkspaceGitState | undefi
 	return { root, commonDir, head, branch, ...(upstream ? { upstream } : {}), ...(upstreamHead ? { upstreamHead } : {}) };
 }
 
-// Most tool results in a non-checkout do not need a Git subprocess. Checking
-// ancestors on each miss also lets a newly initialized repo show up immediately.
-function mayHaveCheckout(cwd: string): boolean {
-	if (process.env.GIT_DIR || process.env.GIT_WORK_TREE) return true;
-	try {
-		let dir = fs.realpathSync(cwd);
-		for (;;) {
-			if (fs.existsSync(path.join(dir, ".git"))) return true;
-			const parent = path.dirname(dir);
-			if (parent === dir) return false;
-			dir = parent;
-		}
-	} catch {
-		return false;
-	}
-}
-
 export function readWorkspaceGitState(cwd: string): WorkspaceGitState | undefined {
-	if (!fs.existsSync(cwd)) return undefined;
-	const fromFiles = readWorkspaceGitStateFromFiles(cwd);
-	if (fromFiles) return fromFiles;
-	if (!mayHaveCheckout(cwd)) return undefined;
+	const { GIT_DIR, GIT_WORK_TREE, GIT_COMMON_DIR, GIT_CEILING_DIRECTORIES, GIT_DISCOVERY_ACROSS_FILESYSTEM } = process.env;
+	const overridden = GIT_DIR || GIT_WORK_TREE || GIT_COMMON_DIR || GIT_CEILING_DIRECTORIES || GIT_DISCOVERY_ACROSS_FILESYSTEM;
+	const checkout = overridden ? undefined : nearestCheckout(cwd);
+	if (!checkout && !overridden) return undefined;
+	if (checkout) {
+		const cached = repoIdentityCache.get(checkout.root);
+		const current = cached?.marker === checkout.marker ? readWorkspaceGitStateFromFiles(cached.identity) : undefined;
+		if (current) return current;
+		repoIdentityCache.delete(checkout.root);
+	}
 	try {
-		// One rev-parse answers root, common dir, git dir and HEAD; each spawn
-		// costs milliseconds that repeat for every file a tool result touches.
-		// The identity is cached, so later calls read refs from .git files.
+		// One authoritative lookup per checkout identity. Subsequent tool results
+		// read the refs directly after checking for a closer or replaced marker.
 		const [rootRaw, commonRaw, gitDirRaw, head] = git(cwd, ["rev-parse", "--show-toplevel", "--git-common-dir", "--git-dir", "HEAD"]).split("\n");
 		if (!rootRaw || !commonRaw || !gitDirRaw || !head) return undefined;
 		const root = path.resolve(rootRaw);
 		const commonDir = path.resolve(cwd, commonRaw);
 		const gitDir = path.resolve(cwd, gitDirRaw);
-		repoIdentityCache.set(cwd, { root, commonDir, gitDir });
-		const viaFiles = readWorkspaceGitStateFromFiles(cwd);
+		if (checkout?.root === root) {
+			if (repoIdentityCache.size >= MAX_CHECKOUTS) {
+				const oldest = repoIdentityCache.keys().next().value;
+				if (oldest !== undefined) repoIdentityCache.delete(oldest);
+			}
+			repoIdentityCache.set(root, { marker: checkout.marker, identity: { root, commonDir, gitDir } });
+		}
+		const viaFiles = readWorkspaceGitStateFromFiles({ root, commonDir, gitDir });
 		if (viaFiles) return viaFiles;
 		const branch = optionalGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]) ?? "(detached)";
 		const upstream = optionalGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
@@ -268,6 +273,13 @@ function writeLease(file: string, lease: WorkspaceWriterLease): void {
 	}
 }
 
+const ownedLeaseFiles = new Map<string, string>();
+
+function removeOwnedLease(file: string): void {
+	if (readLeaseFile(file)?.pid !== process.pid) return;
+	try { fs.rmSync(file, { force: true }); } catch { /* advisory only */ }
+}
+
 function refreshLease(state: WorkspaceGitState, cwd: string, sessionId: string, touchedPath?: string): WorkspaceWriterLease | undefined {
 	try { fs.mkdirSync(leaseDir(state), { recursive: true, mode: 0o700 }); } catch { return undefined; }
 	const file = leaseFile(state, sessionId);
@@ -285,6 +297,10 @@ function refreshLease(state: WorkspaceGitState, cwd: string, sessionId: string, 
 	if (touchedPath !== undefined) lease.paths = [...lease.paths.filter((entry) => entry !== touchedPath), touchedPath];
 	lease.paths = lease.paths.slice(-MAX_PATHS);
 	try { writeLease(file, lease); } catch { return undefined; }
+	const key = `${lease.cwd}\0${sessionId}`;
+	const previous = ownedLeaseFiles.get(key);
+	if (previous && previous !== file) removeOwnedLease(previous);
+	ownedLeaseFiles.set(key, file);
 	return lease;
 }
 
@@ -300,9 +316,15 @@ export function acquireWorkspaceWriterLease(cwd: string, sessionId: string): { s
 }
 
 export function releaseWorkspaceWriterLease(cwd: string, sessionId: string): void {
-	const state = readWorkspaceGitState(cwd);
-	if (!state || !sessionId) return;
-	try { fs.rmSync(leaseFile(state, sessionId), { force: true }); } catch { /* advisory only */ }
+	if (!sessionId) return;
+	const key = `${path.resolve(cwd)}\0${sessionId}`;
+	const owned = ownedLeaseFiles.get(key);
+	ownedLeaseFiles.delete(key);
+	if (owned) removeOwnedLease(owned);
+	else {
+		const state = readWorkspaceGitState(cwd);
+		if (state) removeOwnedLease(leaseFile(state, sessionId));
+	}
 }
 
 function toOwner(lease: WorkspaceWriterLease): WorkspaceLeaseOwner {

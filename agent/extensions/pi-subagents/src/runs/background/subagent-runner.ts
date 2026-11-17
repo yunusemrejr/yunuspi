@@ -12,7 +12,7 @@ import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Message } from "@yunuspi/ai";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
-import { writeAsyncResultFile, writePendingAsyncResultFile } from "./result-files.ts";
+import { workflowAwaitedAsyncResultPath, writeAsyncResultFile, writePendingAsyncResultFile } from "./result-files.ts";
 import { createFileCoalescer } from "../../shared/file-coalescer.ts";
 import { createCapacityResilientJsonWriter } from "../../shared/capacity-resilient-json.ts";
 import { isStorageCapacityError } from "../../shared/file-system-retry.ts";
@@ -2890,6 +2890,7 @@ async function runSubagent(
 		runId: id,
 		...(config.sessionId ? { sessionId: config.sessionId } : {}),
 		...(config.completionOwnerId ? { completionOwnerId: config.completionOwnerId } : {}),
+		...(config.resultPath === workflowAwaitedAsyncResultPath(asyncDir) ? { resultDelivery: "workflow" as const } : {}),
 		mode: config.resultMode ?? (flatSteps.length > 1 ? "chain" : "single"),
 		...(config.nestedSelf ? { isNested: true } : {}),
 		state: "running",

@@ -181,3 +181,89 @@ test('creative image tool serves the decoded file MIME and records native provid
   assert.equal(receipts.at(-1).data.id, receipts.at(-2).data.id);
   assert.equal(Object.hasOwn(receipts.at(-1).data, 'usage'), false, 'cancelled provider request retains unknown usage rather than a fabricated zero');
 });
+
+test('registered Images tool prices attested OpenAI raster buckets and preserves partial evidence', async t => {
+  const cwd = workspace(t), pixels = await picture();
+  fs.writeFileSync(path.join(cwd, 'reference.png'), pixels);
+  const prepare = await imageBillingFixture(t, cwd, pixels);
+  const usage = {input_tokens:100, output_tokens:1000, total_tokens:1100,
+    input_tokens_details:{text_tokens:100, image_tokens:0}, output_tokens_details:{image_tokens:1000, text_tokens:0}};
+  const priced = await prepare({usage});
+  assert.equal(priced.formatted, '$~0.030500');
+  assert.equal(priced.receipt.usage.cost.priceBasis, 'openai-images-standard-token-rates');
+  assert.deepEqual(priced.receipt.usage.cost.imageTokenCounts, {inputText:100, inputImage:0, outputText:0, outputImage:1000});
+  const older = await prepare({model:'gpt-image-2.5-flare', usage});
+  assert.equal(older.formatted, '$~0.030500');
+  const edit = await prepare({edit:true, usage:{...usage, input_tokens:300, total_tokens:1300, input_tokens_details:{text_tokens:100, image_tokens:200}}});
+  assert.equal(edit.formatted, '$~0.032100');
+
+  const cached = await prepare({usage:{...usage, input_tokens_details:{...usage.input_tokens_details, cached_tokens:20}}});
+  assert.equal(cached.formatted, '$~0.030000+?');
+  assert.equal(cached.receipt.usage.cacheRead, 20);
+  const mixed = await prepare({usage:{...usage, input_tokens_details:undefined, output_tokens_details:{image_tokens:900, text_tokens:100}}});
+  assert.equal(mixed.formatted, '$~0.027000+?');
+  const unsupported = await prepare({model:'unknown-image-model', usage});
+  assert.equal(unsupported.formatted, '$?');
+});
+
+test('registered Images tool accepts reported OpenRouter USD only with direct native route evidence', async t => {
+  const cwd = workspace(t), pixels = await picture();
+  const prepare = await imageBillingFixture(t, cwd, pixels);
+  const core = {input_tokens:100, output_tokens:1000};
+  const foreignCurrency = await prepare({origin:'https://gateway.example.invalid', usage:{...core,
+    cost:{total:.125, currency:'EUR', source:'provider-reported', complete:true}}});
+  assert.equal(foreignCurrency.formatted, '$?');
+  assert.equal(foreignCurrency.receipt.usage.input, 100);
+  const gatewayNumber = await prepare({origin:'https://openrouter.example.invalid', backend:'openrouter', usage:{...core, cost:.5}});
+  assert.equal(gatewayNumber.formatted, '$?');
+  const directOpenRouter = {origin:'https://openrouter.ai', backend:'openrouter'};
+  const zero = await prepare({...directOpenRouter, usage:{...core, cost:0}});
+  assert.equal(zero.formatted, '$0.000');
+  const byok = await prepare({...directOpenRouter, usage:{...core, cost:.125, is_byok:true, cost_details:{upstream_inference_cost:.25}}});
+  assert.equal(byok.formatted, '$0.375000');
+  const redirect = await prepare({...directOpenRouter, usage:{...core, cost:.5}, responseUrl:'https://gateway.example.invalid/api/v1/images'});
+  assert.equal(redirect.formatted, '$?');
+  const conflicting = await prepare({...directOpenRouter, usage:{...core, cost:.5, currency:'EUR'}});
+  assert.equal(conflicting.formatted, '$?');
+});
+
+async function imageBillingFixture(t, cwd, pixels) {
+  const { collectSessionCost } = await import('../core/coding-agent/src/core/session-accounting.js');
+  const artDirection = (await load('extensions/art-direction.ts')).default;
+  const keys = ['PI_IMAGE_BACKEND', 'PI_IMAGE_API_URL', 'PI_IMAGE_API_KEY', 'PI_IMAGE_MODEL'];
+  const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
+  t.after(() => { for (const key of keys) before[key] === undefined ? delete process.env[key] : process.env[key] = before[key]; });
+  return async ({usage, origin = 'https://api.openai.com', backend = 'openai-compatible', model = 'gpt-image-2.6-sunburst', edit = false, responseUrl}) => {
+    const isRouter = backend === 'openrouter';
+    process.env.PI_IMAGE_BACKEND = backend;
+    process.env.PI_IMAGE_API_URL = `${origin}${isRouter ? '/api/v1' : '/v1'}`;
+    process.env.PI_IMAGE_API_KEY = 'synthetic-image-billing-only';
+    process.env.PI_IMAGE_MODEL = model;
+    const tools = [], entries = [];
+    artDirection({ registerTool: tool => tools.push(tool), appendEntry: (customType, data) => entries.push({type:'custom', customType, data}) });
+    const fetch = t.mock.method(globalThis, 'fetch', async (url, options) => {
+      const endpoint = new URL(String(url));
+      assert.equal(endpoint.origin, origin);
+      assert.equal(endpoint.pathname, isRouter ? '/api/v1/images' : edit ? '/v1/images/edits' : '/v1/images/generations');
+      assert.equal(edit ? options.body.get('model') : JSON.parse(options.body).model, model);
+      const response = Response.json({data:[{b64_json:Buffer.from(pixels).toString('base64')}], usage});
+      if (responseUrl) Object.defineProperty(response, 'url', {value:responseUrl});
+      return response;
+    });
+    const ctx = {cwd, model:{input:['text','image']}, sessionManager:{getSessionId:()=>'synthetic-billing-session'}};
+    try {
+      const result = await tools.find(tool => tool.name === 'image_generate').execute('synthetic',
+        {action:edit ? 'edit' : 'generate', prompt:'Synthetic square for billing', format:'png', ...(edit && {path:'reference.png'}), ...(isRouter && {transport:'images'})},
+        undefined, undefined, ctx);
+      assert.equal(fetch.mock.callCount(), 1);
+      assert.equal(result.details.decodeVerified, true);
+      assert.deepEqual(entries.map(entry => entry.data.status), ['pending', 'completed']);
+      assert.equal(entries[0].data.id, entries[1].data.id);
+      const replay = JSON.parse(JSON.stringify(entries));
+      const cost = collectSessionCost([...replay, ...replay]);
+      return {...cost, receipt:entries[1].data};
+    } finally {
+      fetch.mock.restore();
+    }
+  };
+}

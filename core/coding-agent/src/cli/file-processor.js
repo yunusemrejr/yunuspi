@@ -1,12 +1,12 @@
 /**
  * Process @file CLI arguments into text content and image attachments
  */
-import { access, readFile, stat } from "node:fs/promises";
+import { withRegularReadFile } from "@yunuspi/agent-core/node";
 import chalk from "chalk";
 import { resolve } from "path";
 import { resolveReadPath } from "../core/tools/path-utils.js";
 import { processImage } from "../utils/image-process.js";
-import { detectSupportedImageMimeTypeFromFile } from "../utils/mime.js";
+import { detectSupportedImageMimeType, IMAGE_TYPE_SNIFF_BYTES } from "../utils/mime.js";
 import { stripBom } from "../utils/text.js";
 /** Process @file arguments into text content and image attachments */
 export async function processFileArguments(fileArgs, options) {
@@ -16,24 +16,24 @@ export async function processFileArguments(fileArgs, options) {
     for (const fileArg of fileArgs) {
         // Expand and resolve path (handles ~ expansion and macOS screenshot Unicode spaces)
         const absolutePath = resolve(resolveReadPath(fileArg, process.cwd()));
-        // Check if file exists
+        let content;
         try {
-            await access(absolutePath);
+            content = await withRegularReadFile(absolutePath, undefined, file => file.readFile());
         }
-        catch {
-            console.error(chalk.red(`Error: File not found: ${absolutePath}`));
+        catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            const message = error?.code === "ENOENT" || error?.code === "ENOTDIR"
+                ? `File not found: ${absolutePath}`
+                : `Could not read file ${absolutePath}: ${reason}`;
+            console.error(chalk.red(`Error: ${message}`));
             process.exit(1);
         }
-        // Check if file is empty
-        const stats = await stat(absolutePath);
-        if (stats.size === 0) {
-            // Skip empty files
+        if (content.length === 0) {
             continue;
         }
-        const mimeType = await detectSupportedImageMimeTypeFromFile(absolutePath);
+        const mimeType = detectSupportedImageMimeType(content.subarray(0, IMAGE_TYPE_SNIFF_BYTES));
         if (mimeType) {
             // Handle image file
-            const content = await readFile(absolutePath);
             const processed = await processImage(content, mimeType, { autoResizeImages });
             if (!processed.ok) {
                 text += `<file name="${absolutePath}">${processed.message}</file>\n`;
@@ -54,16 +54,7 @@ export async function processFileArguments(fileArgs, options) {
             }
         }
         else {
-            // Handle text file
-            try {
-                const content = stripBom(await readFile(absolutePath, "utf-8"));
-                text += `<file name="${absolutePath}">\n${content}\n</file>\n`;
-            }
-            catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
-                console.error(chalk.red(`Error: Could not read file ${absolutePath}: ${message}`));
-                process.exit(1);
-            }
+            text += `<file name="${absolutePath}">\n${stripBom(content.toString("utf-8"))}\n</file>\n`;
         }
     }
     return { text, images };

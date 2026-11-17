@@ -1,4 +1,5 @@
 import * as _bundledSessionAccounting from "../session-accounting.js";
+import * as _bundledSessionWriteLock from "../../utils/session-write-lock.js";
 import { sessionObservability, withSessionObservability } from "../session-observability.js";
 /**
  * Extension loader - loads TypeScript extension modules using jiti.
@@ -50,6 +51,7 @@ const VIRTUAL_MODULES = {
     "@yunuspi/ai/providers/all": _bundledPiAiProviders,
     "@yunuspi/ai/utils/abort": _bundledPiAiAbort,
     "@yunuspi/coding-agent/session-accounting": _bundledSessionAccounting,
+    "@yunuspi/coding-agent/session-write-lock": _bundledSessionWriteLock,
     "@yunuspi/coding-agent": _bundledPiCodingAgent,
     "@mariozechner/pi-agent-core": _bundledPiAgentCore,
     "@earendil-works/pi-agent-core": _bundledPiAgentCore,
@@ -103,6 +105,7 @@ function getAliases() {
     const piAiAbortEntry = resolveWorkspaceOrImport("ai/dist/utils/abort.js", "@yunuspi/ai/utils/abort");
     _aliases = {
         "@yunuspi/coding-agent/session-accounting": path.resolve(__dirname, "../session-accounting.js"),
+        "@yunuspi/coding-agent/session-write-lock": path.resolve(__dirname, "../../utils/session-write-lock.js"),
         "@yunuspi/coding-agent": piCodingAgentEntry,
         "@yunuspi/agent-core": piAgentCoreEntry,
         "@yunuspi/tui": piTuiEntry,
