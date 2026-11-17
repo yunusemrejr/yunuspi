@@ -97,12 +97,15 @@ import { nestedSummaryFromAsyncStatus, projectNestedEvents, resolveNestedAsyncDi
 import { beginFreeRun, recoveryRoutes, recoveryRoutesEnv } from "../../../../lib/free-models.ts";
 import { formatSubagentModelVerificationError, isContextOverflow } from "../shared/session-model.ts";
 import {
+	INCOMPLETE_CHILD_ASSISTANT_RESPONSE,
 	SUBAGENT_STARTUP_RETRY_DELAYS_MS,
 	formatSubagentExtensionConflictError,
 	formatSubagentStartupRetryExhaustedError,
 	formatSubagentStartupRetryNote,
 	isRetryableSubagentStartupFailure,
+	updatePendingAssistantResponse,
 	waitForSubagentStartupRetry,
+	type PendingChildAssistantResponse,
 } from "../shared/subagent-startup-retry.ts";
 import { markProcessTerminalCandidateLeaseRelease, writeProcessTerminalCandidate, type ProcessTerminalCandidate } from "./process-terminal.ts";
 import { createOwnedProcessTreeController, type OwnedProcessTreeController } from "./owned-process-tree.ts";
@@ -576,6 +579,7 @@ interface RunPiStreamingResult {
 	toolBudget?: ToolBudgetState;
 	toolBudgetBlocked?: boolean;
 	observedMutationAttempt?: boolean;
+	assistantResponsePending?: boolean;
 	structuredOutputToolInvoked?: boolean;
 	structuredOutputMessageStartIndex?: number;
 	structuredOutput?: unknown;
@@ -699,6 +703,7 @@ function runPiStreaming(
 		}
 		let error: string | undefined = writerRegistrationError;
 		let assistantError: string | undefined;
+		let assistantResponsePending: PendingChildAssistantResponse | undefined;
 		let interrupted = false;
 		let timedOut = false;
 		let stopped = false;
@@ -803,6 +808,7 @@ function runPiStreaming(
 
 			appendChildEvent(event as unknown as Record<string, unknown>);
 			transcriptWriter?.writeChildEvent(event);
+			assistantResponsePending = updatePendingAssistantResponse(assistantResponsePending, event);
 			if (event.type === "compaction_start") compactionStartedReceived = true;
 			if (event.type === "compaction_end" && event.willRetry === true) {
 				compactionStartedReceived = false;
@@ -1137,12 +1143,13 @@ function runPiStreaming(
 			clearStdioGuard();
 			stdoutReader.end();
 			stderrReader.end();
+			if (assistantResponsePending) addUsageCost(usage, undefined, assistantResponsePending.provider, assistantResponsePending.model);
 			finalizeChildUsage(usage);
 			outputStream.end();
 			const stderr = stderrTail.text();
 			const finalOutput = getFinalOutput(messages) || rawStdoutTail.text().trim();
 			const finalError = error ?? assistantError;
-			const forcedDrainAfterFinalSuccess = Boolean(forcedTerminationSignal || signal) && (cleanTerminalAssistantStopReceived || agentSettledReceived) && !finalError;
+			const forcedDrainAfterFinalSuccess = Boolean(forcedTerminationSignal || signal) && (cleanTerminalAssistantStopReceived || agentSettledReceived) && !finalError && !assistantResponsePending;
 			const forcedDrainAfterEmptyTerminal = forcedDrainAfterFinalSuccess && hasEmptyTerminalAssistantResponse(messages);
 			const forcedDrainError = forcedDrainAfterEmptyTerminal && stderr.trim()
 				? stderr.trim()
@@ -1154,6 +1161,7 @@ function runPiStreaming(
 				stopped,
 				forcedDrainAfterFinalSuccess: forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal,
 			}) ? formatProcessSignalError(signal!) : undefined;
+			const responseError = assistantResponsePending && (exitCode === 0 || !stderr.trim()) ? INCOMPLETE_CHILD_ASSISTANT_RESPONSE : undefined;
 			resolve(omitUndefinedProperties({
 				stderr,
 				exitCode: timedOut || stopped ? 1 : interrupted || (forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal) ? 0 : forcedTerminationSignal || signal ? (exitCode ?? 1) : exitCode,
@@ -1163,7 +1171,7 @@ function runPiStreaming(
 				toolCount,
 				durationMs: Date.now() - startedAt,
 				model,
-				error: stopped ? (stopMessage ?? "Subagent stopped by user.") : timedOut ? (timeoutMessage ?? "Subagent timed out.") : interrupted || (forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal) ? undefined : finalError ?? forcedDrainError ?? signalError,
+				error: stopped ? (stopMessage ?? "Subagent stopped by user.") : timedOut ? (timeoutMessage ?? "Subagent timed out.") : interrupted || (forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal) ? undefined : finalError ?? forcedDrainError ?? signalError ?? responseError,
 				protocolError,
 				finalOutput: (timedOut || stopped) && !finalOutput.trim() ? (stopped ? stopMessage ?? "Subagent stopped by user." : timeoutMessage ?? "Subagent timed out.") : finalOutput,
 				outputState: finalOutput.trim() ? "present" : "absent",
@@ -1171,6 +1179,7 @@ function runPiStreaming(
 				timedOut,
 				stopped,
 				observedMutationAttempt,
+				assistantResponsePending: Boolean(assistantResponsePending),
 				structuredOutputToolInvoked,
 				structuredOutputMessageStartIndex,
 				watchdog: childWatchdogState,
@@ -2208,6 +2217,7 @@ async function runSingleStepInner(
 			protocolError: run.protocolError,
 			processSignal: run.processSignal,
 			observedMutationAttempt: run.observedMutationAttempt,
+			assistantResponsePending: run.assistantResponsePending,
 			interrupted: run.interrupted,
 			timedOut: run.timedOut,
 			stopped: run.stopped,

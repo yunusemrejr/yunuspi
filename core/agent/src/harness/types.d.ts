@@ -129,6 +129,11 @@ export declare class ExecutionError extends Error {
     code: ExecutionErrorCode;
     constructor(code: ExecutionErrorCode, message: string, cause?: Error);
 }
+/** A tool rejection carrying public result details, such as a retained output reference. */
+export declare class AgentToolError<T = unknown> extends Error {
+    constructor(message: string, details: T, options?: ErrorOptions);
+    static detailsOf(error: unknown): unknown;
+}
 /** Stable compaction error codes returned by compaction helpers. */
 export type CompactionErrorCode = "aborted" | "summarization_failed";
 /** Error returned by compaction helpers. */

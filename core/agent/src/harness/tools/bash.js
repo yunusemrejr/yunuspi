@@ -1,4 +1,5 @@
 import { Type } from "typebox";
+import { AgentToolError } from "../types.js";
 import { applyShellOutputUpdate } from "../utils/output-capture.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize } from "../utils/truncate.js";
 const MAX_TIMEOUT_SECONDS = 2_147_483_647 / 1000;
@@ -93,10 +94,11 @@ export function createBashTool(options) {
                     : result.error.code === "aborted"
                         ? "Command aborted"
                         : result.error.message;
-                throw new Error(outputText ? `${outputText}\n\n${status}` : status, { cause: result.error });
+                throw new AgentToolError(outputText ? `${outputText}\n\n${status}` : status, { ...details, failure: result.error.code }, { cause: result.error });
             }
             if (result.value.exitCode !== 0) {
-                throw new Error(`${outputText ? `${outputText}\n\n` : ""}Command exited with code ${result.value.exitCode}`);
+                throw new AgentToolError(`${outputText ? `${outputText}\n\n` : ""}Command exited with code ${result.value.exitCode}`,
+                    { ...details, failure: "nonzero-exit", exitCode: result.value.exitCode });
             }
             return { content: [{ type: "text", text: outputText || "(no output)" }], details };
         },

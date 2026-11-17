@@ -3,6 +3,7 @@
  * Transforms to Message[] only at the LLM call boundary.
  */
 import { EventStream, validateToolArguments, } from "@yunuspi/ai";
+import { AgentToolError } from "./harness/types.js";
 import { getDefaultStreamFn } from "./stream-fn.js";
 /**
  * Start an agent loop with a new prompt message.
@@ -564,7 +565,7 @@ async function executePreparedToolCall(prepared, signal, emit) {
         acceptingUpdates = false;
         await Promise.all(updateEvents);
         return {
-            result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
+            result: createErrorToolResult(error instanceof Error ? error.message : String(error), AgentToolError.detailsOf(error)),
             isError: true,
         };
     }
@@ -607,10 +608,10 @@ async function finalizeExecutedToolCall(currentContext, assistantMessage, prepar
         isError,
     };
 }
-function createErrorToolResult(message) {
+function createErrorToolResult(message, details = {}) {
     return {
         content: [{ type: "text", text: message }],
-        details: {},
+        details,
     };
 }
 async function emitToolExecutionEnd(finalized, emit) {

@@ -89,12 +89,15 @@ import { modelRouteCandidateAt, type ModelRouteCandidate } from "../../shared/mo
 import { beginFreeRun, recoveryRoutes, recoveryRoutesEnv } from "../../../../lib/free-models.ts";
 import { recordModelRoutingAttempt } from "../../../../lib/model-routing-metrics.ts";
 import {
+	INCOMPLETE_CHILD_ASSISTANT_RESPONSE,
 	SUBAGENT_STARTUP_RETRY_DELAYS_MS,
 	formatSubagentExtensionConflictError,
 	formatSubagentStartupRetryExhaustedError,
 	formatSubagentStartupRetryNote,
 	isRetryableSubagentStartupFailure,
+	updatePendingAssistantResponse,
 	waitForSubagentStartupRetry,
+	type PendingChildAssistantResponse,
 } from "../shared/subagent-startup-retry.ts";
 import {
 	createMutatingFailureState,
@@ -355,9 +358,11 @@ function structuredDelegationProgressChanged(
 
 const AFTER_COMPACTION_SETTLEMENT = Symbol("afterCompactionSettlement");
 const DISPATCHED_DURATION_MS = Symbol("dispatchedDurationMs");
+const ASSISTANT_RESPONSE_PENDING = Symbol("assistantResponsePending");
 type ForegroundAttemptResult = SingleResult & {
 	[AFTER_COMPACTION_SETTLEMENT]?: true;
 	[DISPATCHED_DURATION_MS]?: number;
+	[ASSISTANT_RESPONSE_PENDING]?: PendingChildAssistantResponse;
 };
 
 async function runSingleAttempt(
@@ -879,6 +884,8 @@ async function runSingleAttempt(
 			if (lifecycleFinished) return;
 			lifecycleFinished = true;
 			result[DISPATCHED_DURATION_MS] = performance.now() - dispatchedAt;
+			const pendingAssistant = result[ASSISTANT_RESPONSE_PENDING];
+			if (pendingAssistant) addUsageCost(result.usage, undefined, pendingAssistant.provider, pendingAssistant.model);
 			finalizeChildUsage(result.usage);
 			clearFinalDrainTimers();
 			clearWatchdogTailTimer();
@@ -1106,6 +1113,7 @@ async function runSingleAttempt(
 			}
 			shared.transcriptWriter?.writeChildEvent(evt);
 			shared.orcaProgressTab?.event(evt);
+			result[ASSISTANT_RESPONSE_PENDING] = updatePendingAssistantResponse(result[ASSISTANT_RESPONSE_PENDING], evt);
 			addAuxiliaryUsage(result.usage, evt);
 			if (evt.type === "compaction_start") compactionStartedReceived = true;
 			if (evt.type === "compaction_end" && evt.willRetry === true) {
@@ -1459,7 +1467,7 @@ async function runSingleAttempt(
 			const stderr = stderrTail.text();
 			const rawStdout = rawStdoutTail.text();
 			let closeError = result.error ?? toolDiagnosticError ?? assistantError;
-			const forcedDrainAfterFinalSuccess = Boolean(forcedTerminationSignal || signal) && (cleanTerminalAssistantStopReceived || agentSettledReceived) && !closeError;
+			const forcedDrainAfterFinalSuccess = Boolean(forcedTerminationSignal || signal) && (cleanTerminalAssistantStopReceived || agentSettledReceived) && !closeError && !result[ASSISTANT_RESPONSE_PENDING];
 			const forcedDrainAfterEmptyTerminal = forcedDrainAfterFinalSuccess && hasEmptyTerminalAssistantResponse(result.messages ?? []);
 			// An owned post-final drain is cleanup, not a process failure. Keeping
 			// its signal on a successful result misclassifies later acceptance
@@ -1486,6 +1494,9 @@ async function runSingleAttempt(
 			}
 			if (code !== 0 && stderr.trim() && !closeError && !forcedDrainAfterFinalSuccess) {
 				closeError = stderr.trim();
+			}
+			if (!closeError && result[ASSISTANT_RESPONSE_PENDING] && !result.stopped && !result.interrupted && !result.timedOut) {
+				closeError = INCOMPLETE_CHILD_ASSISTANT_RESPONSE;
 			}
 			const finalCode = forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal ? 0 : forcedTerminationSignal || signal ? (code ?? 1) : (code ?? 0);
 			if (!result.error && closeError) result.error = closeError;
@@ -2191,6 +2202,7 @@ async function runSyncCompletionInner(
 				durationMs: dispatchedDurationMs,
 				protocolError: result.protocolError,
 				processSignal: result.processSignal,
+				assistantResponsePending: Boolean(result[ASSISTANT_RESPONSE_PENDING]),
 				detached: result.detached,
 				interrupted: result.interrupted,
 				timedOut: result.timedOut,
@@ -2206,7 +2218,13 @@ async function runSyncCompletionInner(
 				});
 				const shouldRetry = await waitForSubagentStartupRetry(retryDelayMs, [options.signal, options.interruptSignal]);
 				if (!shouldRetry) {
-					if (options.interruptSignal?.aborted) {
+					if (options.signal?.aborted) {
+						const cancellationError = "Subagent startup retry cancelled before relaunch.";
+						result.stopped = true;
+						result.error = cancellationError;
+						result.finalOutput = cancellationError;
+						if (result.progress) result.progress.error = cancellationError;
+					} else {
 						result.exitCode = 0;
 						result.interrupted = true;
 						result.error = undefined;
@@ -2215,12 +2233,6 @@ async function runSyncCompletionInner(
 							result.progress.status = "running";
 							result.progress.error = undefined;
 						}
-					} else {
-						const cancellationError = "Subagent startup retry cancelled before relaunch.";
-						result.error = cancellationError;
-						result.finalOutput = cancellationError;
-						attempt.error = cancellationError;
-						if (result.progress) result.progress.error = cancellationError;
 					}
 					break modelAttemptsLoop;
 				}

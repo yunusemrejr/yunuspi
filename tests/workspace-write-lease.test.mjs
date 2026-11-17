@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import childProcess, { execFileSync, spawnSync } from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import { pathToFileURL } from "node:url";
 
 const root = path.resolve(import.meta.dirname, "..");
@@ -119,5 +120,106 @@ test("sibling worktrees sharing a common Git directory own different files", () 
 		assert.equal(attributeWorkspacePath(second, "second-session", "src.txt").status, "current_session");
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("workspace observations follow loose, symbolic, local upstream and detached refs", (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-writer-ref-"));
+	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+	git(dir, "init", "-qb", "fixture-main");
+	assert.equal(readWorkspaceGitState(dir), undefined);
+	git(dir, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture");
+	const head = git(dir, "rev-parse", "HEAD");
+	assert.equal(readWorkspaceGitState(dir)?.head, head, "the first commit arrives outside the observer");
+	git(dir, "branch", "fixture-upstream");
+	git(dir, "branch", "--set-upstream-to=fixture-upstream");
+	assert.equal(readWorkspaceGitState(dir)?.upstreamHead, head);
+
+	const main = path.join(dir, ".git", "refs", "heads", "fixture-main");
+	fs.renameSync(main, path.join(path.dirname(main), "fixture-backing"));
+	fs.symlinkSync("fixture-backing", main);
+	assert.equal(readWorkspaceGitState(dir)?.head, head);
+	git(dir, "symbolic-ref", "refs/heads/fixture-alias", "refs/heads/fixture-main");
+	git(dir, "symbolic-ref", "HEAD", "refs/heads/fixture-alias");
+	assert.equal(readWorkspaceGitState(dir)?.head, head);
+	const unicodeBranch = "fixture-unicode\u00a0";
+	git(dir, "branch", unicodeBranch);
+	git(dir, "symbolic-ref", "HEAD", "refs/heads/fixture-upstream");
+	git(dir, "branch", `--set-upstream-to=${unicodeBranch}`);
+	assert.equal(readWorkspaceGitState(dir)?.upstream, `./${unicodeBranch}`);
+	assert.equal(readWorkspaceGitState(dir)?.upstreamHead, head);
+	git(dir, "symbolic-ref", "HEAD", `refs/heads/${unicodeBranch}`);
+	assert.equal(readWorkspaceGitState(dir)?.branch, unicodeBranch);
+	assert.equal(readWorkspaceGitState(dir)?.head, head);
+	git(dir, "pack-refs", "--all");
+	assert.equal(fs.existsSync(path.join(dir, ".git", "refs", "heads", unicodeBranch)), false);
+	assert.equal(readWorkspaceGitState(dir)?.branch, unicodeBranch);
+	assert.equal(readWorkspaceGitState(dir)?.head, head);
+	git(dir, "symbolic-ref", "HEAD", "refs/heads/fixture-upstream");
+	assert.equal(readWorkspaceGitState(dir)?.upstream, `./${unicodeBranch}`);
+	assert.equal(readWorkspaceGitState(dir)?.upstreamHead, head);
+	git(dir, "update-ref", "--no-deref", "HEAD", head);
+	assert.equal(readWorkspaceGitState(dir)?.branch, "(detached)");
+	assert.equal(readWorkspaceGitState(dir)?.head, head);
+});
+
+test("an in-place reftable migration keeps the cached workspace identity usable", (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-writer-reftable-"));
+	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+	git(dir, "init", "-qb", "fixture-main");
+	git(dir, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture");
+	const before = readWorkspaceGitState(dir);
+	assert.ok(before);
+	const marker = fs.statSync(path.join(dir, ".git"), { bigint: true }).ino;
+	const migration = spawnSync("git", ["-C", dir, "refs", "migrate", "--ref-format=reftable"], { encoding: "utf8" });
+	assert.ifError(migration.error);
+	if (migration.status !== 0 && /not a git command|unknown subcommand|unknown option/i.test(migration.stderr)) {
+		return t.skip("This Git version lacks reftable migration");
+	}
+	assert.equal(migration.status, 0, migration.stderr);
+	assert.equal(git(dir, "rev-parse", "--show-ref-format"), "reftable");
+	assert.equal(fs.statSync(path.join(dir, ".git"), { bigint: true }).ino, marker);
+	const after = readWorkspaceGitState(dir);
+	assert.deepEqual(after, before);
+});
+
+test("oversized Git metadata is rejected before reading payload bytes or spawning Git", (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-writer-bounded-"));
+	t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+	git(dir, "init", "-qb", "fixture-main");
+	git(dir, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--allow-empty", "-qm", "fixture");
+	assert.ok(readWorkspaceGitState(dir));
+	const head = path.join(dir, ".git", "HEAD");
+	fs.truncateSync(head, 8193);
+	const { openSync, readSync, closeSync } = fs;
+	const originalExec = childProcess.execFileSync;
+	let metadataFd, reads = 0, gitCalls = 0;
+	fs.openSync = (file, ...args) => {
+		const fd = openSync(file, ...args);
+		if (file === head) metadataFd = fd;
+		return fd;
+	};
+	fs.readSync = (fd, ...args) => {
+		if (fd === metadataFd) reads++;
+		return readSync(fd, ...args);
+	};
+	fs.closeSync = fd => {
+		if (fd === metadataFd) metadataFd = undefined;
+		return closeSync(fd);
+	};
+	childProcess.execFileSync = (file, ...args) => {
+		if (file === "git") gitCalls++;
+		return originalExec(file, ...args);
+	};
+	syncBuiltinESMExports();
+	try {
+		assert.equal(readWorkspaceGitState(dir), undefined);
+		assert.equal(reads, 0);
+		assert.equal(gitCalls, 0);
+		assert.equal(metadataFd, undefined);
+	} finally {
+		Object.assign(fs, { openSync, readSync, closeSync });
+		childProcess.execFileSync = originalExec;
+		syncBuiltinESMExports();
 	}
 });

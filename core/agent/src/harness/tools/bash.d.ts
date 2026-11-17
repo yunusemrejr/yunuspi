@@ -1,6 +1,6 @@
 import { type Static, Type } from "typebox";
 import type { Context } from "../context.ts";
-import type { AgentHarnessTool, ShellOutputTruncation } from "../types.ts";
+import type { AgentHarnessTool, ExecutionErrorCode, ShellOutputTruncation } from "../types.ts";
 import type { ExecutionToolContext } from "./tool-context.ts";
 declare const bashSchema: Type.TObject<{
     command: Type.TString;
@@ -10,6 +10,8 @@ export type BashToolInput = Static<typeof bashSchema>;
 export interface BashToolDetails {
     truncation?: ShellOutputTruncation;
     fullOutputPath?: string;
+    failure?: ExecutionErrorCode | "nonzero-exit";
+    exitCode?: number;
 }
 export interface BashExecution {
     command: string;

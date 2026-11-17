@@ -306,3 +306,80 @@ if (!fs.existsSync(${JSON.stringify(marker)})) { fs.writeFileSync(${JSON.stringi
     if (retry) assert.ok(result.progressSummary.durationMs >= 2500, "logical duration still includes the queued time");
   });
 }
+
+test('a foreground child exiting during a response is not launched again as a startup failure', { timeout: 10_000 }, async () => {
+  for (const sequence of ['incomplete', 'incomplete-after-receipt', 'metered-interruption']) {
+    const retainPriorUsage = sequence === 'incomplete-after-receipt';
+    const meteredInterruption = sequence === 'metered-interruption';
+    const binary = path.join(root, `fixture-child-pi-${sequence}`);
+    const marker = path.join(root, `child-rpc-launches-${sequence}`);
+    const routed = { role: 'assistant', provider: model.provider, model: model.id };
+    const known = { type: 'message_end', message: { ...routed, stopReason: 'toolUse', content: [],
+      usage: { input: 2, output: 3, cost: { total: 0.05, source: 'provider-reported' } } } };
+    const partial = { ...routed, content: [{ type: 'text', text: 'Progress before exit.' }],
+      ...(meteredInterruption ? { usage: known.message.usage } : {}) };
+    const partialEvents = [
+      ...(retainPriorUsage ? [known] : []),
+      { type: 'message_start', message: { ...routed, content: [] } },
+      { type: 'message_update', message: partial, assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Progress before exit.', partial } },
+      ...(meteredInterruption ? [{ ...known, message: { ...known.message, stopReason: 'aborted', errorMessage: 'Fixture provider interruption.' } }] : []),
+    ];
+    const replay = { ...known, message: { ...known.message, stopReason: 'stop', content: [{ type: 'text', text: 'Replayed answer.' }] } };
+    fs.writeFileSync(binary, `#!${process.execPath}
+const fs=require('node:fs'), marker=${JSON.stringify(marker)};
+const first=!fs.existsSync(marker); fs.appendFileSync(marker,'launched\\n');
+const rows=first?${JSON.stringify(partialEvents)}:${JSON.stringify([replay])};
+fs.writeSync(1,rows.map(row=>JSON.stringify(row)).join('\\n')+'\\n');
+process.exit(first?1:0);
+`, { mode: 0o700 });
+    const env = { PI_SUBAGENT_ADMISSION_DIR: path.join(root, 'incomplete-admission'), PI_SUBAGENT_MAX_CONCURRENT: '1', PI_SUBAGENT_PI_BINARY: binary };
+    const previous = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
+    Object.assign(process.env, env);
+    let result;
+    try {
+      const agent = { name: 'fixture', description: 'Local fixture', source: 'runtime', filePath: path.join(root, 'fixture.md'),
+        systemPrompt: '', systemPromptMode: 'replace', completionGuard: false,
+        inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false };
+      result = await runSync(root, [agent], agent.name, 'Synthetic local observation.', {
+        availableModels: registry, modelOverride: route, timeoutMs: 8_000, acceptance: { level: 'none', reason: 'Local fixture.' },
+      });
+    } finally {
+      for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+    }
+    assert.equal(fs.readFileSync(marker, 'utf8'), 'launched\n');
+    assert.equal(result.exitCode, 1);
+    assert.match(result.error, meteredInterruption ? /Fixture provider interruption/ : /before its assistant response settled/);
+    assert.deepEqual(result.modelAttempts.map(attempt => attempt.success), [false]);
+    assert.equal(result.usage.turns, retainPriorUsage || meteredInterruption ? 1 : 0);
+    assert.equal(result.usage.cost, retainPriorUsage || meteredInterruption ? 0.05 : 0);
+    assert.equal(result.usage.costDetails?.unknown, !meteredInterruption, 'only the terminal response establishes its billed amount');
+  }
+});
+
+test('Stop during foreground startup backoff retains the prior attempt and settles as stopped', { timeout: 8_000 }, async t => {
+  const binary = path.join(root, 'fixture-stop-backoff-pi');
+  const marker = path.join(root, 'stop-backoff-launches');
+  fs.writeFileSync(binary, `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(marker)},'launched\\n');process.exit(1);\n`, { mode: 0o700 });
+  const env = { PI_SUBAGENT_ADMISSION_DIR: path.join(root, 'stop-backoff-admission'), PI_SUBAGENT_MAX_CONCURRENT: '1', PI_SUBAGENT_PI_BINARY: binary };
+  const previous = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
+  const controller = new AbortController();
+  const schedule = setTimeout;
+  let backoffs = 0;
+  t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+    if (delay === 250 && fs.existsSync(marker)) { backoffs++; queueMicrotask(() => controller.abort()); }
+    return schedule(callback, delay, ...args);
+  });
+  const agent = { name: 'backoff-fixture', description: 'Local fixture', source: 'runtime', filePath: path.join(root, 'backoff-fixture.md'),
+    systemPrompt: '', systemPromptMode: 'replace', inheritProjectContext: false, inheritGlobalContext: false, inheritSkills: false };
+  const lifecycle = [];
+  const result = await runSync(root, [agent], agent.name, 'Local fixture task.', {
+    availableModels: registry, modelOverride: route, signal: controller.signal, timeoutMs: 5_000, onLifecycle: state => lifecycle.push(state),
+  });
+  assert.equal(backoffs, 1);
+  assert.equal(fs.readFileSync(marker, 'utf8'), 'launched\n');
+  assert.deepEqual(result.modelAttempts.map(attempt => ({ success: attempt.success, exitCode: attempt.exitCode })), [{ success: false, exitCode: 1 }]);
+  assert.equal(result.stopped, true);
+  assert.deepEqual(lifecycle, ['running', 'stopped']);
+});

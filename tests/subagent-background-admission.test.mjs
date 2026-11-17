@@ -19,7 +19,7 @@ const resultText = 'Synthetic admitted child output.';
 const previousReport = 'The existing requested report belongs to an earlier attempt.';
 const childReport = 'This admitted writer changed the requested report.';
 
-async function fixture(t, { occupied = true, timeoutMs, unavailable = false, report } = {}) {
+async function fixture(t, { occupied = true, timeoutMs, unavailable = false, report, assistantSequence } = {}) {
   const root = fs.mkdtempSync(path.join(tmpdir(), 'pi-background-admission-'));
   const directory = path.join(root, 'slots');
   const asyncDir = path.join(root, 'async');
@@ -45,15 +45,26 @@ async function fixture(t, { occupied = true, timeoutMs, unavailable = false, rep
   ];
   const writeReport = `fs.writeFileSync(${JSON.stringify(reportPath)}, ${JSON.stringify(childReport)});`;
   const markStarted = `fs.appendFileSync(${JSON.stringify(markerPath)}, 'started\\n');`;
+  const meteredUsage = { input: 2, output: 3, cost: { total: 0.05, source: 'provider-reported' } };
+  const partial = { ...events[1].message, content: [{ type: 'text', text: 'Progress before exit.' }],
+    usage: assistantSequence === 'metered-interruption' ? meteredUsage : undefined, stopReason: undefined };
+  const partialEvents = [
+    { type: 'message_start', message: { ...partial, content: [] } },
+    { type: 'message_update', message: partial, assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Progress before exit.', partial } },
+  ];
   const timedReport = Boolean(report && timeoutMs !== undefined && report !== 'complete');
+  const childEvents = assistantSequence === 'metered-interruption' ? [events[0], ...partialEvents, {
+    type: 'message_end', message: { ...partial, stopReason: 'aborted', errorMessage: 'Fixture provider interruption.' },
+  }] : timedReport ? events.slice(0, 1) : events;
   fs.writeFileSync(childPath, [
     `#!${process.execPath}`,
     `const fs = require('node:fs');`,
+    assistantSequence === 'incomplete' ? `if (!fs.existsSync(${JSON.stringify(markerPath)})) { ${markStarted} fs.writeSync(1,${JSON.stringify(partialEvents.map(event => JSON.stringify(event)).join('\n')+'\n')}); process.exit(1); }` : '',
     report === 'shutdown' ? `process.on('SIGTERM', () => { ${writeReport} process.exit(0); });` : '',
     report === 'retry' ? `if (!fs.existsSync(${JSON.stringify(markerPath)})) { ${markStarted} ${writeReport} process.exit(1); }` : '',
     report === 'write' || report === 'complete' ? writeReport : '',
     markStarted,
-    `for (const event of ${JSON.stringify(timedReport ? events.slice(0, 1) : events)}) console.log(JSON.stringify(event));`,
+    `for (const event of ${JSON.stringify(childEvents)}) console.log(JSON.stringify(event));`,
     timedReport ? 'setInterval(() => {}, 1000);' : '',
     '',
   ].join('\n'), { mode: 0o700 });
@@ -168,6 +179,35 @@ test('one native background child launches on release and accounts only its actu
   assert.equal(receipt.results[0].modelAttempts.length, 1);
   assert.equal(receipt.results[0].usage.input, 2);
   assert.equal(receipt.results[0].usage.output, 3);
+});
+
+test('a native background child exiting during its assistant response is not replayed', { timeout: 40_000 }, async t => {
+  const run = await fixture(t, { occupied: false, assistantSequence: 'incomplete' });
+  await run.started();
+  const receipt = await run.result();
+  await run.exited();
+  assert.equal(run.invocations(), 'started\n');
+  assert.equal(receipt.state, 'failed');
+  const row = receipt.results[0];
+  assert.match(row.error, /before its assistant response settled/);
+  assert.deepEqual(row.modelAttempts.map(attempt => attempt.success), [false]);
+  assert.equal(row.usage?.turns ?? 0, 0);
+  assert.equal(row.usage.costDetails.unknown, true);
+});
+
+test('a native background child interruption with final metering preserves that response price once', { timeout: 40_000 }, async t => {
+  const run = await fixture(t, { occupied: false, assistantSequence: 'metered-interruption' });
+  await run.started();
+  const receipt = await run.result();
+  await run.exited();
+  assert.equal(run.invocations(), 'started\n');
+  assert.equal(receipt.state, 'failed');
+  const row = receipt.results[0];
+  assert.match(row.error, /Fixture provider interruption/);
+  assert.deepEqual(row.modelAttempts.map(attempt => attempt.success), [false]);
+  assert.equal(row.usage.turns, 1);
+  assert.equal(row.usage.cost, 0.05);
+  assert.equal(row.usage.costDetails.unknown, false);
 });
 
 test('an unavailable child admission store is a terminal local error without a route retry', { timeout: 40_000 }, async t => {

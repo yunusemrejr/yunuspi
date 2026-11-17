@@ -3277,7 +3277,7 @@
       {
         "name": "image_crop",
         "source": "agent/extensions/design-studio.ts",
-        "line": 32,
+        "line": 49,
         "kind": "factory"
       },
       {

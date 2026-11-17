@@ -52,6 +52,19 @@ export class ExecutionError extends Error {
         this.code = code;
     }
 }
+const toolErrorDetails = Symbol.for("yunuspi.agent-tool-error.details");
+/** A tool rejection carrying public result details, such as a retained output reference. */
+export class AgentToolError extends Error {
+    constructor(message, details, options) {
+        super(message, options);
+        this.name = "AgentToolError";
+        this[toolErrorDetails] = details;
+    }
+    static detailsOf(error) {
+        // The same error can cross source, bundled, or extension-loaded module copies.
+        return error instanceof Error && Object.hasOwn(error, toolErrorDetails) ? error[toolErrorDetails] : undefined;
+    }
+}
 /** Error returned by compaction helpers. */
 export class CompactionError extends Error {
     /** Backend-independent error code. */

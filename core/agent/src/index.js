@@ -15,6 +15,7 @@ export * from "./harness/skills.js";
 export * from "./harness/system-prompt.js";
 export { AGENT_TELEMETRY_SCHEMAS, AI_TELEMETRY_SCHEMA, HARNESS_TELEMETRY_SCHEMA, startAiSpan, startHarnessSpan, } from "./harness/telemetry.js";
 export * from "./harness/tools/index.js";
+export { AgentToolError } from "./harness/types.js";
 export { BranchSummaryError, CompactionError, ExecutionError, err, FileError, getOrThrow, getOrUndefined, ok, toError, } from "./harness/types.js";
 export { applyShellOutputUpdate } from "./harness/utils/output-capture.js";
 export { createShellOutputDecoder } from "./harness/utils/shell-output-decoder.js";

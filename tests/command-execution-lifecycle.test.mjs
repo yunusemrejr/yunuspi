@@ -4,11 +4,16 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import childProcess from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { syncBuiltinESMExports } from 'node:module';
 import { setTimeout as delay } from 'node:timers/promises';
 import { execCommand } from '../core/coding-agent/src/core/exec.js';
+import { createBashToolDefinition } from '../core/coding-agent/src/core/tools/bash.js';
+import { runAgentLoop } from '../core/agent/src/agent-loop.js';
 import { executeToolCall, finalizeToolCall, createToolResultMessage } from '../core/agent/src/harness/execution/tools.js';
 import { BACKGROUND_CONTEXT } from '../core/agent/src/harness/context.js';
+import { NodeExecutionEnv } from '../core/agent/src/harness/env/nodejs.js';
+import { createBashTool as createHarnessBashTool } from '../core/agent/src/harness/tools/bash.js';
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'command-execution-lifecycle-'));
 test.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
@@ -87,6 +92,80 @@ test('harness tools retain explicit failure evidence and permit after-hook recov
     assert.deepEqual(message.details, result.details);
     assert.equal(createToolResultMessage(finalizeToolCall(call, executed, { isError: false })).isError, false);
   }
+});
+
+test('a failed native shell call keeps its exact spill and exit receipt in both tool runtimes', async () => {
+  const expected = 'synthetic prefix\n' + 'x'.repeat(100_000) + '\nlast evidence\n';
+  const script = "process.stdout.write('synthetic prefix\\n' + 'x'.repeat(100000) + '\\nlast evidence\\n'); process.exitCode=7";
+  const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+  const executedCommand = `${quote(process.execPath)} -e ${quote(script)}`;
+  const tool = createBashToolDefinition(scratch, { spawnHook: state => ({ ...state, command: executedCommand }) });
+  const args = { command: 'synthetic request before the spawn hook', maxOutputBytes: 512 };
+  const toolCall = { type: 'toolCall', id: 'failed-shell-receipt', name: 'bash', arguments: args };
+  const gate = { signal: new AbortController().signal, admit: work => work() };
+  const cleared = { toolCall, args, tool: { execute: (id, params, onUpdate) => tool.execute(id, params, gate.signal, onUpdate) } };
+  const result = await executeToolCall(cleared, gate, () => {}, undefined, {}, BACKGROUND_CONTEXT);
+  const harnessMessage = createToolResultMessage(finalizeToolCall(cleared, result));
+
+  const model = { id: 'fixture', name: 'Fixture', provider: 'fixture', api: 'openai-completions' };
+  let calls = 0, legacyMessage;
+  const stream = () => {
+    const first = calls++ === 0;
+    const message = { role: 'assistant', model: model.id, provider: model.provider, api: model.api,
+      content: first ? [toolCall] : [{ type: 'text', text: 'done' }], stopReason: first ? 'toolUse' : 'stop',
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } }, timestamp: Date.now() };
+    return { async *[Symbol.asyncIterator]() { yield { type: 'done', message }; }, result: async () => message };
+  };
+  await runAgentLoop([{ role: 'user', content: 'Run the shell fixture', timestamp: Date.now() }], { messages: [], tools: [tool], systemPrompt: '' },
+    { model, convertToLlm: messages => messages }, event => {
+      if (event.type === 'message_end' && event.message.role === 'toolResult') legacyMessage = event.message;
+    }, gate.signal, stream);
+
+  const receipts = [harnessMessage, legacyMessage];
+  try {
+    for (const message of receipts) {
+      assert.equal(message.isError, true);
+      assert.match(message.content[0].text, /last evidence[\s\S]*Command exited with code 7/);
+      assert.equal(message.details?.failure, 'nonzero-exit');
+      assert.deepEqual(message.details.execution, {
+        exitCode: 7, cwd: scratch, commandSha256: createHash('sha256').update(executedCommand).digest('hex'),
+      });
+      assert.equal(message.details.truncation.truncated, true);
+      assert.equal(fs.readFileSync(message.details.fullOutputPath, 'utf8'), expected);
+    }
+  } finally {
+    for (const message of receipts) {
+      const artifact = message?.details?.fullOutputPath ?? /Full output:\s*([^\]]+)\]/.exec(message?.content[0].text ?? '')?.[1];
+      if (artifact) fs.rmSync(artifact, { force: true });
+    }
+  }
+});
+
+test('plain execution errors cannot introduce arbitrary result details', async () => {
+  const gate = { signal: new AbortController().signal, admit: work => work() };
+  const error = Object.assign(new Error('opaque failure'), { details: { private: 'not a tool result' } });
+  const call = { args: {}, toolCall: { id: 'opaque', name: 'fixture', arguments: {} }, tool: { execute() { throw error; } } };
+  const result = await executeToolCall(call, gate, () => {}, undefined, {}, BACKGROUND_CONTEXT);
+  assert.equal(result.isError, true);
+  assert.equal(result.result.details, undefined);
+  assert.deepEqual(result.result.content, [{ type: 'text', text: 'opaque failure' }]);
+});
+
+test('the harness Bash tool retains its spill and numeric exit code on failure', async () => {
+  const tool = createHarnessBashTool();
+  const args = { command: "printf '%60000s' '' ; printf 'fixture-tail\\n' ; exit 3", timeout: 5 };
+  const call = { tool, args, toolCall: { id: 'native-harness-failure', name: 'bash', arguments: args } };
+  const gate = { signal: new AbortController().signal, admit: work => work() };
+  const execution = await executeToolCall(call, gate, () => {}, { env: new NodeExecutionEnv({ cwd: scratch }) }, {}, BACKGROUND_CONTEXT);
+  const message = createToolResultMessage(finalizeToolCall(call, execution));
+  const artifact = message.details?.fullOutputPath ?? /Full output:\s*([^\]]+)\]/.exec(message.content[0].text)?.[1];
+  try {
+    assert.equal(message.isError, true);
+    assert.equal(message.details?.failure, 'nonzero-exit');
+    assert.equal(message.details.exitCode, 3);
+    assert.equal(message.details.truncation.truncated, true);
+    assert.equal(fs.readFileSync(message.details.fullOutputPath, 'utf8'), ' '.repeat(60_000) + 'fixture-tail\n');
+  } finally { if (artifact && artifact !== 'undefined') fs.rmSync(artifact, { force: true }); }
 });
 
 test('invalid extension timeouts fail before execution and zero preserves unlimited commands', async () => {

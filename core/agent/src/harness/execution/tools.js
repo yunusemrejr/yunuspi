@@ -1,9 +1,10 @@
 import { validateToolArguments } from "@yunuspi/ai";
 import { withAbortSignal } from "../context.js";
-function createErrorToolResult(message) {
+import { AgentToolError } from "../types.js";
+function createErrorToolResult(message, details) {
     return {
         content: [{ type: "text", text: message }],
-        details: undefined,
+        details,
     };
 }
 function immediateError(toolCall, message, terminate = false) {
@@ -67,7 +68,7 @@ export function executeToolCall(call, gate, onUpdate, toolContext, invocation, c
         }
         catch (error) {
             return {
-                result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
+                result: createErrorToolResult(error instanceof Error ? error.message : String(error), AgentToolError.detailsOf(error)),
                 isError: true,
             };
         }

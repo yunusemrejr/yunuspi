@@ -1,3 +1,10 @@
+## 0.56.25 — Durable vision charges, safer retries, and richer shell evidence
+
+- Image understanding settles late provider usage on the originating session after a fork. Missing usage remains unknown, and the fork starts without the original pending charge.
+- Foreground and background subagents stop startup retries once an assistant response begins. A lost terminal receipt marks spend partial and preserves known earlier charges.
+- Reminder hooks read Git metadata without waiting on special files. Repositories before their first commit reuse checkout identity and still recognize the first commit.
+- Failed shell calls retain captured output references and known exit evidence through the tool result in both runtimes.
+
 ## 0.56.24 — Explicit headless waits, provider charges, and lighter checks
 
 - Headless `bg_wait` can join a finite shell task owned by the current session. Stop cancels the wait, and automatic shutdown keeps its existing scope.

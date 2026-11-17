@@ -16,6 +16,9 @@ const LEASE_DIR_NAME = "yunuspi-writer-leases";
 const LEASE_VERSION = 1;
 const MAX_PATHS = 128;
 const MAX_CHECKOUTS = 128;
+const SMALL_GIT_METADATA_BYTES = 8192;
+const MAX_GIT_CONFIG_BYTES = 1024 * 1024;
+const MAX_PACKED_REFS_BYTES = 16 * 1024 * 1024;
 
 export interface WorkspaceGitState {
 	root: string;
@@ -51,12 +54,16 @@ export interface WorkspaceMutationRecord {
 	conflicts: WorkspaceLeaseOwner[];
 }
 
+function trimGitWhitespace(value: string): string {
+	return value.replace(/^[\t\n\v\f\r ]+|[\t\n\v\f\r ]+$/g, "");
+}
+
 function git(cwd: string, args: string[]): string {
-	return execFileSync("git", ["-C", cwd, ...args], {
+	return trimGitWhitespace(execFileSync("git", ["-C", cwd, ...args], {
 		encoding: "utf8",
 		stdio: ["ignore", "pipe", "ignore"],
 		timeout: 1000,
-	}).trim();
+	}));
 }
 
 function optionalGit(cwd: string, args: string[]): string | undefined {
@@ -73,18 +80,19 @@ function inside(root: string, candidate: string): boolean {
 	return relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 }
 
-type GitIdentity = { root: string; commonDir: string; gitDir: string };
+type GitIdentity = { root: string; commonDir: string; gitDir: string; refFormat: string };
 const repoIdentityCache = new Map<string, { marker: string; identity: GitIdentity }>();
 
-function nearestCheckout(cwd: string): { root: string; marker: string } | undefined {
+function nearestCheckout(cwd: string): { root: string; marker: string; directory: boolean } | undefined {
 	try {
 		let dir = fs.realpathSync(cwd);
 		for (;;) {
 			const stat = fs.statSync(path.join(dir, ".git"), { bigint: true, throwIfNoEntry: false });
 			if (stat) {
+				if (!stat.isFile() && !stat.isDirectory()) return undefined;
 				// Gitfiles can be rewritten in place when a linked checkout moves.
 				const revision = stat.isDirectory() ? "" : stat.ctimeNs;
-				return { root: dir, marker: `${stat.dev}:${stat.ino}:${revision}` };
+				return { root: dir, marker: `${stat.dev}:${stat.ino}:${revision}`, directory: stat.isDirectory() };
 			}
 			const parent = path.dirname(dir);
 			if (parent === dir) return undefined;
@@ -93,64 +101,92 @@ function nearestCheckout(cwd: string): { root: string; marker: string } | undefi
 	} catch { return undefined; }
 }
 
-function readRefSha(commonDir: string, gitDir: string, ref: string): string | undefined {
-	for (const base of [gitDir, commonDir]) {
-		try {
-			const sha = fs.readFileSync(path.join(base, ref), "utf8").trim();
-			if (/^[0-9a-f]{40,64}$/i.test(sha)) return sha;
-		} catch { /* fall through to packed-refs */ }
+function readGitMetadata(file: string, maxBytes = SMALL_GIT_METADATA_BYTES): string | undefined {
+	let fd: number;
+	try {
+		fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0));
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		if (code === "ENOENT" || code === "ENOTDIR") return undefined;
+		throw error;
 	}
 	try {
-		for (const line of fs.readFileSync(path.join(commonDir, "packed-refs"), "utf8").split("\n")) {
-			const match = /^([0-9a-f]{40,64}) (.+)$/i.exec(line.trim());
-			if (match && match[2] === ref) return match[1];
+		const info = fs.fstatSync(fd);
+		if (!info.isFile() || info.size > maxBytes) throw new Error("Unsuitable Git metadata file");
+		// Read the verified descriptor only, including one byte to detect growth
+		// after validation. A changing or oversized file cannot consume more I/O.
+		const buffer = Buffer.allocUnsafe(info.size + 1);
+		let offset = 0;
+		while (offset < buffer.length) {
+			const count = fs.readSync(fd, buffer, offset, buffer.length - offset, offset);
+			if (count === 0) break;
+			offset += count;
 		}
-	} catch { /* no packed-refs */ }
+		if (offset !== info.size) throw new Error("Git metadata changed during observation");
+		return buffer.toString("utf8", 0, offset);
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
+/** undefined = no ref in the files backend; null = needs authoritative Git resolution. */
+function readRefSha(commonDir: string, gitDir: string, ref: string): string | null | undefined {
+	const parts = ref.split("/");
+	if (!ref.startsWith("refs/") || parts.some(part => !part || part === "." || part === "..")) throw new Error("Invalid Git reference");
+	for (const base of commonDir === gitDir ? [gitDir] : [gitDir, commonDir]) {
+		const sha = readGitMetadata(path.join(base, ref))?.trim();
+		if (sha !== undefined) return /^[0-9a-f]{40,64}$/i.test(sha) ? sha : null;
+	}
+	const packed = readGitMetadata(path.join(commonDir, "packed-refs"), MAX_PACKED_REFS_BYTES);
+	for (const line of packed?.split("\n") ?? []) {
+		const match = /^([0-9a-f]{40,64}) (.+)$/i.exec(trimGitWhitespace(line));
+		if (match && match[2] === ref) return match[1];
+	}
 	return undefined;
 }
 
 function readUpstreamRef(commonDir: string, branch: string): string | undefined {
 	// Minimal config read: locate [branch "<name>"] remote + merge entries.
-	let config: string;
-	try {
-		config = fs.readFileSync(path.join(commonDir, "config"), "utf8");
-	} catch {
-		return undefined;
-	}
+	const config = readGitMetadata(path.join(commonDir, "config"), MAX_GIT_CONFIG_BYTES);
+	if (!config) return undefined;
 	let inSection = false, remote: string | undefined, merge: string | undefined;
 	for (const rawLine of config.split("\n")) {
-		const line = rawLine.trim();
+		const line = trimGitWhitespace(rawLine);
 		const section = /^\[branch "(.+)"\]$/.exec(line);
 		if (section) { inSection = section[1] === branch; continue; }
 		if (line.startsWith("[")) { inSection = false; continue; }
 		if (!inSection) continue;
-		const kv = /^(\w+)\s*=\s*(.+)$/.exec(line);
-		if (kv?.[1] === "remote") remote = kv[2].trim();
-		if (kv?.[1] === "merge") merge = kv[2].trim();
+		const kv = /^(\w+)[\t\v\f\r ]*=(.+)$/.exec(line);
+		if (kv?.[1] === "remote") remote = trimGitWhitespace(kv[2]);
+		if (kv?.[1] === "merge") merge = trimGitWhitespace(kv[2]);
 	}
 	if (!remote || !merge?.startsWith("refs/heads/")) return undefined;
 	return `${remote}/${merge.slice("refs/heads/".length)}`;
 }
 
-function readWorkspaceGitStateFromFiles(identity: GitIdentity): WorkspaceGitState | undefined {
-	const { root, commonDir, gitDir } = identity;
-	let headFile: string;
-	try {
-		headFile = fs.readFileSync(path.join(gitDir, "HEAD"), "utf8").trim();
-	} catch {
-		return undefined;
-	}
-	let head: string | undefined, branch = "(detached)";
+/** null represents a verified files-format branch before its first commit. */
+function readWorkspaceGitStateFromFiles(identity: GitIdentity): WorkspaceGitState | null | undefined {
+	const { root, commonDir, gitDir, refFormat } = identity;
+	const headFile = trimGitWhitespace(readGitMetadata(path.join(gitDir, "HEAD")) ?? "");
+	if (!headFile) return undefined;
+	let head: string | null | undefined, branch = "(detached)";
 	const refMatch = /^ref:\s*(refs\/heads\/.+)$/.exec(headFile);
 	if (refMatch) {
 		branch = refMatch[1].slice("refs/heads/".length);
 		head = readRefSha(commonDir, gitDir, refMatch[1]);
+		if (head === undefined && !refMatch[1].includes("\uFFFD") && (refFormat === "files" || refFormat === "--show-ref-format")) {
+			// Git can migrate the ref backend without replacing .git. Only
+			// conclude "unborn" when current config cannot select another backend.
+			const config = readGitMetadata(path.join(commonDir, "config"), MAX_GIT_CONFIG_BYTES);
+			if (config !== undefined && !/^\s*(?:\[\s*include(?:if)?(?:\s|\])|refstorage\s*=)/im.test(config)) return null;
+		}
 	} else if (/^[0-9a-f]{40,64}$/i.test(headFile)) {
 		head = headFile;
 	}
 	if (!head) return undefined;
 	const upstream = branch === "(detached)" ? undefined : readUpstreamRef(commonDir, branch);
-	const upstreamHead = upstream ? readRefSha(commonDir, gitDir, `refs/remotes/${upstream}`) : undefined;
+	const upstreamRef = upstream?.startsWith("./") ? `refs/heads/${upstream.slice(2)}` : upstream ? `refs/remotes/${upstream}` : undefined;
+	const upstreamHead = upstreamRef ? readRefSha(commonDir, gitDir, upstreamRef) : undefined;
 	return { root, commonDir, head, branch, ...(upstream ? { upstream } : {}), ...(upstreamHead ? { upstreamHead } : {}) };
 }
 
@@ -159,34 +195,52 @@ export function readWorkspaceGitState(cwd: string): WorkspaceGitState | undefine
 	const overridden = GIT_DIR || GIT_WORK_TREE || GIT_COMMON_DIR || GIT_CEILING_DIRECTORIES || GIT_DISCOVERY_ACROSS_FILESYSTEM;
 	const checkout = overridden ? undefined : nearestCheckout(cwd);
 	if (!checkout && !overridden) return undefined;
-	if (checkout) {
-		const cached = repoIdentityCache.get(checkout.root);
-		const current = cached?.marker === checkout.marker ? readWorkspaceGitStateFromFiles(cached.identity) : undefined;
-		if (current) return current;
-		repoIdentityCache.delete(checkout.root);
-	}
 	try {
-		// One authoritative lookup per checkout identity. Subsequent tool results
-		// read the refs directly after checking for a closer or replaced marker.
-		const [rootRaw, commonRaw, gitDirRaw, head] = git(cwd, ["rev-parse", "--show-toplevel", "--git-common-dir", "--git-dir", "HEAD"]).split("\n");
-		if (!rootRaw || !commonRaw || !gitDirRaw || !head) return undefined;
-		const root = path.resolve(rootRaw);
-		const commonDir = path.resolve(cwd, commonRaw);
-		const gitDir = path.resolve(cwd, gitDirRaw);
-		if (checkout?.root === root) {
-			if (repoIdentityCache.size >= MAX_CHECKOUTS) {
-				const oldest = repoIdentityCache.keys().next().value;
-				if (oldest !== undefined) repoIdentityCache.delete(oldest);
+		let identity: GitIdentity | undefined;
+		if (checkout) {
+			const cached = repoIdentityCache.get(checkout.root);
+			if (cached?.marker === checkout.marker) identity = cached.identity;
+			else {
+				repoIdentityCache.delete(checkout.root);
+				// Reject an unsuitable known checkout HEAD before invoking git.
+				const entry = path.join(checkout.root, ".git");
+				const pointer = checkout.directory ? undefined : /^gitdir: (.+)$/.exec(trimGitWhitespace(readGitMetadata(entry) ?? ""));
+				if (checkout.directory || pointer) {
+					const dir = pointer ? path.resolve(checkout.root, pointer[1]) : entry;
+					if (readGitMetadata(path.join(dir, "HEAD")) === undefined) return undefined;
+				}
 			}
-			repoIdentityCache.set(root, { marker: checkout.marker, identity: { root, commonDir, gitDir } });
 		}
-		const viaFiles = readWorkspaceGitStateFromFiles({ root, commonDir, gitDir });
-		if (viaFiles) return viaFiles;
+		if (!identity) {
+			// Identify the checkout independently: an unborn HEAD does not
+			// invalidate the root or require a new subprocess on every result.
+			const [rootRaw, commonRaw, gitDirRaw, refFormat] = git(cwd, ["rev-parse", "--show-toplevel", "--git-common-dir", "--git-dir", "--show-ref-format"]).split("\n");
+			if (!rootRaw || !commonRaw || !gitDirRaw) return undefined;
+			const root = path.resolve(rootRaw), commonDir = path.resolve(cwd, commonRaw), gitDir = path.resolve(cwd, gitDirRaw);
+			identity = { root, commonDir, gitDir, refFormat };
+			if (checkout) {
+				const current = nearestCheckout(cwd);
+				if (current?.root !== checkout.root || current?.marker !== checkout.marker) return undefined;
+			}
+			if (checkout?.root === root) {
+				if (repoIdentityCache.size >= MAX_CHECKOUTS) {
+					const oldest = repoIdentityCache.keys().next().value;
+					if (oldest !== undefined) repoIdentityCache.delete(oldest);
+				}
+				repoIdentityCache.set(root, { marker: checkout.marker, identity });
+			}
+		}
+		const viaFiles = readWorkspaceGitStateFromFiles(identity);
+		if (viaFiles !== undefined) return viaFiles ?? undefined;
+		const head = optionalGit(cwd, ["rev-parse", "--verify", "HEAD"]);
+		if (!head) return undefined;
 		const branch = optionalGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"]) ?? "(detached)";
 		const upstream = optionalGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"]);
 		const upstreamHead = upstream ? optionalGit(cwd, ["rev-parse", upstream]) : undefined;
+		const { root, commonDir } = identity;
 		return { root, commonDir, head, branch, ...(upstream ? { upstream } : {}), ...(upstreamHead ? { upstreamHead } : {}) };
 	} catch {
+		// Confirmed unsuitable metadata must not be reopened by a synchronous Git fallback.
 		return undefined;
 	}
 }

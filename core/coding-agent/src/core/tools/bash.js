@@ -2,6 +2,7 @@ import { constants } from "node:fs";
 import { createHash } from "node:crypto";
 import { access as fsAccess } from "node:fs/promises";
 import { spawn } from "child_process";
+import { AgentToolError } from "@yunuspi/agent-core";
 import { Type } from "typebox";
 import { waitForChildProcess } from "../../utils/child-process.js";
 import { fileSizeLimitPrefix, getDiskLimits, watchDisk } from "../../utils/disk-guard.js";
@@ -284,6 +285,8 @@ export function createShellToolDefinition(cwd, config, options) {
                 return { text, details };
             };
             const appendStatus = (text, status) => `${text ? `${text}\n\n` : ""}${status}`;
+            const failure = ({ text, details }, kind, status, cause, execution) => new AgentToolError(
+                appendStatus(text, status), { ...details, failure: kind, ...(execution ? { execution } : {}) }, { cause });
             const cancelCapture = () => output.cancelCapture();
             if (signal?.aborted) cancelCapture();
             else signal?.addEventListener("abort", cancelCapture, { once: true });
@@ -301,38 +304,37 @@ export function createShellToolDefinition(cwd, config, options) {
                 }
                 catch (err) {
                     const snapshot = await finishOutput();
-                    const { text } = formatOutput(snapshot, "");
+                    const captured = formatOutput(snapshot, "");
                     if (err instanceof Error && err.message === "aborted") {
-                        throw new Error(appendStatus(text, "Command aborted"));
+                        throw failure(captured, "aborted", "Command aborted", err);
                     }
                     if (err instanceof Error && err.message.startsWith("disk-guard:")) {
-                        throw new Error(appendStatus(text, `Command stopped by disk guard: ${err.message.slice("disk-guard:".length)}. ` +
+                        throw failure(captured, "disk-guard", `Command stopped by disk guard: ${err.message.slice("disk-guard:".length)}. ` +
                             "Something wrote far more data than intended (unbounded loop, infinite stream such as ffmpeg apad/aevalsrc " +
-                            "without a duration, runaway log). Bound it before rerunning and delete the partial output."));
+                            "without a duration, runaway log). Bound it before rerunning and delete the partial output.", err);
                     }
                     if (err instanceof Error && err.message.startsWith("timeout:")) {
                         const timeoutSecs = err.message.split(":")[1];
                         // Renders and builds were rerun in the foreground with a guessed timeout and
                         // killed near the end; say the process is gone and where long work belongs.
-                        throw new Error(appendStatus(text, `Command timed out after ${timeoutSecs} seconds and was stopped. Check its partial output files before rerunning; run renders, builds and other long jobs with bg_run, which reports back when they finish. A process left behind with \`&\` or nohup is killed when the call returns; setsid is not a reliable way around it.`));
+                        throw failure(captured, "timeout", `Command timed out after ${timeoutSecs} seconds and was stopped. Check its partial output files before rerunning; run renders, builds and other long jobs with bg_run, which reports back when they finish. A process left behind with \`&\` or nohup is killed when the call returns; setsid is not a reliable way around it.`, err);
                     }
+                    if (captured.details) throw failure(captured, "execution", err instanceof Error ? err.message : String(err), err);
                     throw err;
                 }
                 const snapshot = await finishOutput();
                 if (signal?.aborted) {
-                    throw new Error(appendStatus(formatOutput(snapshot, "").text, "Command aborted"));
+                    throw failure(formatOutput(snapshot, ""), "aborted", "Command aborted");
                 }
-                const { text: outputText, details } = formatOutput(snapshot);
+                const captured = formatOutput(snapshot);
                 if (exitCode === null) {
-                    throw new Error(appendStatus(outputText, "Command terminated by signal"));
+                    throw failure(captured, "signal", "Command terminated by signal");
                 }
+                const execution = { exitCode, cwd: spawnContext.cwd, commandSha256: createHash("sha256").update(spawnContext.command).digest("hex") };
                 if (exitCode !== 0) {
-                    throw new Error(appendStatus(outputText, `Command exited with code ${exitCode}`));
+                    throw failure(captured, "nonzero-exit", `Command exited with code ${exitCode}`, undefined, execution);
                 }
-                return { content: [{ type: "text", text: outputText }], details: {
-                    ...details,
-                    execution: { exitCode, cwd: spawnContext.cwd, commandSha256: createHash("sha256").update(spawnContext.command).digest("hex") },
-                } };
+                return { content: [{ type: "text", text: captured.text }], details: { ...captured.details, execution } };
             }
             finally {
                 signal?.removeEventListener("abort", cancelCapture);

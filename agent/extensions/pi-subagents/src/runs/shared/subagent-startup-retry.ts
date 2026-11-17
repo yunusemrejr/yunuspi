@@ -10,6 +10,21 @@ export const SUBAGENT_STARTUP_RETRY_DELAYS_MS = [250, 750, 1500] as const;
 
 /** A genuine startup race should fail well before a model request can complete. */
 export const MAX_SUBAGENT_STARTUP_FAILURE_DURATION_MS = 2000;
+export const INCOMPLETE_CHILD_ASSISTANT_RESPONSE = "Child exited before its assistant response settled.";
+
+export interface PendingChildAssistantResponse { provider?: string; model?: string }
+
+/** The child RPC orders each assistant response's start, updates and end.
+ * Keep its route while it is in flight. Its terminal message owns usage. */
+export function updatePendingAssistantResponse(pending: PendingChildAssistantResponse | undefined,
+	event: { type?: unknown; message?: { role?: unknown; provider?: unknown; model?: unknown } }): PendingChildAssistantResponse | undefined {
+	if (event.message?.role !== "assistant") return pending;
+	if (event.type === "message_end") return undefined;
+	if (event.type !== "message_start" && event.type !== "message_update") return pending;
+	const provider = typeof event.message.provider === "string" ? event.message.provider : pending?.provider;
+	const model = typeof event.message.model === "string" ? event.message.model : pending?.model;
+	return pending && pending.provider === provider && pending.model === model ? pending : { provider, model };
+}
 
 const SIGKILL_PROCESS_SIGNAL_ERROR = formatProcessSignalError("SIGKILL");
 const EXTENSION_REGISTRATION_CONFLICT_PATTERN = /Failed to load extension\b[^\n]*:\s*(?:Tool|Flag)\s+"[^"]+"\s+conflicts with\b/i;
@@ -25,6 +40,7 @@ export interface SubagentStartupFailureEvidence {
 	protocolError?: unknown;
 	processSignal?: string | null;
 	observedMutationAttempt?: boolean;
+	assistantResponsePending?: boolean;
 	detached?: boolean;
 	interrupted?: boolean;
 	timedOut?: boolean;
@@ -68,6 +84,7 @@ export function isRetryableSubagentStartupFailure(evidence: SubagentStartupFailu
 		&& evidence.protocolError === undefined
 		&& (evidence.processSignal === undefined || evidence.processSignal === null || evidence.processSignal === "SIGKILL")
 		&& evidence.observedMutationAttempt !== true
+		&& evidence.assistantResponsePending !== true
 		&& evidence.detached !== true
 		&& evidence.interrupted !== true
 		&& evidence.timedOut !== true

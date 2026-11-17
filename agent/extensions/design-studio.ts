@@ -15,20 +15,37 @@ const outputDir = Type.Optional(Type.String({ minLength: 1, maxLength: 4096, des
 const scale = Type.Optional(Type.Number({ minimum: 0.5, maximum: 4, description: "Device pixel ratio of the reference export (2 for @2x). Inferred from common export widths when omitted" }));
 
 export default function designStudio(pi: any) {
-  function register(name: string, description: string, parameters: any, handler: (params: any, cwd: string, signal?: AbortSignal, ctx?: any) => Promise<any>, deadlineMs: number) {
+  function register(name: string, description: string, parameters: any, handler: (params: any, cwd: string, signal: AbortSignal, ctx: any, toolCallId: string) => Promise<any>, deadlineMs: number) {
     pi.registerTool({
       name, label: name.replaceAll("_", " "), description, parameters,
-      async execute(_id: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) {
+      async execute(toolCallId: string, params: any, signal: AbortSignal | undefined, _update: any, ctx: any) {
         const deadline = AbortSignal.timeout(deadlineMs);
         const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
-        const result = await handler(params, ctx?.cwd || process.cwd(), bounded, ctx);
+        const result = await handler(params, ctx?.cwd || process.cwd(), bounded, ctx, toolCallId);
         return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
       },
     });
   }
   register("image_understand", "Ask a vision model about 1..8 local images: content, composition, visible defects, references or sampled-frame comparisons. Runs on the session model when it accepts images. Returns observations, usage and source hash/crop/scale evidence. region isolates small details in one image; maxWidth bounds sent pixels. Files are sent to the session model's provider; a design-map.json remains a local alternative for measurements.",
     Type.Object({ action: Type.Optional(choices(["analyze"])), path: Type.Optional(localPath), paths: Type.Optional(Type.Array(localPath, { minItems: 1, maxItems: 8 })), prompt: Type.Optional(Type.String({ minLength: 1, maxLength: 8000 })), region: Type.Optional(box), maxWidth: Type.Optional(Type.Integer({ minimum: 256, maximum: 2560 })), maxTokens: Type.Optional(Type.Integer({ minimum: 128, maximum: 8192 })) }),
-    (params, cwd, signal, ctx) => { const id = randomUUID(), session = ctx?.sessionManager?.getSessionId?.(); return imageUnderstand(params, cwd, signal, ctx, { onUsage: (usage, status, model) => { if (ctx?.sessionManager?.getSessionId?.() !== session) return; try { pi.appendEntry?.("auxiliary-model-usage-v1", { id, owner: "image-understand", provider: model.provider, model: model.id, status, ...(usage === undefined ? {} : { usage }) }); } catch {} } }); }, 180000);
+    (params, cwd, signal, ctx, toolCallId) => {
+      const id = randomUUID();
+      const owner = ctx?.sessionManager, sessionId = owner?.getSessionId?.();
+      let append: ((data: unknown) => boolean) | undefined;
+      try { append = pi.bindAuxiliaryUsage?.(); } catch { /* A stale context cannot start a new receipt. */ }
+      return imageUnderstand(params, cwd, signal, ctx, {
+        onUsage(usage, status, model) {
+          const receipt = { id, owner: "image-understand", toolCallId, provider: model.provider, model: model.id,
+            status, ...(usage === undefined ? {} : { usage }) };
+          try {
+            if (append) append(receipt);
+            else if (sessionId && ctx?.sessionManager === owner && owner.getSessionId?.() === sessionId) {
+              pi.appendEntry?.("auxiliary-model-usage-v1", receipt);
+            }
+          } catch { /* Accounting must not invalidate completed vision work. */ }
+        },
+      });
+    }, 180000);
   register("image_crop",
     "Cut assets out of a reference at full source resolution: explicit regions (source px, or css with units:\"css\"), or block ids / kinds from an existing design-map.json (e.g. kinds:[\"image\"] cuts every photo). Optional padding, background keying to transparency (key:\"auto\" or #rrggbb, edge-connected with de-fringing), trim and format (auto picks PNG for flat/alpha and WebP for photographic). Returns files with CSS sizes. Up to 24 assets per call.",
     Type.Object({ ...source, map: Type.Optional(localPath), blocks: Type.Optional(Type.Array(Type.String({ pattern: "^b\\d{1,4}$" }), { maxItems: 24 })), kinds: Type.Optional(Type.Array(choices(["image", "icon", "gradient", "mixed", "flat", "container"]), { maxItems: 6 })),
