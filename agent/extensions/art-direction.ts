@@ -669,7 +669,8 @@ export default function artDirection(pi: any) {
         delete imageBaseEnv.PI_IMAGE_API_URL; delete imageBaseEnv.PI_IMAGE_API_KEY;
       }
       if (selectedBackend === 'openrouter' && params.model === 'auto' && params.maxCostUsd === undefined) params.maxCostUsd = .25;
-      const ownerSession = ctx.sessionManager?.getSessionId?.();
+      const ownerManager = ctx.sessionManager;
+      const ownerSession = ownerManager?.getSessionId?.();
       const backendName = imageBaseEnv.PI_IMAGE_BACKEND?.trim().toLowerCase();
       const providerKey = params.action !== "brief" && (!backendName || backendName === "openrouter") && !imageBaseEnv.PI_IMAGE_API_KEY && !process.env.OPENROUTER_API_KEY
         ? await ctx.modelRegistry?.getApiKeyForProvider?.("openrouter") : undefined;
@@ -680,11 +681,19 @@ export default function artDirection(pi: any) {
       if (params.action === "brief") return { result: buildGenerationBrief(direction, params) };
       if (params.action === 'plan') return { result: await planImageModel({ ...params, model: params.model ?? imageBaseEnv.PI_IMAGE_MODEL ?? 'auto' }, signal) };
       const imageEnv = imageBackendEnvironment(imageBaseEnv, !!providerKey, params.model);
+      assertOwner(ctx);
+      // The charged request can outlive the creative tool's session context.
+      const appendUsage = typeof pi.bindAuxiliaryUsage === "function" ? pi.bindAuxiliaryUsage() : undefined;
       let usageModel = imageEnv.PI_IMAGE_MODEL;
       const usageId = randomUUID();
       const runtime = { providerKey, onModel: (model: string) => { usageModel = model; }, onUsage: (usage: unknown, status: string) => {
-        if (ctx.sessionManager?.getSessionId?.() !== ownerSession) return;
-        try { pi.appendEntry?.("auxiliary-model-usage-v1", { id: usageId, owner: "image-generate", provider: imageEnv.PI_IMAGE_BACKEND === "openrouter" ? "openrouter" : "openai-compatible", model: usageModel?.trim().slice(0, 128), status, ...(usage === undefined ? {} : { usage }) }); } catch { /* accounting must not discard generated pixels */ }
+        const receipt = { id: usageId, owner: "image-generate", provider: imageEnv.PI_IMAGE_BACKEND === "openrouter" ? "openrouter" : "openai-compatible", model: usageModel?.trim().slice(0, 128), status, ...(usage === undefined ? {} : { usage }) };
+        try {
+          if (appendUsage) appendUsage(receipt);
+          else if (ownerSession && ctx.sessionManager === ownerManager && ownerManager.getSessionId?.() === ownerSession) {
+            pi.appendEntry?.("auxiliary-model-usage-v1", receipt);
+          }
+        } catch { /* accounting must not discard generated pixels */ }
       } };
       if (params.action === "generate") {
         const run = await imageGenerateRun(params, ctx.cwd as string, signal, direction, imageEnv, runtime);

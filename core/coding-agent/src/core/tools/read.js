@@ -173,7 +173,7 @@ export function createReadToolDefinition(cwd, options) {
                         if (aborted)
                             return;
                         signal?.removeEventListener("abort", onAbort);
-                        resolve({ content, details });}); /* PI_NATIVE_READ_QUEUE_END */
+                        resolve({ content, details });}, signal); /* PI_NATIVE_READ_QUEUE_END */
                     }
                     catch (error) {
                         let failure = error;

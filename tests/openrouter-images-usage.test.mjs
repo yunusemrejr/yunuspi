@@ -1,13 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateImages } from '../core/ai/src/api/openrouter-images.js';
+import { collectSessionCost } from '../core/coding-agent/src/core/session-accounting.js';
 const model = { id: 'fixture-image', provider: 'openrouter', api: 'openrouter-images', baseUrl: 'https://openrouter.ai/api/v1', input: ['text'], output: ['image'], cost: { input: 1, output: 2, cacheRead: .1, cacheWrite: 1.25 } };
 const valid = { prompt_tokens: 100, completion_tokens: 1, prompt_tokens_details: { cached_tokens: 80, cache_write_tokens: 10 } };
-async function generate(rawUsage, overrides = {}) {
+async function generate(rawUsage, overrides = {}, http = {}) {
   let requests = 0;
   const result = await generateImages({ ...model, ...overrides }, { input: [{ type: 'text', text: 'fixture' }] }, {
     apiKey: 'TEST_fixture-only', maxRetries: 0,
-    fetch: async () => { requests++; return new Response('{"id":"fixture","choices":[{"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":' + (typeof rawUsage === 'string' ? rawUsage : JSON.stringify(rawUsage)) + '}', { status: 200, headers: { 'content-type': 'application/json' } }); },
+    fetch: async url => {
+      requests++;
+      assert.equal(String(url), `${(overrides.baseUrl ?? model.baseUrl).replace(/\/$/, '')}/chat/completions`);
+      const response = new Response('{"id":"fixture","choices":[{"message":{"role":"assistant","content":""},"finish_reason":"stop"}],"usage":' +
+        (typeof rawUsage === 'string' ? rawUsage : JSON.stringify(rawUsage)) + '}', { headers: {'content-type':'application/json'} });
+      if (http.url !== undefined) Object.defineProperty(response, 'url', {value:http.url});
+      if (http.redirected) Object.defineProperty(response, 'redirected', {value:true});
+      return response;
+    },
   });
   assert.equal(result.stopReason, 'stop', result.errorMessage);
   assert.equal(requests, 1, 'accounting never makes extra model or billing requests');
@@ -77,6 +86,32 @@ test('official returned charges including zero take precedence without adding up
     const usage = await generate({ ...valid, cost: .0042 }, overrides);
     assert.equal(usage.cost.source, 'estimate');
     assert.ok(Math.abs(usage.cost.total - .0000325) < 1e-12);
+  }
+});
+test('chat images use exact OpenRouter HTTP authority and report partial BYOK charges', async () => {
+  const ledger = usage => collectSessionCost([{type:'custom', customType:'auxiliary-model-usage-v1',
+    data:{id:'fixture', owner:'image-generate', provider:'openrouter', model:'fixture-image', status:'completed', usage}}]).formatted;
+  const upstream = {is_byok:true, cost_details:{upstream_inference_cost:.02}};
+  for (const origin of ['https://openrouter.ai', 'https://eu.openrouter.ai', 'https://us.openrouter.ai']) {
+    const options = {baseUrl:origin+'/api/v1', cost:undefined};
+    const http = {url:origin+'/api/v1/chat/completions'};
+    for (const [billing, expected] of [
+      [{cost:.01}, '$0.010000'], [{cost:0}, '$0.000'],
+      [upstream, '$0.020000+?'], [{...upstream, cost:0}, '$0.020000'],
+      [{cost:.01, is_byok:true}, '$0.010000+?'], [{is_byok:true}, '$?'],
+      [{...upstream, is_byok:false, cost:.01}, '$0.010000'],
+    ]) assert.equal(ledger(await generate({...valid, ...billing}, options, http)), expected, origin);
+  }
+  for (const [baseUrl, http] of [
+    [model.baseUrl, {url:'https://gateway.invalid/chat/completions'}],
+    [model.baseUrl, {url:model.baseUrl+'/chat/completions', redirected:true}],
+    ['https://openrouter.ai:8000/api/v1', {}],
+    ['https://openrouter.ai/compatible/v1', {}],
+    ['https://eu.openrouter.ai.gateway.invalid/api/v1', {}],
+  ]) {
+    const usage = await generate({...valid, cost:.5, ...upstream}, {baseUrl,cost:undefined}, http);
+    assert.equal(ledger(usage), '$?', baseUrl);
+    assert.equal(usage.input, 10);
   }
 });
 test('image estimates reuse context tiers and partial/missing rate semantics', async () => {

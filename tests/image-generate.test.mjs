@@ -80,6 +80,103 @@ async function picture(format = 'png') {
   return encodeImage({ width: 8, height: 8, data: new Uint8Array(8 * 8 * 4).fill(255) }, format);
 }
 
+for (const [action, reported] of [['fork',.01], ['switch',.01], ['switch',undefined], ['stop',.01]]) {
+  test(`${reported === undefined ? 'an unpriced' : 'a paid'} image request retains its source receipt after ${action}`, {timeout:15_000}, async t => {
+    const { AgentSessionRuntime, DefaultResourceLoader, SessionManager, SettingsManager, createAgentSession } =
+      await import('../core/coding-agent/src/index.js');
+    const { collectSessionCost } = await import('../core/coding-agent/src/core/session-accounting.js');
+    const { default: registerArtDirection } = await load('extensions/art-direction.ts');
+    const cwd = workspace(t), bytes = await picture();
+    const config = {PI_IMAGE_BACKEND:'openrouter', PI_IMAGE_API_URL:'https://openrouter.ai/api/v1', PI_IMAGE_API_KEY:'TEST_image_owner_fixture'};
+    const previous = Object.fromEntries(Object.keys(config).map(key => [key, process.env[key]]));
+    Object.assign(process.env, config);
+    t.after(() => {
+      for (const [key, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[key]; else process.env[key] = value;
+      }
+    });
+    const submitted = Promise.withResolvers(), response = Promise.withResolvers();
+    const outbound = t.mock.method(globalThis, 'fetch', async (url, init) => {
+      assert.equal(String(url), 'https://openrouter.ai/api/v1/chat/completions');
+      assert.equal(init.method, 'POST');
+      assert.equal(new Headers(init.headers).get('authorization'), 'Bearer TEST_image_owner_fixture');
+      submitted.resolve();
+      return response.promise;
+    });
+    const model = {id:'fixture', name:'Fixture', api:'openai-completions', provider:'audit', baseUrl:'https://fixture.invalid',
+      input:['text'], reasoning:false, contextWindow:8192, maxTokens:2048, cost:{input:0,output:0,cacheRead:0,cacheWrite:0}};
+    const modelRuntime = {getModel:()=>model, getAvailable:()=>[model], hasConfiguredAuth:()=>true, isUsingSubscription:()=>false,
+      streamSimple(){ assert.fail('the fixture makes no model request'); }};
+    async function create(sessionManager) {
+      let context;
+      const settingsManager = SettingsManager.inMemory();
+      const resourceLoader = new DefaultResourceLoader({cwd, agentDir:cwd, settingsManager, noExtensions:true, noSkills:true,
+        noPromptTemplates:true, noThemes:true, noContextFiles:true, extensionFactories:[pi => {
+          registerArtDirection(pi);
+          pi.on('session_start', (_event, ctx) => { context = ctx; });
+        }]});
+      await resourceLoader.reload();
+      const runtime = await createAgentSession({cwd, agentDir:cwd, model, modelRuntime, settingsManager, resourceLoader, sessionManager, tools:[]});
+      await runtime.session.bindExtensions({mode:'print'});
+      return {...runtime, context, services:{cwd, agentDir:cwd}};
+    }
+    function sessionFile() {
+      const manager = SessionManager.create(cwd, cwd);
+      manager.appendMessage({role:'user', content:'Generate a synthetic image.', timestamp:1});
+      manager.flush();
+      return manager;
+    }
+    const manager = sessionFile(), original = await create(manager);
+    const sourceFile = manager.getSessionFile(), sourceLeaf = manager.getLeafId();
+    const host = new AgentSessionRuntime(original.session, original.services, ({sessionManager}) => create(sessionManager));
+    t.after(() => host.dispose());
+    const stop = new AbortController();
+    if (action === 'stop') original.session.subscribe(event => {
+      if (event.type === 'entry_appended' && event.entry.data?.status === 'completed') {
+        stop.abort(new DOMException('Fixture stop after image receipt', 'AbortError'));
+      }
+    });
+    const tool = original.session.extensionRunner.getToolDefinition('image_generate');
+    assert.ok(tool);
+    const invoke = tool.execute('image-fixture', {action:'generate', model:'fixture/image', prompt:'Synthetic plate.'},
+      stop.signal, undefined, original.context).then(result => ({result}), error => ({error}));
+    const readSource = () => SessionManager.open(sourceFile, cwd).getEntries();
+    const targetEvents = [];
+    let pendingTarget;
+    try {
+      await Promise.race([submitted.promise, invoke.then(outcome => assert.fail(outcome.error ?? 'tool ended before dispatch'))]);
+      assert.equal(collectSessionCost(readSource()).pending, 1);
+      if (action === 'fork') assert.equal((await host.fork(manager.getLeafId(), {position:'at'})).cancelled, false);
+      if (action === 'switch') assert.equal((await host.switchSession(sessionFile().getSessionFile())).cancelled, false);
+      if (action !== 'stop') {
+        host.session.subscribe(event => targetEvents.push(event.type));
+        pendingTarget = collectSessionCost(host.session.sessionManager.getEntries()).pending;
+      }
+    } finally {
+      response.resolve(Response.json({id:'fixture', choices:[{message:{content:'',
+        images:[{image_url:{url:`data:image/png;base64,${bytes.toString('base64')}`}}]}}],
+      ...(reported === undefined ? {} : {usage:{prompt_tokens:10, completion_tokens:2, cost:reported}})}));
+      await invoke;
+    }
+    const entries = readSource(), source = collectSessionCost(entries);
+    const receipts = entries.filter(entry => entry.customType === 'auxiliary-model-usage-v1');
+    const target = collectSessionCost(host.session.sessionManager.getEntries());
+    assert.equal(outbound.mock.callCount(), 1);
+    assert.deepEqual({reported:source.reported, pending:source.pending, unknown:source.unknown, pendingTarget},
+      {reported:reported ?? 0, pending:0, unknown:reported === undefined, pendingTarget:action === 'stop' ? undefined : 0});
+    assert.deepEqual(receipts.map(entry => [entry.parentId, entry.accountingOnly, entry.data.status]),
+      [[sourceLeaf,true,'pending'], [sourceLeaf,true,'completed']]);
+    assert.equal(receipts[0].data.id, receipts[1].data.id);
+    assert.equal(collectSessionCost([...entries,...entries]).reported, reported ?? 0);
+    if (action === 'stop') assert.match((await invoke).error?.message ?? '', /Fixture stop after image receipt/);
+    else {
+      assert.equal(target.total, 0);
+      assert.equal(target.pending, 0);
+      assert.ok(!targetEvents.includes('entry_appended'));
+    }
+  });
+}
+
 test('generated artifacts require decoded pixels and a failed registry preserves generated pixels for recovery', async t => {
   const cwd = workspace(t), oldFetch = globalThis.fetch;
   t.after(() => { globalThis.fetch = oldFetch; });
@@ -220,11 +317,28 @@ test('registered Images tool accepts reported OpenRouter USD only with direct na
   const zero = await prepare({...directOpenRouter, usage:{...core, cost:0}});
   assert.equal(zero.formatted, '$0.000');
   const byok = await prepare({...directOpenRouter, usage:{...core, cost:.125, is_byok:true, cost_details:{upstream_inference_cost:.25}}});
-  assert.equal(byok.formatted, '$0.375000');
+  assert.equal(byok.formatted, '$0.125000+?');
+  const regional = await prepare({...directOpenRouter, origin:'https://us.openrouter.ai', usage:{...core, cost:.125},
+    responseUrl:'https://us.openrouter.ai/api/v1/images'});
+  assert.equal(regional.formatted, '$0.125000');
   const redirect = await prepare({...directOpenRouter, usage:{...core, cost:.5}, responseUrl:'https://gateway.example.invalid/api/v1/images'});
   assert.equal(redirect.formatted, '$?');
   const conflicting = await prepare({...directOpenRouter, usage:{...core, cost:.5, currency:'EUR'}});
   assert.equal(conflicting.formatted, '$?');
+});
+
+test('registered chat Images tool retains HTTP authority through bounded response reading', async t => {
+  const cwd = workspace(t), pixels = await picture();
+  const prepare = await imageBillingFixture(t, cwd, pixels);
+  const usage = {prompt_tokens:100, completion_tokens:1000, is_byok:true, cost_details:{upstream_inference_cost:.02}};
+  const origin = 'https://eu.openrouter.ai', responseUrl = origin+'/api/v1/chat/completions';
+  const route = {origin, responseUrl, backend:'openrouter', transport:'chat', model:'fixture/image', usage};
+  assert.equal((await prepare(route)).formatted, '$0.020000+?');
+  assert.equal((await prepare({...route, usage:{...usage, cost:0}})).formatted, '$0.020000');
+  const direct = { ...route, origin:'https://openrouter.ai', responseUrl:'https://openrouter.ai/api/v1/chat/completions',
+    usage:{...usage, cost:.4} };
+  assert.equal((await prepare({...direct, redirected:true})).formatted, '$?');
+  assert.equal((await prepare({...direct, responseUrl:'https://gateway.invalid/api/v1/chat/completions'})).formatted, '$?');
 });
 
 async function imageBillingFixture(t, cwd, pixels) {
@@ -233,7 +347,8 @@ async function imageBillingFixture(t, cwd, pixels) {
   const keys = ['PI_IMAGE_BACKEND', 'PI_IMAGE_API_URL', 'PI_IMAGE_API_KEY', 'PI_IMAGE_MODEL'];
   const before = Object.fromEntries(keys.map(key => [key, process.env[key]]));
   t.after(() => { for (const key of keys) before[key] === undefined ? delete process.env[key] : process.env[key] = before[key]; });
-  return async ({usage, origin = 'https://api.openai.com', backend = 'openai-compatible', model = 'gpt-image-2.6-sunburst', edit = false, responseUrl}) => {
+  return async ({usage, origin = 'https://api.openai.com', backend = 'openai-compatible', model = 'gpt-image-2.6-sunburst',
+    edit = false, responseUrl, redirected = false, transport = 'images'}) => {
     const isRouter = backend === 'openrouter';
     process.env.PI_IMAGE_BACKEND = backend;
     process.env.PI_IMAGE_API_URL = `${origin}${isRouter ? '/api/v1' : '/v1'}`;
@@ -244,16 +359,21 @@ async function imageBillingFixture(t, cwd, pixels) {
     const fetch = t.mock.method(globalThis, 'fetch', async (url, options) => {
       const endpoint = new URL(String(url));
       assert.equal(endpoint.origin, origin);
-      assert.equal(endpoint.pathname, isRouter ? '/api/v1/images' : edit ? '/v1/images/edits' : '/v1/images/generations');
+      assert.equal(endpoint.pathname, isRouter ? transport === 'chat' ? '/api/v1/chat/completions' : '/api/v1/images'
+        : edit ? '/v1/images/edits' : '/v1/images/generations');
       assert.equal(edit ? options.body.get('model') : JSON.parse(options.body).model, model);
-      const response = Response.json({data:[{b64_json:Buffer.from(pixels).toString('base64')}], usage});
+      const base64 = Buffer.from(pixels).toString('base64');
+      const response = Response.json(isRouter && transport === 'chat'
+        ? {choices:[{message:{content:'', images:[{image_url:{url:`data:image/png;base64,${base64}`}}]}}], usage}
+        : {data:[{b64_json:base64}], usage});
       if (responseUrl) Object.defineProperty(response, 'url', {value:responseUrl});
+      if (redirected) Object.defineProperty(response, 'redirected', {value:true});
       return response;
     });
     const ctx = {cwd, model:{input:['text','image']}, sessionManager:{getSessionId:()=>'synthetic-billing-session'}};
     try {
       const result = await tools.find(tool => tool.name === 'image_generate').execute('synthetic',
-        {action:edit ? 'edit' : 'generate', prompt:'Synthetic square for billing', format:'png', ...(edit && {path:'reference.png'}), ...(isRouter && {transport:'images'})},
+        {action:edit ? 'edit' : 'generate', prompt:'Synthetic square for billing', format:'png', ...(edit && {path:'reference.png'}), ...(isRouter && {transport})},
         undefined, undefined, ctx);
       assert.equal(fetch.mock.callCount(), 1);
       assert.equal(result.details.decodeVerified, true);

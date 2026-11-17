@@ -1,3 +1,10 @@
+## 0.56.28 — Cancellable file work, sandbox readiness, and image billing
+
+- Cancel queued file mutations and path lookups promptly while keeping admitted writes ordered until they settle.
+- Start the guarded background-shell execution timer after sandbox readiness. Startup has its own deadline.
+- Expand explicitly requested skills with an abortable regular-file read so a named pipe cannot freeze the session.
+- Keep image-generation usage with the originating session through forks and switches. Verify OpenRouter billing evidence across supported regional endpoints and keep missing amounts unknown.
+
 ## 0.56.27 — Accurate footer labels, retained job outcomes, and faster startup
 
 - Derive the footer's subscription label from recorded requests in live, terminal, and reopened sessions.

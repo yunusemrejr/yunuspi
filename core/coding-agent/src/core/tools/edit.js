@@ -154,7 +154,7 @@ export function createEditToolDefinition(cwd, options) {
                     }
                     throw error;
                 }
-            });
+            }, signal);
         },
         ...editRenderers,
     };

@@ -53,7 +53,7 @@ export function createWriteToolDefinition(cwd, options) {
                     content: [{ type: "text", text: `Successfully wrote to ${path}` }],
                     details: documentMutation ? { documentMutation } : undefined,
                 };
-            });
+            }, signal);
         },
         ...writeRenderers,
     };

@@ -307,13 +307,21 @@ def main():
     at = 2
     gpu = False
     ready = False
-    while at < len(sys.argv) and sys.argv[at] in ('--protect', '--gpu', '--ready-pipe'):
+    mounted_ready = None
+    while at < len(sys.argv) and sys.argv[at] in ('--protect', '--gpu', '--ready-pipe', '--mounted-ready'):
         if sys.argv[at] == '--ready-pipe':
             mode = os.fstat(GUARD_READY_FD).st_mode
-            if ready or not (stat.S_ISSOCK(mode) or stat.S_ISFIFO(mode)):
+            if ready or mounted_ready or not (stat.S_ISSOCK(mode) or stat.S_ISFIFO(mode)):
                 raise RuntimeError('invalid harness readiness pipe')
             ready = True
             at += 1
+            continue
+        if sys.argv[at] == '--mounted-ready':
+            token = sys.argv[at + 1] if at + 1 < len(sys.argv) else ''
+            if ready or mounted_ready or len(token) != 32 or any(c not in '0123456789abcdef' for c in token):
+                raise RuntimeError('invalid mounted readiness token')
+            mounted_ready = token
+            at += 2
             continue
         if sys.argv[at] == '--gpu':
             # Opt-in GPU render nodes for Vulkan/GL compute (Brush, Blender). Not the
@@ -346,12 +354,18 @@ def main():
     # project builds retain their filesystem access.
     writable = writable_mounts(roots)
     ssh_mounts, ssh_descriptors = ssh_config_mounts()
+    command = sys.argv[at + 1:]
+    if mounted_ready:
+        # Only this fixed trampoline can write before the user command. It runs
+        # after mount setup, then replaces itself with the original argv.
+        command = ['/bin/sh', '-c', r'/usr/bin/printf "\036%s\n" "$1" || exit 126; shift; exec "$@"',
+                   'yunuspi-mount-ready', mounted_ready, *command]
     arguments = ['/usr/bin/bwrap', '--unshare-user', '--unshare-pid',
                  '--ro-bind', '/', '/', *writable,
                  *ssh_mounts,
                  '--proc', '/proc', '--dev', '/dev',
                  *(['--dev-bind-try', '/dev/dri', '/dev/dri'] if gpu else []),
-                 '--cap-drop', 'ALL', '--die-with-parent', '--', *sys.argv[at + 1:]]
+                 '--cap-drop', 'ALL', '--die-with-parent', '--', *command]
     try:
         if ready:
             # Report admission on the private parent pipe after preparing the

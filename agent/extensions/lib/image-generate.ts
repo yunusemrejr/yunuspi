@@ -222,7 +222,7 @@ function imageBillingRoute(requestUrl: string, response: Response): ImageBilling
   try {
     const url = new URL(requestUrl);
     if (response.url && new URL(response.url).href !== url.href) return undefined;
-    if (url.href === "https://openrouter.ai/api/v1/images") return "openrouter";
+    if (/^https:\/\/(?:(?:us|eu)\.)?openrouter\.ai\/api\/v1\/images$/.test(url.href)) return "openrouter";
     if (url.href === "https://api.openai.com/v1/images/generations" || url.href === "https://api.openai.com/v1/images/edits") return "openai";
   } catch { /* Unknown origin has no pricing contract. */ }
   return undefined;
@@ -333,13 +333,11 @@ export function imageUsage(raw: any, evidence: ImageBillingEvidence = {}) {
   const reasoning = raw.completion_tokens_details?.reasoning_tokens ?? raw.reasoning;
   if (tokenCount(totalTokens)) usage.totalTokens = totalTokens;
   if (tokenCount(reasoning)) usage.reasoning = reasoning;
-  // Only the documented native OpenRouter field carries an authoritative USD total.
-  // https://openrouter.ai/blog/tutorials/image-generation/
+  // The dedicated /images schema documents usage.cost, but no upstream charge.
+  // https://openrouter.ai/docs/guides/overview/multimodal/image-generation
   if (evidence.route === "openrouter" && usdAmount(raw.cost) && currencyIsUsd(raw.currency) && currencyIsUsd(raw.cost_currency)) {
-    const upstream = raw.cost_details?.upstream_inference_cost;
-    usage.cost = { total: raw.cost, source: "provider-reported", complete: true,
-      ...(raw.is_byok === true ? { byok: true } : {}),
-      ...(usdAmount(upstream) && currencyIsUsd(raw.cost_details?.currency) ? { upstreamInferenceCost: upstream } : {}) };
+    const byok = raw.is_byok === true;
+    usage.cost = { total: raw.cost, source: "provider-reported", complete: !byok, ...(byok ? { byok: true } : {}) };
   } else if (evidence.route === "openai") {
     const cost = estimateOpenAIImageUsage(raw, cached, written, evidence);
     if (cost) usage.cost = cost;
@@ -433,7 +431,12 @@ async function openRouterImage(brief: GenerationBrief, params: any, backend: Bac
     fetch: async (url, options) => {
       const response = await fetch(url, options);
       const text = await responseText(response, bounded);
-      return new Response(text, { status: response.status, statusText: response.statusText, headers: response.headers });
+      const buffered = new Response(text, { status: response.status, statusText: response.statusText, headers: response.headers });
+      // The SDK needs the original response provenance to trust reported costs.
+      return Object.defineProperties(buffered, {
+        url: { value: response.url },
+        redirected: { value: response.redirected },
+      });
     },
   }); } catch (error) {
     runtime.onUsage?.(undefined, bounded.aborted ? bounded.reason?.name === "TimeoutError" ? "timeout" : "cancelled" : "failed");

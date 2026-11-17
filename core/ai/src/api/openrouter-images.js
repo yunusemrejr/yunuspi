@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { calculateCost } from "../models.js";
+import { applyOpenRouterUsage, isOpenRouterBillingEndpoint } from "./openrouter-usage.js";
 import { formatProviderError, normalizeProviderError } from "../utils/error-body.js";
 import { headersToRecord, providerHeadersToRecord } from "../utils/headers.js";
 import { retryProviderRequest } from "../utils/provider-retry.js";
@@ -40,7 +41,7 @@ export const generateImages = async (model, context, options) => {
         const imageResponse = response;
         output.responseId = imageResponse.id;
         if (imageResponse.usage) {
-            output.usage = parseUsage(imageResponse.usage, model);
+            output.usage = parseUsage(imageResponse.usage, model, rawResponse);
         }
         const choice = imageResponse.choices[0];
         if (choice) {
@@ -106,7 +107,7 @@ function buildParams(model, context) {
         modalities: model.output.includes("text") ? ["image", "text"] : ["image"],
     };
 }
-function parseUsage(rawUsage, model) {
+function parseUsage(rawUsage, model, response) {
     let countsComplete = true;
     const validCount = value => Number.isSafeInteger(value) && value >= 0;
     const count = (value, required = false) => {
@@ -140,21 +141,8 @@ function parseUsage(rawUsage, model) {
     };
     calculateCost(model, usage);
     usage.cost.complete = usage.cost.complete && countsComplete;
-    // The official account charge includes routing discounts/fees which a
-    // catalog estimate cannot reconstruct. Upstream cost is separate evidence.
-    let official = false;
-    try {
-        const endpoint = new URL(model.baseUrl);
-        official = model.provider === "openrouter" && endpoint.protocol === "https:" && endpoint.hostname === "openrouter.ai";
-    } catch {}
-    if (official && Number.isFinite(rawUsage.cost) && rawUsage.cost >= 0) {
-        usage.cost.estimatedTotal = usage.cost.total;
-        usage.cost.total = rawUsage.cost;
-        usage.cost.source = "provider-reported";
-        usage.cost.complete = true;
-        const upstream = rawUsage.cost_details?.upstream_inference_cost;
-        if (Number.isFinite(upstream) && upstream >= 0) usage.cost.upstreamInferenceCost = upstream;
-        if (rawUsage.is_byok === true) usage.cost.byok = true;
+    if (isOpenRouterBillingEndpoint(model, response, "chat/completions")) {
+        applyOpenRouterUsage(usage, rawUsage);
     }
     return usage;
 }

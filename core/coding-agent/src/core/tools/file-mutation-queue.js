@@ -1,7 +1,7 @@
+import { createFileMutationQueue } from "@yunuspi/agent-core/node";
 import { realpath } from "node:fs/promises";
 import { resolve } from "node:path";
-const fileMutationQueues = new Map();
-let registrationQueue = Promise.resolve();
+const queue = createFileMutationQueue();
 function isMissingPathError(error) {
     return (typeof error === "object" &&
         error !== null &&
@@ -24,28 +24,6 @@ async function getMutationQueueKey(filePath) {
  * Serialize file mutation operations targeting the same file.
  * Operations for different files still run in parallel.
  */
-export async function withFileMutationQueue(filePath, fn) {
-    const registration = registrationQueue.then(async () => {
-        const key = await getMutationQueueKey(filePath);
-        const currentQueue = fileMutationQueues.get(key) ?? Promise.resolve();
-        let releaseNext;
-        const nextQueue = new Promise((resolveQueue) => {
-            releaseNext = resolveQueue;
-        });
-        const chainedQueue = currentQueue.then(() => nextQueue);
-        fileMutationQueues.set(key, chainedQueue);
-        return { key, currentQueue, chainedQueue, releaseNext };
-    });
-    registrationQueue = registration.then(() => undefined, () => undefined);
-    const { key, currentQueue, chainedQueue, releaseNext } = await registration;
-    await currentQueue;
-    try {
-        return await fn();
-    }
-    finally {
-        releaseNext();
-        if (fileMutationQueues.get(key) === chainedQueue) {
-            fileMutationQueues.delete(key);
-        }
-    }
+export function withFileMutationQueue(filePath, fn, signal) {
+    return queue(() => getMutationQueueKey(filePath), fn, signal);
 }

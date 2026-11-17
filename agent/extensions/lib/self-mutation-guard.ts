@@ -1,6 +1,7 @@
 /** Launch-scoped harness maintenance authority. Never derive authority from tool cwd. */
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { randomBytes } from "node:crypto";
 import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -321,14 +322,15 @@ function hasHarnessInode(target: fs.Stats): boolean {
 export function guardedCommand(
   command: string,
   args: readonly string[],
-  options: { gpu?: boolean; readyPipe?: boolean } = {},
-): { command: string; args: string[]; readyFd?: 3 } {
+  options: { gpu?: boolean; readyPipe?: boolean; mountedReady?: boolean } = {},
+): { command: string; args: string[]; readyFd?: 3; readyStdoutPrefix?: Buffer } {
   if (SELF_MUTATION_ALLOWED) return { command, args: [...args] };
   if (rootDiscoveryFailed) throw new Error(discoveryFailure);
   if (process.platform !== "linux")
     throw new Error(
       "Harness write isolation requires Linux bubblewrap. Use the documented WSL2/Linux VM runtime. No unisolated command was started.",
     );
+  const readyToken = options.mountedReady ? randomBytes(16).toString("hex") : undefined;
   return {
     command: "/usr/bin/python3",
     args: [
@@ -341,11 +343,13 @@ export function guardedCommand(
       // GPU render nodes only for engines that compute on them (Vulkan/GL).
       ...(options.gpu ? ["--gpu"] : []),
       ...(options.readyPipe ? ["--ready-pipe"] : []),
+      ...(readyToken ? ["--mounted-ready", readyToken] : []),
       "--",
       command,
       ...args,
     ],
     ...(options.readyPipe ? { readyFd: 3 as const } : {}),
+    ...(readyToken ? { readyStdoutPrefix: Buffer.from(`\x1e${readyToken}\n`) } : {}),
   };
 }
 

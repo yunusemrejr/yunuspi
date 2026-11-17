@@ -74,6 +74,7 @@ export class BackgroundAdmissionCapacityError extends Error {
 }
 // Node clamps larger delays to 1ms, which would immediately kill the task.
 export const MAX_TASK_TIMEOUT_SECONDS = 2_147_483_647 / 1000;
+const GUARD_ADMISSION_MS = 120_000;
 const TELEMETRY_BUFFER_CHARS = 512 * 1024;
 const TERMINAL_PUBLISH_MAX_ATTEMPTS = 5;
 const TERMINAL_PUBLISH_BASE_DELAY_MS = 100;
@@ -1076,7 +1077,7 @@ export class BackgroundTaskRegistry {
           ? baseInvocation
           : shellInvocation(commandToSpawn, this.platform, this.env);
       if (outputFailure !== undefined) throw new Error(outputFailure);
-      const guarded = guardedCommand(invocation.shell, invocation.args);
+      const guarded = guardedCommand(invocation.shell, invocation.args, { mountedReady: timeoutSeconds !== undefined });
       this.assertAdmissionActive(options.signal);
       const child = this.spawn(guarded.command, guarded.args, {
         cwd: ctx.cwd,
@@ -1103,8 +1104,50 @@ export class BackgroundTaskRegistry {
         }
       });
 
+      const expire = (message: string) => {
+        if (task.status !== "running" || task.finalized || task.killKind !== undefined) return;
+        task.killKind = "timeout";
+        task.error = message;
+        this.writeNotice(task, `\n[background task timeout: ${message}]\n`, true);
+        try {
+          this.requestKill(task, "SIGTERM");
+        } catch (error) {
+          this.recordKillFailure(task, error);
+        }
+      };
+      const armExecutionTimeout = () => {
+        if (timeoutSeconds === undefined || task.finalized || task.killKind !== undefined) return;
+        task.timeoutHandle = setTimeout(() => expire(`Timed out after ${String(timeoutSeconds)}s`), timeoutSeconds * 1000);
+      };
+      const readyPrefix = guarded.readyStdoutPrefix;
+      let ready = !readyPrefix;
+      let readyLength = 0;
       child.stdout?.on("data", (data) => {
-        this.appendChildOutput(task, data, "stdout");
+        if (ready || !readyPrefix) {
+          this.appendChildOutput(task, data, "stdout");
+          return;
+        }
+        if (processFailure !== undefined) return;
+        const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
+        const length = Math.min(bytes.length, readyPrefix.length - readyLength);
+        if (!bytes.subarray(0, length).equals(readyPrefix.subarray(readyLength, readyLength + length))) {
+          if (task.killKind !== undefined) return;
+          processFailure = task.error = "Invalid background task isolation readiness.";
+          this.writeNotice(task, `\n[background task: ${processFailure}]\n`, true);
+          try {
+            this.requestKill(task, "SIGTERM");
+          } catch (error) {
+            this.recordKillFailure(task, error);
+          }
+          return;
+        }
+        readyLength += length;
+        if (readyLength !== readyPrefix.length) return;
+        ready = true;
+        clearTimeout(task.timeoutHandle);
+        task.timeoutHandle = undefined;
+        armExecutionTimeout();
+        if (bytes.length > length) this.appendChildOutput(task, bytes.subarray(length), "stdout");
       });
       child.stderr?.on("data", (data) => {
         this.appendChildOutput(task, data, "stderr");
@@ -1152,6 +1195,9 @@ export class BackgroundTaskRegistry {
         } else if (task.killKind === "disk_guard") {
           status = "failed";
           error = task.error ?? "Stopped by disk guard";
+        } else if (!ready) {
+          status = "failed";
+          error = `Background task exited before isolation readiness (exit ${String(code)}${signalName ? `, ${signalName}` : ""}).`;
         } else if (code === 0 && signalName === null) { /* PI_BG_SIGNAL_STATUS_BOUND */
           status = "completed";
         } else {
@@ -1162,23 +1208,8 @@ export class BackgroundTaskRegistry {
         void this.finalizeTask(task, status, code, signalName, error);
       });
 
-      if (timeoutSeconds !== undefined) {
-        task.timeoutHandle = setTimeout(() => {
-          if (task.status !== "running") return;
-          task.killKind = "timeout";
-          task.error = `Timed out after ${String(timeoutSeconds)}s`;
-          this.writeNotice(
-            task,
-            `\n[background task timeout: ${task.error}]\n`,
-            true,
-          );
-          try {
-            this.requestKill(task, "SIGTERM");
-          } catch (error) {
-            this.recordKillFailure(task, error);
-          }
-        }, timeoutSeconds * 1000);
-      }
+      if (ready) armExecutionTimeout();
+      else task.timeoutHandle = setTimeout(() => expire("Background task isolation admission timed out before starting the command."), GUARD_ADMISSION_MS);
 
       await this.writeMetadata(task);
       this.onChange();
