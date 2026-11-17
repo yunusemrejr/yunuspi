@@ -1,18 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { createReadTool } from '../core/coding-agent/src/core/tools/read.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const load = (rel) => import(pathToFileURL(path.join(root, rel)));
 const { looksBinary, sniffKind, describeBinary } = await load('agent/extensions/lib/binary-read.ts');
 const { buildDocx, buildXlsx } = await load('agent/extensions/lib/office-build.ts');
-const { writeZip } = await load('agent/extensions/lib/office-zip.ts');
+const { writeZip, ZIP_LIMITS } = await load('agent/extensions/lib/office-zip.ts');
 const deliverables = (await load('agent/extensions/deliverables.ts')).default;
-const { createReadTool } = await import(pathToFileURL(path.join(root, 'core/coding-agent/src/core/tools/read.js')));
 
 const has = (name, flag = '-v') => spawnSync(name, [flag], { stdio: 'ignore' }).status === 0;
 const hasPdf = has('pdftotext') && has('pdfinfo');
@@ -118,6 +120,138 @@ function registered() {
   deliverables({ on: (event, handler) => handlers.set(event, [...(handlers.get(event) ?? []), handler]), registerTool() {}, sendMessage: async () => {}, events: { emit() {}, on() {} } });
   return async (event, ctx) => { for (const handler of handlers.get('tool_result') ?? []) { const result = await handler(event, ctx); if (result) return result; } };
 }
+
+test('binary read hook leaves the native reply alone if the input becomes an unwritten FIFO', { skip: process.platform !== 'linux' }, async t => {
+  const dir = tmp();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const child = spawnSync(process.execPath, ['--input-type=module', '--eval', `
+    import assert from 'node:assert/strict';
+    import { execFileSync } from 'node:child_process';
+    import { randomBytes } from 'node:crypto';
+    import fs from 'node:fs';
+    import fsp from 'node:fs/promises';
+    import { syncBuiltinESMExports } from 'node:module';
+    import path from 'node:path';
+    import deliverables from './agent/extensions/deliverables.ts';
+    import { readOffice } from './agent/extensions/lib/office-read.ts';
+    import { writeZip } from './agent/extensions/lib/office-zip.ts';
+    import { createReadToolDefinition } from './core/coding-agent/src/core/tools/read.js';
+
+    const cwd = process.argv[1];
+    const handlers = [];
+    deliverables({on(event, handler) { if (event === 'tool_result') handlers.push(handler); }, registerTool() {}});
+    const { open } = fsp;
+    const { openSync, readFileSync } = fs;
+    for (const stage of ['sniff', 'directory']) {
+      const file = path.join(cwd, stage === 'sniff' ? 'sample.bin' : 'sample.zip');
+      const fifo = path.join(cwd, 'fifo');
+      execFileSync('mkfifo', [fifo]);
+      fs.writeFileSync(file, stage === 'sniff' ? Buffer.from([0, 1, 2, 3]) : writeZip([{name: 'content.dat', data: randomBytes(12000)}]));
+      const input = {path:file};
+      const native = await createReadToolDefinition(cwd).execute('binary-race', input);
+      let raced = false;
+      const replace = () => { if (!raced) { fs.renameSync(fifo, file); raced = true; } };
+      fs.openSync = (name, ...args) => {
+        if (name === file && stage === 'sniff') replace();
+        return openSync(name, ...args);
+      };
+      fs.readFileSync = (name, ...args) => {
+        if (name === file && stage === 'directory') replace();
+        return readFileSync(name, ...args);
+      };
+      fsp.open = async (name, ...args) => {
+        if (name === file && stage === 'sniff') replace();
+        const handle = await open(name, ...args);
+        if (name === file && stage === 'directory') {
+          const read = handle.read.bind(handle);
+          let reads = 0;
+          handle.read = async (...params) => {
+            const result = await read(...params);
+            if (++reads === 2) replace();
+            return result;
+          };
+        }
+        return handle;
+      };
+      syncBuiltinESMExports();
+      try {
+        for (const handler of handlers) assert.equal(await handler({ ...native, toolName: 'read', input }, { cwd }), undefined);
+        assert.equal(raced, true, stage);
+      } finally {
+        fs.openSync = openSync;
+        fs.readFileSync = readFileSync;
+        fsp.open = open;
+        syncBuiltinESMExports();
+      }
+    }
+
+    const file = path.join(cwd, 'memo.docx');
+    const fifo = path.join(cwd, 'office-fifo');
+    execFileSync('mkfifo', [fifo]);
+    fs.writeFileSync(file, 'fixture document');
+    let replaced = false;
+    const replaceOffice = name => {
+      if (name === file && !replaced) { fs.renameSync(fifo, file); replaced = true; }
+    };
+    fs.openSync = (name, ...args) => { replaceOffice(name); return openSync(name, ...args); };
+    fs.readFileSync = (name, ...args) => { replaceOffice(name); return readFileSync(name, ...args); };
+    try {
+      assert.throws(() => readOffice(file), /is not a file/);
+      assert.equal(replaced, true);
+    } finally {
+      fs.openSync = openSync;
+      fs.readFileSync = readFileSync;
+    }
+  `, dir], { cwd: root, encoding: 'utf8', timeout: 10_000, killSignal: 'SIGKILL' });
+  assert.ifError(child.error);
+  assert.equal(child.status, 0, child.stderr);
+});
+
+test('ZIP previews read the directory without allocating the archive body', async t => {
+  const dir = tmp();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const target = path.join(dir, 'large.zip');
+  const zip = writeZip([{ name: 'small.txt', data: 'one entry' }]);
+  const end = zip.length - 22;
+  const centralOffset = zip.readUInt32LE(end + 16);
+  const placedAt = 48 * 1024 * 1024;
+  fs.writeFileSync(target, zip.subarray(0, centralOffset));
+  const fd = fs.openSync(target, 'r+');
+  try {
+    zip.writeUInt32LE(placedAt, end + 16);
+    fs.writeSync(fd, zip.subarray(centralOffset), 0, zip.length - centralOffset, placedAt);
+  } finally { fs.closeSync(fd); }
+
+  const { open } = fsp;
+  let readBytes = 0;
+  fsp.open = async (name, ...args) => {
+    const handle = await open(name, ...args);
+    if (name === target) {
+      const read = handle.read.bind(handle);
+      handle.read = async (...args) => {
+        const result = await read(...args);
+        readBytes += result.bytesRead;
+        return result;
+      };
+    }
+    return handle;
+  };
+  syncBuiltinESMExports();
+  t.after(() => { fsp.open = open; syncBuiltinESMExports(); });
+
+  const view = await describeBinary(target);
+  assert.equal(view.opened, true);
+  assert.match(view.text, /small\.txt \(9 bytes\)/);
+  assert.ok(view.facts.bytes > placedAt);
+  assert.ok(readBytes > 8192 && readBytes <= 8192 + 65557, `read ${readBytes} bytes`);
+
+  readBytes = 0;
+  fs.truncateSync(target, ZIP_LIMITS.maxFileBytes + 1);
+  const oversized = await describeBinary(target);
+  assert.equal(oversized.opened, false);
+  assert.match(oversized.text, /larger than 96 MiB/);
+  assert.equal(readBytes, 8192);
+});
 
 test('read hook: the real read tool on a binary file is replaced, text and images are left alone', { skip: !hasPdf && 'poppler is not installed' }, async () => {
   const dir = tmp(), ctx = { cwd: dir };

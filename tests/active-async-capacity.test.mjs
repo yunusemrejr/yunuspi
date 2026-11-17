@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import {
-  acquireActiveAsyncCapacity, getActiveAsyncCapacitySnapshot, inspectActiveAsyncCapacityOwner, transferActiveAsyncCapacity,
+  acquireActiveAsyncCapacity, activeAsyncCapacitySessionKey, getActiveAsyncCapacitySnapshot, inspectActiveAsyncCapacityOwner, transferActiveAsyncCapacity,
 } from '../agent/extensions/pi-subagents/src/runs/background/active-async-capacity.ts';
 
 const capacityUrl = new URL('../agent/extensions/pi-subagents/src/runs/background/active-async-capacity.ts', import.meta.url).href;
@@ -27,6 +27,7 @@ function fixture(t, label, kind = 'runner') {
 async function reserveInProcess(t, f, action = 'acquireActiveAsyncCapacity(input, options);') {
   const script = `
     import fs from 'node:fs';
+    import { syncBuiltinESMExports } from 'node:module';
     import path from 'node:path';
     import { acquireActiveAsyncCapacity, transferActiveAsyncCapacity } from ${JSON.stringify(capacityUrl)};
     const input = ${JSON.stringify(f.input)};
@@ -61,6 +62,39 @@ test('a fresh occupied async slot can be reused immediately after its unbound cr
   assert.equal(f.snapshot().used, 1);
   assert.equal(f.inspect().relation, 'none');
   assert.equal(next.rollback(), true);
+});
+
+test('a crash after publishing the slot directory but before writing the owner releases only a qualified new slot', linuxOnly, async t => {
+  for (const label of ['new-publication', 'legacy-publication']) {
+    const f = fixture(t, label);
+    const kill = await reserveInProcess(t, f, `
+      const mkdir = fs.mkdirSync;
+      fs.mkdirSync = (dir, ...args) => {
+        const result = mkdir(dir, ...args);
+        if (path.basename(dir) === 'slot-0') {
+          process.send('reserved');
+          Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20000);
+        }
+        return result;
+      };
+      syncBuiltinESMExports();
+      acquireActiveAsyncCapacity(input, options);
+    `);
+    const slotPath = path.join(f.options.rootDir, activeAsyncCapacitySessionKey(f.input.sessionId), 'slot-0');
+    assert.deepEqual(fs.readdirSync(slotPath), []);
+    assert.equal(f.snapshot().used, 1);
+    assert.throws(f.replacement, { name: 'ActiveAsyncCapacityError' });
+    await kill();
+    if (label === 'legacy-publication') {
+      // An older publisher can win canonical mkdir after a new intent exists.
+      fs.chmodSync(slotPath, 0o700);
+      assert.equal(f.snapshot().used, 1);
+      assert.throws(f.replacement, { name: 'ActiveAsyncCapacityError' });
+    } else {
+      assert.equal(f.snapshot().used, 0);
+      assert.equal(f.replacement().rollback(), true);
+    }
+  }
 });
 
 test('a second reaper cannot steal a live claim even when its timestamp is old', linuxOnly, async t => {
@@ -161,18 +195,19 @@ test('workflow startup failure rolls back, and only an unmarked dead workflow fr
   assert.equal(slot.rollback(), true);
   assert.equal(failed.snapshot().used, 0);
 
-  for (const marked of [false, true]) {
-    const f = fixture(t, `workflow-${marked}`, 'workflow');
+  for (const phase of ['unmarked', 'prepared', 'started']) {
+    const f = fixture(t, `workflow-${phase}`, 'workflow');
     const kill = await reserveInProcess(t, f, `
       const slot = acquireActiveAsyncCapacity(input, options);
       fs.mkdirSync(input.asyncDir);
       fs.writeFileSync(path.join(input.asyncDir, 'status.json'), JSON.stringify({
         mode: 'workflow', runId: input.runId, sessionId: input.sessionId, state: 'running', steps: [],
       }));
-      ${marked ? 'slot.markWorkflowStarted();' : ''}
+      ${phase === 'unmarked' ? '' : 'slot.markWorkflowPrepared();'}
+      ${phase === 'started' ? 'slot.markWorkflowStarted();' : ''}
     `);
     await kill();
-    assert.equal(f.snapshot().used, Number(marked));
-    if (!marked) assert.equal(f.replacement().rollback(), true);
+    assert.equal(f.snapshot().used, Number(phase === 'started'));
+    if (phase !== 'started') assert.equal(f.replacement().rollback(), true);
   }
 });

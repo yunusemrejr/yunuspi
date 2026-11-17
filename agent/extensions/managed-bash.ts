@@ -46,6 +46,8 @@ import { setTimeout as delay } from "node:timers/promises";
 import { choices } from "./lib/tool-schema.ts";
 /** Foreground grace period used by bounded internal capture helpers. */
 const GRACE_MS = 4000;
+/** Cold inventory across the protected roots has its own startup budget. */
+const GUARD_ADMISSION_MS = 120_000;
 /** Node setTimeout() upper bound; delays above this clamp to 1ms (see resolveTimeoutMs). */
 const MAX_TIMEOUT_MS = 2_147_483_647;
 const MAX_TIMEOUT_SECONDS = MAX_TIMEOUT_MS / 1000;
@@ -254,7 +256,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			const diskLimits = getDiskLimits();
 			const shellCommand = BACKGROUND_JOB_EXIT_TRAP + fileSizeLimitPrefix(diskLimits) + command;
 			const commandFromStdin = shellConfig.commandTransport === "stdin";
-			const guarded = guardedCommand(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, shellCommand]);
+			const guarded = guardedCommand(shellConfig.shell, commandFromStdin ? shellConfig.args : [...shellConfig.args, shellCommand], { readyPipe: true });
 			const child = spawn(
 				guarded.command,
 				guarded.args,
@@ -262,7 +264,7 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 					cwd,
 					detached: process.platform !== "win32",
 					env: env ?? process.env,
-					stdio: [commandFromStdin ? "pipe" : "ignore", "pipe", "pipe"],
+					stdio: [commandFromStdin ? "pipe" : "ignore", "pipe", "pipe", ...(guarded.readyFd === undefined ? [] : ["pipe" as const])],
 					windowsHide: true,
 				},
 			);
@@ -279,7 +281,6 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 				state: "running",
 				startedAt: Date.now(),
 				timeoutSeconds: timeout,
-				deadline: timeoutMs === undefined ? undefined : Date.now() + timeoutMs,
 				cancelOutput: onOutputCancelled,
 				out: new Tail(TAIL_CAP),
 				err: new Tail(TAIL_CAP),
@@ -290,6 +291,9 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			if (graceMs > GRACE_MS) ownProcessGroup(job.pid);
 
 			let detached = false;
+			let admissionPending = guarded.readyFd !== undefined;
+			const readyPipe = guarded.readyFd === undefined ? undefined : child.stdio[guarded.readyFd];
+			let admissionTimer: NodeJS.Timeout | undefined;
 			let deadlineTimer: NodeJS.Timeout | undefined;
 			let graceTimer: NodeJS.Timeout | undefined;
 			let cancelTimer: NodeJS.Timeout | undefined;
@@ -346,8 +350,9 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			const handleAbort = () => {
 				if (detached) return;
 				job.cancelOutput?.();
+				if (admissionPending) readyPipe?.destroy();
 				if (child.pid) {
-					if (cancelGraceMs > 0) {
+					if (!admissionPending && cancelGraceMs > 0) {
 						const pid = child.pid;
 						try {
 							process.kill(-pid, "SIGTERM");
@@ -389,21 +394,26 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 
 			return await new Promise<{ exitCode: number | null }>((resolve, reject) => {
 				let settled = false;
-				const onExit = (code: number | null, sig: NodeJS.Signals | null) => {
+				const cleanup = () => {
 					job.cancelOutput = undefined;
 					stopDiskWatch();
+					if (admissionTimer) clearTimeout(admissionTimer);
 					if (deadlineTimer) clearTimeout(deadlineTimer);
 					if (graceTimer) clearTimeout(graceTimer);
 					if (cancelTimer) clearTimeout(cancelTimer);
+					readyPipe?.destroy();
 					// One removal for both the foreground and post-detach paths; after the
 					// process is done, an abort must never touch a finished job.
 					signal?.removeEventListener("abort", handleAbort);
+				};
+				const onExit = (code: number | null, sig: NodeJS.Signals | null) => {
+					cleanup();
 					job.exitCode = code;
 					job.signal = sig ?? undefined;
 					job.endedAt = job.endedAt ?? Date.now();
 					// Only the first finalizer names the state; killers (deadline/kill) pre-set it.
 					if (job.state === "running") {
-						job.state = code === 0 && !sig ? "completed" : "failed";
+						job.state = code === 0 && !sig && !admissionPending ? "completed" : "failed";
 					}
 					if (detached) return;
 					settled = true;
@@ -415,6 +425,8 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 						reject(new Error(`Command killed (signal ${sig ?? "unknown"})`));
 					} else if (signal?.aborted) {
 						reject(new Error("aborted"));
+					} else if (admissionPending && code === 0) {
+						reject(new Error("Harness guard exited before reporting shell admission"));
 					} else {
 						resolve({ exitCode: code });
 					}
@@ -444,18 +456,22 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 				});
 				const terminationGracePending = () => cancelTimer !== undefined ||
 					(job.state === "killed" && Date.now() - (job.endedAt ?? 0) < KILL_TERM_GRACE_MS);
+				const readyPipeClosed = readyPipe && new Promise<void>(resolvePipe => {
+					readyPipe.once("end", resolvePipe);
+					readyPipe.once("close", resolvePipe);
+				});
 				waitForChildProcess(child, {
 					isOutputBackpressured: () => pendingOutput.size > 0 || terminationGracePending(),
 					isCancelled: () => !terminationGracePending() &&
 						(Boolean(signal?.aborted) || job.state === "timed_out" || job.state === "killed" || outputError !== undefined),
 				}).then(async code => {
+					// A very fast payload can close both output pipes before the
+					// event loop delivers the guard's byte on the separate pipe.
+					if (code === 0 && admissionPending && !signal?.aborted) await readyPipeClosed;
 					await Promise.all(pendingOutput);
 					onExit(code, child.signalCode);
 				}).catch((err) => {
-					job.cancelOutput = undefined;
-					stopDiskWatch();
-					if (deadlineTimer) clearTimeout(deadlineTimer);
-					if (graceTimer) clearTimeout(graceTimer);
+					cleanup();
 					// WHY a failed spawn must not leave a live job: reject AND settle the job
 					// so `process list` can't show an unkillable "running" job (no pid, no
 					// exit event ever) and `process remove` will accept it.
@@ -463,32 +479,54 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 						job.state = "failed";
 						job.endedAt = Date.now();
 					}
-					signal?.removeEventListener("abort", handleAbort);
 					settled = true;
 					reject(err);
 				});
 
-				if (timeoutMs !== undefined) {
-					deadlineTimer = setTimeout(() => {
-						if (job.state !== "running") return;
-						job.state = "timed_out";
-						job.endedAt = Date.now();
-						if (child.pid) killTree(child.pid);
-						job.cancelOutput?.();
-					}, timeoutMs);
+				const startCommandTimers = () => {
+					if (timeoutMs !== undefined) {
+						job.deadline = Date.now() + timeoutMs;
+						deadlineTimer = setTimeout(() => {
+							if (job.state !== "running" || signal?.aborted || outputError) return;
+							job.state = "timed_out";
+							job.endedAt = Date.now();
+							if (child.pid) killTree(child.pid);
+							job.cancelOutput?.();
+						}, timeoutMs);
+					}
+					// Detach has side effects and starts only once admission is complete.
+					if (Number.isFinite(graceMs)) {
+						graceTimer = setTimeout(() => {
+							if (settled || job.state !== "running" || signal?.aborted || outputError) return;
+							detach();
+							// The detached command has no final exit code yet.
+							resolve({ exitCode: null });
+						}, graceMs);
+					}
+				};
+				if (!admissionPending) {
+					startCommandTimers();
+					return;
 				}
-				// WHY setTimeout not Promise.race: detach has side effects (listener removal, watchdog) and must run exactly once.
-				if (Number.isFinite(graceMs)) {
-					graceTimer = setTimeout(() => {
-						if (settled) return; // exit already won
-						detached = true;
-						detach();
-						// A detached process has not produced a terminal exit code yet.
-						// `null` is accepted by the builtin bash contract and prevents a
-						// still-running build from being reported as successful.
-						resolve({ exitCode: null });
-					}, graceMs);
-				}
+				const failAdmission = (message: string) => {
+					if (!admissionPending || outputError || signal?.aborted || job.state !== "running") return;
+					outputError = new Error(message);
+					if (child.pid) killTree(child.pid);
+					job.cancelOutput?.();
+					readyPipe?.destroy();
+				};
+				admissionTimer = setTimeout(() => failAdmission("Harness write isolation admission timed out before starting the command"), GUARD_ADMISSION_MS);
+				readyPipe?.once("error", () => failAdmission("Harness write isolation admission pipe failed"));
+				readyPipe?.once("data", (chunk: Buffer) => {
+					if (outputError || signal?.aborted || job.state !== "running") return;
+					if (chunk.length !== 1 || chunk[0] !== 1) {
+						failAdmission("Harness write isolation reported invalid shell admission");
+						return;
+					}
+					admissionPending = false;
+					clearTimeout(admissionTimer);
+					startCommandTimers();
+				});
 			});
 		},
 	} satisfies import("@yunuspi/coding-agent").BashOperations;

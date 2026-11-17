@@ -50,11 +50,13 @@ export interface ActiveAsyncCapacityOwnerV1 {
 	transferPredecessor?: ActiveAsyncCapacityOwnerV1;
 	runnerProcessInstanceId?: string;
 	runnerStartedAt?: number;
+	workflowDispatchPending?: true;
 }
 
 export interface ActiveAsyncCapacityHandle {
 	readonly owner: ActiveAsyncCapacityOwnerV1;
 	markStarted(runnerProcessInstanceId: string): void;
+	markWorkflowPrepared(): void;
 	markWorkflowStarted(): void;
 	rollback(): boolean;
 	rollbackBeforeRunnerProceed(runnerProcessInstanceId: string): boolean;
@@ -188,13 +190,13 @@ function claimUnavailable(error: unknown): boolean {
 	return ["ENOENT", "EEXIST", "ENOTEMPTY", "ENOTDIR", "EISDIR"].includes((error as NodeJS.ErrnoException).code ?? "");
 }
 
-function withSlotClaim<T>(dir: string, operation: () => T): { acquired: true; value: T } | { acquired: false } {
-	const claimPath = path.join(dir, "capacity.claim");
+function withPathClaim<T>(claimPath: string, recoveryDir: string, operation: () => T): { acquired: true; value: T } | { acquired: false } {
+	const dir = path.dirname(claimPath);
 	const previous = readSlotClaim(claimPath);
 	if (previous) {
 		if (!creatorIsGone(previous.creator)) return { acquired: false };
 		// Two reapers of the same token cannot move a later claim over this tombstone.
-		const retired = path.join(path.dirname(dir), `.recovered-claim-${previous.token}`);
+		const retired = path.join(recoveryDir, `.recovered-claim-${previous.token}`);
 		try { fs.renameSync(claimPath, retired); }
 		catch (error) { if (claimUnavailable(error)) return { acquired: false }; throw error; }
 	} else if (fs.lstatSync(claimPath, { throwIfNoEntry: false })) return { acquired: false };
@@ -225,11 +227,15 @@ function withSlotClaim<T>(dir: string, operation: () => T): { acquired: true; va
 	}
 }
 
-function removeOwnedSlot(dir: string, expected: ActiveAsyncCapacityOwnerV1, options: CapacityOptions, requireUnstarted = false, release?: ActiveAsyncCapacityReleaseVerdict): boolean {
-	if (requireUnstarted && (expected.runnerProcessInstanceId || expected.runnerStartedAt)) return false;
+function withSlotClaim<T>(dir: string, operation: () => T) {
+	return withPathClaim(path.join(dir, "capacity.claim"), path.dirname(dir), operation);
+}
+
+function removeOwnedSlot(dir: string, expected: ActiveAsyncCapacityOwnerV1, options: CapacityOptions, requireBeforeDispatch = false, release?: ActiveAsyncCapacityReleaseVerdict): boolean {
+	if (requireBeforeDispatch && !isBeforeDispatch(expected)) return false;
 	const claimed = withSlotClaim(dir, () => {
 		const current = matchingOwner(dir, expected);
-		if (!current || (requireUnstarted && (current.runnerProcessInstanceId || current.runnerStartedAt))) return false;
+		if (!current || (requireBeforeDispatch && !isBeforeDispatch(current))) return false;
 		if (release?.state === "releasable" && release.unstartedReservation) {
 			if (!abandonedFreshReservation(current, options)) return false;
 			// Keep the retired generation's directory nonempty. If two reapers
@@ -290,8 +296,12 @@ function isUnstarted(owner: ActiveAsyncCapacityOwnerV1): boolean {
 	return owner.runnerProcessInstanceId === undefined && owner.runnerStartedAt === undefined;
 }
 
+function isBeforeDispatch(owner: ActiveAsyncCapacityOwnerV1): boolean {
+	return isUnstarted(owner) || (owner.kind === "workflow" && owner.workflowDispatchPending === true && owner.runnerProcessInstanceId === undefined);
+}
+
 function abandonedFreshReservation(owner: ActiveAsyncCapacityOwnerV1, options: CapacityOptions): boolean {
-	return owner.generation === 0 && owner.sourceRunId === undefined && isUnstarted(owner) && creatorIsGone(owner.creator, options.pidLiveness);
+	return owner.generation === 0 && owner.sourceRunId === undefined && isBeforeDispatch(owner) && creatorIsGone(owner.creator, options.pidLiveness);
 }
 
 function transferPredecessor(owner: ActiveAsyncCapacityOwnerV1): ActiveAsyncCapacityOwnerV1 | undefined {
@@ -456,8 +466,13 @@ export function reconcileActiveAsyncCapacity(
 	const liveWorkflowRunIds = options.liveWorkflowRunIds ?? new Set<string>();
 	for (const dir of occupiedSlots(poolDir)) {
 		let owner = readOwner(dir);
-		if (!owner
-			|| owner.ownerSessionId !== sessionId
+		if (!owner) {
+			if (incompletePublication(dir) && creatorIsGone(readPublisher(dir))) {
+				withPublicationClaim(dir, () => recoverIncompletePublication(dir));
+			}
+			continue;
+		}
+		if (owner.ownerSessionId !== sessionId
 			|| owner.ownerSessionKey !== activeAsyncCapacitySessionKey(sessionId)
 			|| path.basename(dir) !== `slot-${owner.slot}`) continue;
 		if (recoverAbandonedTransfer(dir, owner, options)) {
@@ -479,25 +494,98 @@ export function getActiveAsyncCapacitySnapshot(
 	return reconcileActiveAsyncCapacity(sessionId, limit, options);
 }
 
-function createSlot(poolDir: string, owner: ActiveAsyncCapacityOwnerV1): boolean {
-	const destination = slotDir(poolDir, owner.slot);
-	fs.mkdirSync(poolDir, { recursive: true, mode: 0o700 });
+const publicationMode = 0o1700;
+
+function publicationPath(dir: string, suffix: string): string {
+	return path.join(path.dirname(dir), `.${path.basename(dir)}.publisher${suffix}`);
+}
+
+function withPublicationClaim<T>(dir: string, operation: () => T) {
+	return withPathClaim(publicationPath(dir, ".claim"), path.dirname(dir), operation);
+}
+
+function incompletePublication(dir: string): boolean {
+	const stat = fs.lstatSync(dir, { throwIfNoEntry: false });
+	return Boolean(stat?.isDirectory() && (stat.mode & 0o1000) && stat.uid === process.getuid?.() &&
+		!fs.lstatSync(path.join(dir, "owner.json"), { throwIfNoEntry: false }));
+}
+
+function readPublisher(dir: string): ReservationCreator | undefined {
+	let fd: number | undefined;
 	try {
-		fs.mkdirSync(destination, { mode: 0o700 });
+		fd = fs.openSync(publicationPath(dir, ".json"), fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
+		const stat = fs.fstatSync(fd);
+		if (stat.isFile() && stat.uid === process.getuid?.() && stat.size <= 1024) return JSON.parse(fs.readFileSync(fd, "utf-8"));
+	} catch { /* Unreadable publisher identity cannot establish a dead owner. */ }
+	finally { if (fd !== undefined) fs.closeSync(fd); }
+}
+
+function retireIncompleteSlot(dir: string): void {
+	const retired = path.join(path.dirname(dir), `.incomplete-slot-${randomUUID()}`);
+	fs.renameSync(dir, retired);
+	fs.rmSync(retired, { recursive: true, force: true });
+}
+
+function recoverIncompletePublication(dir: string): boolean {
+	if (!incompletePublication(dir) || !creatorIsGone(readPublisher(dir))) return false;
+	retireIncompleteSlot(dir);
+	return true;
+}
+
+function publishSlot(destination: string, owner: ActiveAsyncCapacityOwnerV1, mode: number): boolean {
+	try {
+		fs.mkdirSync(destination, { mode });
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
 		throw error;
 	}
-	// If owner persistence fails, the corrupt occupied directory remains and
-	// fails closed instead of becoming available to another admission.
-	fs.writeFileSync(path.join(destination, "owner.json"), `${JSON.stringify(owner, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
+	try { writeCapacityOwner(path.join(destination, "owner.json"), owner); }
+	catch (error) {
+		if (mode === publicationMode) {
+			try { if (incompletePublication(destination)) retireIncompleteSlot(destination); }
+			catch { /* Preserve the original write error and its recovery evidence. */ }
+		}
+		throw error;
+	}
 	return true;
+}
+
+function createSlot(poolDir: string, owner: ActiveAsyncCapacityOwnerV1): boolean {
+	const destination = slotDir(poolDir, owner.slot);
+	fs.mkdirSync(poolDir, { recursive: true, mode: 0o700 });
+	if (!localCreator) return publishSlot(destination, owner, 0o700);
+	const publisher = withPublicationClaim(destination, () => {
+		if (fs.lstatSync(destination, { throwIfNoEntry: false }) && !recoverIncompletePublication(destination)) return false;
+		// Legacy writers use mkdir(0700). Its EEXIST exclusion still applies to
+		// both versions, and the sticky bit identifies a new incomplete slot.
+		writeCapacityOwner(publicationPath(destination, ".json"), localCreator);
+		return publishSlot(destination, owner, publicationMode);
+	});
+	return publisher.acquired && publisher.value;
 }
 
 function handleFor(owner: ActiveAsyncCapacityOwnerV1, limit: number, options: CapacityOptions, rollbackOwner?: ActiveAsyncCapacityOwnerV1): ActiveAsyncCapacityHandle {
 	const rootDir = options.rootDir ?? ACTIVE_ASYNC_CAPACITY_DIR;
 	const writeOwner = options.writeOwner ?? writeCapacityOwner;
 	const dir = slotDir(sessionDir(owner.ownerSessionId, rootDir), owner.slot);
+	const markWorkflow = (dispatchPending: boolean): void => {
+		const claimed = withSlotClaim(dir, () => {
+			const current = matchingOwner(dir, owner);
+			if (!current || current.kind !== "workflow") return false;
+			if (current.runnerStartedAt !== undefined) {
+				if (dispatchPending && !current.workflowDispatchPending) return false;
+				if (dispatchPending === Boolean(current.workflowDispatchPending)) return true;
+			}
+			const next = { ...current, runnerStartedAt: current.runnerStartedAt ?? options.now?.() ?? Date.now() };
+			if (dispatchPending) next.workflowDispatchPending = true;
+			else delete next.workflowDispatchPending;
+			writeOwner(path.join(dir, "owner.json"), next);
+			Object.assign(owner, next);
+			if (!dispatchPending) delete owner.workflowDispatchPending;
+			return true;
+		});
+		if (!claimed.acquired || !claimed.value) throw new Error(`Active async capacity ownership changed for workflow '${owner.runId}'.`);
+	};
 	return {
 		owner,
 		markStarted(runnerProcessInstanceId) {
@@ -515,17 +603,8 @@ function handleFor(owner: ActiveAsyncCapacityOwnerV1, limit: number, options: Ca
 			});
 			if (!claimed.acquired || !claimed.value) throw new Error(`Active async capacity ownership changed for run '${owner.runId}'.`);
 		},
-		markWorkflowStarted() {
-			const claimed = withSlotClaim(dir, () => {
-				const current = matchingOwner(dir, owner);
-				if (!current || current.kind !== "workflow") return false;
-				const next = { ...current, runnerStartedAt: options.now?.() ?? Date.now() };
-				writeOwner(path.join(dir, "owner.json"), next);
-				Object.assign(owner, next);
-				return true;
-			});
-			if (!claimed.acquired || !claimed.value) throw new Error(`Active async capacity ownership changed for workflow '${owner.runId}'.`);
-		},
+		markWorkflowPrepared: () => markWorkflow(true),
+		markWorkflowStarted: () => markWorkflow(false),
 		rollback() {
 			if (!rollbackOwner) return removeOwnedSlot(dir, owner, options, true);
 			if (owner.runnerProcessInstanceId || owner.runnerStartedAt) return false;

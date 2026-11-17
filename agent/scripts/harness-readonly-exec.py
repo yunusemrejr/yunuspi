@@ -4,6 +4,7 @@ No path/command regex is a security boundary. Unavailable namespaces fail closed
 Only executable children are restricted; Pi's own session/log writes are unaffected.
 """
 import os
+import fcntl
 import glob
 import hashlib
 import json
@@ -19,6 +20,7 @@ import time
 # never remembered. PI_HARDLINK_SCAN_TTL_S=0 restores a fresh scan per command.
 INVENTORY_TTL_S = 120
 INVENTORY_MARKER = 'hardlink-inventory.json'
+GUARD_READY_FD = 3
 
 
 def ssh_config_mounts():
@@ -173,51 +175,88 @@ def inventory_marker(protected):
     return os.path.join(cache, INVENTORY_MARKER)
 
 
-def verified_hardlink_inventory(protected, protected_roots):
-    """Run the fresh inventory unless this exact root set passed a moment ago.
-
-    The marker (<agent>/cache) lives inside the protected tree, which guarded commands see
-    read-only, so a command cannot forge it. A hard-link alias can only be made
-    from outside the sandbox (link() across the read-only bind mount is EXDEV),
-    so a short window cannot hide one that a guarded command could create.
-    Anything unexpected about the marker, or no cache directory inside the
-    protected root, means a fresh scan.
-    """
-    ttl = inventory_ttl()
-    marker = inventory_marker(protected)
-    if marker is None:
-        ttl = 0
-    key = inventory_key(protected_roots)
-    if ttl:
-        try:
-            fd = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW)
-            try:
-                info = os.fstat(fd)
-                if (stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid()
-                        and not info.st_mode & 0o022 and info.st_size < 4096):
-                    with os.fdopen(os.dup(fd), 'rb') as stream:
-                        record = json.loads(stream.read(4096))
-                    age = time.time() - float(record['at'])
-                    if record.get('key') == key and 0 <= age < ttl:
-                        return
-            finally:
-                os.close(fd)
-        except (OSError, ValueError, KeyError, TypeError):
-            pass
-    check_protected_hardlinks(protected_roots)
-    if not ttl:
-        return
-    temporary = '%s.%d.tmp' % (marker, os.getpid())
+def inventory_passed(marker, key, ttl):
     try:
-        with open(temporary, 'w', opener=lambda path, flags: os.open(path, flags | os.O_NOFOLLOW, 0o600)) as stream:
+        fd = os.open(marker, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, 'rb') as stream:
+            info = os.fstat(stream.fileno())
+            if (stat.S_ISREG(info.st_mode) and info.st_uid == os.geteuid()
+                    and not info.st_mode & 0o022 and info.st_size < 4096):
+                record = json.loads(stream.read(4096))
+                age = time.time() - float(record['at'])
+                return record.get('key') == key and 0 <= age < ttl
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        pass
+    return False
+
+
+def lock_inventory(marker):
+    path = marker + '.lock'
+    fd = None
+    try:
+        # Guarded payloads cannot open a write-only inode on their read-only
+        # mount. A readable file would let them acquire an advisory lock.
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o200)
+        info = os.fstat(fd)
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o200):
+            raise OSError('untrusted inventory lock')
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        current = os.stat(path, follow_symlinks=False)
+        if (current.st_dev, current.st_ino) != (info.st_dev, info.st_ino):
+            raise OSError('inventory lock replaced')
+        return fd
+    except OSError:
+        if fd is not None:
+            os.close(fd)
+        return None
+
+
+def remember_inventory(marker, key):
+    temporary = '%s.%d.tmp' % (marker, os.getpid())
+    created = False
+    try:
+        with open(temporary, 'x', opener=lambda path, flags: os.open(path, flags | os.O_NOFOLLOW, 0o600)) as stream:
+            created = True
             json.dump({'key': key, 'at': time.time()}, stream)
         os.replace(temporary, marker)
     except OSError:
         # A read-only or full harness root only costs the next command a scan.
-        try:
-            os.unlink(temporary)
-        except OSError:
-            pass
+        if created:
+            try:
+                os.unlink(temporary)
+            except OSError:
+                pass
+
+
+def verified_hardlink_inventory(protected, protected_roots):
+    """Reuse only a recent pass for the same complete set of protected roots.
+
+    The marker stays inside the read-only tree. A guarded command cannot
+    forge it or create a cross-mount hard link while it is valid.
+    """
+    ttl = inventory_ttl()
+    marker = inventory_marker(protected) if ttl else None
+    if marker is None:
+        check_protected_hardlinks(protected_roots)
+        return
+    key = inventory_key(protected_roots)
+    if inventory_passed(marker, key, ttl):
+        return
+    fd = lock_inventory(marker)
+    try:
+        # Another launcher can publish while we wait for its cold scan.
+        key = inventory_key(protected_roots)
+        if fd is not None and inventory_passed(marker, key, ttl):
+            return
+        check_protected_hardlinks(protected_roots)
+        if inventory_key(protected_roots) != key:
+            raise RuntimeError('protected roots changed during hard-link inventory; retry the command')
+        if fd is not None:
+            remember_inventory(marker, key)
+    finally:
+        if fd is not None:
+            os.close(fd)
 
 
 def writable_mounts(protected_roots):
@@ -267,7 +306,15 @@ def main():
     roots = {protected}
     at = 2
     gpu = False
-    while at < len(sys.argv) and sys.argv[at] in ('--protect', '--gpu'):
+    ready = False
+    while at < len(sys.argv) and sys.argv[at] in ('--protect', '--gpu', '--ready-pipe'):
+        if sys.argv[at] == '--ready-pipe':
+            mode = os.fstat(GUARD_READY_FD).st_mode
+            if ready or not (stat.S_ISSOCK(mode) or stat.S_ISFIFO(mode)):
+                raise RuntimeError('invalid harness readiness pipe')
+            ready = True
+            at += 1
+            continue
         if sys.argv[at] == '--gpu':
             # Opt-in GPU render nodes for Vulkan/GL compute (Brush, Blender). Not the
             # default: a virtual DRM device changes headless browser rendering.
@@ -306,6 +353,11 @@ def main():
                  *(['--dev-bind-try', '/dev/dri', '/dev/dri'] if gpu else []),
                  '--cap-drop', 'ALL', '--die-with-parent', '--', *sys.argv[at + 1:]]
     try:
+        if ready:
+            # Report admission on the private parent pipe after preparing the
+            # mounts, before launching bubblewrap. The payload never inherits it.
+            os.write(GUARD_READY_FD, b'\x01')
+            os.close(GUARD_READY_FD)
         os.execv(arguments[0], arguments)
     finally:
         for descriptor in ssh_descriptors:

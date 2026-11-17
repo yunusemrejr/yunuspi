@@ -5178,8 +5178,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 					persist();
 					if (!lastStatusWriteAccepted) throw new Error("Initial workflow status was superseded.");
 					if (workflowCapacity) deps.state.activeAsyncCapacity = workflowCapacity.reconcile(new Set(deps.state.workflowControllers.keys()));
-					// This durable marker must succeed before the local controller can schedule work.
-					workflowCapacity?.markWorkflowStarted();
+					workflowCapacity?.markWorkflowPrepared();
 				} catch (error) {
 					const message = error instanceof Error ? error.message : String(error);
 					deps.state.workflowControllers?.delete(workflowRunId);
@@ -5326,6 +5325,9 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 						appendWorkflowEvent({ type: "subagent.workflow.trace", trace });
 					};
 					try {
+						// Child launches, resumes and host commands become reachable only
+						// after this durable dispatch fence authorizes the runtime.
+						workflowCapacity?.markWorkflowStarted();
 						const workflow = await runWorkflowScript({
 							script: workflowScript,
 							onMetric: kind => {

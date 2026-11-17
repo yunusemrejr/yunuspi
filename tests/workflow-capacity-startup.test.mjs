@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
@@ -56,4 +58,58 @@ test('an initial workflow status that loses its write fence never starts the con
   assert.equal(state.fleetJobs.size, 0);
   assert.equal(getActiveAsyncCapacitySnapshot(sessionManager.getSessionId(), 1).used, 0);
   assert.equal(fs.existsSync(path.join(path.dirname(newerStatusPath), 'events.jsonl')), false);
+});
+
+test('a workflow killed after preparation but before scheduling releases its verified capacity', { skip: process.platform !== 'linux', timeout: 20_000 }, async t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-workflow-prepared-crash-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const repo = fileURLToPath(new URL('..', import.meta.url));
+  const runtime = path.join(root, 'runtime');
+  const script = `
+    import fs from 'node:fs';
+    import path from 'node:path';
+    import { syncBuiltinESMExports } from 'node:module';
+    import { createSubagentExecutor } from './agent/extensions/pi-subagents/src/runs/foreground/subagent-executor.ts';
+    import { SessionManager } from './core/coding-agent/src/core/session-manager.js';
+    import { createEventBus } from './core/coding-agent/src/core/event-bus.js';
+    const root = ${JSON.stringify(root)};
+    const manager = SessionManager.inMemory(root);
+    const append = fs.appendFileSync;
+    fs.appendFileSync = (target, data, ...args) => {
+      if (typeof data === 'string' && data.includes('"type":"subagent.workflow.started"')) {
+        process.send(manager.getSessionId());
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20000);
+      }
+      return append(target, data, ...args);
+    };
+    syncBuiltinESMExports();
+    const executor = createSubagentExecutor({
+      state: { currentSessionId: null, asyncJobs: new Map(), fleetJobs: new Map(), subagentSpawns: { sessionId: null, count: 0 } },
+      pi: { events: createEventBus(), appendEntry() {} }, config: { maxActiveAsyncRunsPerSession: 1 },
+      expandTilde: value => value, discoverAgents: () => ({ agents: [] }),
+      tempArtifactsDir: path.join(root, 'artifacts'), getSubagentSessionRoot: () => path.join(root, 'sessions'),
+    });
+    await executor.execute('fixture', { workflowScript: 'return runs.run("one", { agent: "fixture", task: "Synthetic" });', async: true, mission: false },
+      new AbortController().signal, undefined, { cwd: root, hasUI: false, sessionManager: manager });
+  `;
+  const env = { ...process.env, PI_CODING_AGENT_DIR: root, PI_SUBAGENTS_TEMP_ROOT: runtime };
+  delete env.PI_HARNESS_MUTATION_DENIED;
+  delete env.PI_SUBAGENT_CHILD;
+  const child = spawn(process.execPath, ['--input-type=module', '-e', script], { cwd: repo, env, stdio: ['ignore', 'ignore', 'inherit', 'ipc'] });
+  const closed = once(child, 'close');
+  t.after(async () => { child.kill('SIGKILL'); await closed; });
+  const sessionId = await Promise.race([once(child, 'message').then(([id]) => id), closed.then(() => undefined)]);
+  assert.ok(sessionId);
+  const { acquireActiveAsyncCapacity, activeAsyncCapacitySessionKey, getActiveAsyncCapacitySnapshot } = await import('../agent/extensions/pi-subagents/src/runs/background/active-async-capacity.ts');
+  const rootDir = path.join(runtime, 'session-active-async-capacity');
+  const owner = JSON.parse(fs.readFileSync(path.join(rootDir, activeAsyncCapacitySessionKey(sessionId), 'slot-0', 'owner.json'), 'utf8'));
+  assert.ok(owner.runnerStartedAt);
+  assert.equal(owner.workflowDispatchPending, true);
+  assert.equal(getActiveAsyncCapacitySnapshot(sessionId, 1, { rootDir }).used, 1);
+  child.kill('SIGKILL');
+  assert.deepEqual(await closed, [null, 'SIGKILL']);
+  assert.equal(getActiveAsyncCapacitySnapshot(sessionId, 1, { rootDir }).used, 0);
+  const replacement = acquireActiveAsyncCapacity({ sessionId, limit: 1, runId: 'replacement', kind: 'workflow', asyncDir: path.join(root, 'replacement') }, { rootDir });
+  assert.equal(replacement.rollback(), true);
+  assert.equal(fs.existsSync(path.join(owner.asyncDir, 'events.jsonl')), false);
 });

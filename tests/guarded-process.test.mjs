@@ -4,7 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { getEventListeners } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
 import { runGuarded } from '../agent/extensions/lib/guarded-process.ts';
+import { processIdentity } from '../agent/extensions/lib/process-owner.ts';
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'guarded-process-'));
 test.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
@@ -22,6 +24,84 @@ async function assertOrphanStopped(pid) {
     await new Promise(resolve => setTimeout(resolve, 10));
   } while (Date.now() < deadline);
   assert.fail(`Owned orphan ${pid} remained live in state ${state} after output closed`);
+}
+
+async function waitForFixture(read) {
+  const deadline = Date.now() + 3_000;
+  do {
+    const value = read();
+    if (value) return value;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  } while (Date.now() < deadline);
+  assert.fail('Owned process fixture did not reach its ready boundary');
+}
+
+async function deadlineAfterLeaderExit(t, { descriptor = 1, miss = 'none' } = {}) {
+  const id = `${descriptor}-${miss}`;
+  const readyPath = path.join(scratch, `${id}.pid`);
+  const releasePath = path.join(scratch, `${id}.release`);
+  const stdout = descriptor === 1 ? "process.stdout,process.stderr" : "'ignore','ignore',process.stdout";
+  const code = `
+    const fs=require('node:fs'), {spawn}=require('node:child_process');
+    const grand=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:['ignore',${stdout}]});
+    grand.unref();
+    const ready=${JSON.stringify(readyPath)}, release=${JSON.stringify(releasePath)};
+    fs.writeFileSync(ready+'.tmp',JSON.stringify({leader:process.pid,writer:grand.pid}));
+    fs.renameSync(ready+'.tmp',ready);
+    const timer=setInterval(()=>{if(fs.existsSync(release))clearInterval(timer)},10);
+  `;
+  let fireDeadline;
+  const realSetTimeout = globalThis.setTimeout;
+  const timers = t.mock.method(globalThis, 'setTimeout', (callback, ms, ...args) => {
+    if (ms !== 137 || fireDeadline) return realSetTimeout(callback, ms, ...args);
+    const handle = realSetTimeout(() => {}, 10_000);
+    fireDeadline = () => { clearTimeout(handle); callback(...args); };
+    return handle;
+  });
+  const pending = run(code, { timeoutMs: 137 });
+  void pending.catch(() => {});
+  timers.mock.restore();
+  let writer, writerIdentity, watchdog, fired = false, missed = 0;
+  let fdReads;
+  try {
+    assert.ok(fireDeadline);
+    const ready = await waitForFixture(() => fs.existsSync(readyPath) && JSON.parse(fs.readFileSync(readyPath, 'utf8')));
+    writer = ready.writer;
+    writerIdentity = processIdentity(writer);
+    assert.ok(writerIdentity);
+    fs.writeFileSync(releasePath, '');
+    await waitForFixture(() => {
+      try { process.kill(ready.leader, 0); return false; }
+      catch (error) { if (error.code === 'ESRCH') return true; throw error; }
+    });
+    if (miss !== 'none') {
+      const readdir = fs.readdirSync;
+      fdReads = t.mock.method(fs, 'readdirSync', (target, ...args) => {
+        if (target === `/proc/${writer}/fd` && (miss === 'all' || missed === 0)) { missed++; return []; }
+        return readdir(target, ...args);
+      });
+      syncBuiltinESMExports();
+    }
+    fireDeadline();
+    fired = true;
+    const bound = new Promise((_, reject) => { watchdog = setTimeout(() => reject(Error('guarded deadline did not settle')), 2_500); });
+    if (miss === 'all') {
+      await assert.rejects(Promise.race([pending, bound]), { message: 'node exceeded 0s. Could not confirm that inherited output writers exited.' });
+      assert.equal(processIdentity(writer), writerIdentity, 'no unverified PID was signaled');
+      assert.ok(missed >= 2);
+    } else {
+      await assert.rejects(Promise.race([pending, bound]), { message: 'node exceeded 0s' });
+      await assertOrphanStopped(writer);
+      if (miss === 'first') assert.equal(missed, 1);
+    }
+  } finally {
+    clearTimeout(watchdog);
+    if (fdReads) { fdReads.mock.restore(); syncBuiltinESMExports(); }
+    if (!fired) { fs.writeFileSync(releasePath, ''); fireDeadline?.(); }
+    if (writerIdentity && processIdentity(writer) === writerIdentity) {
+      try { process.kill(writer, 'SIGKILL'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
+    }
+  }
 }
 
 test('guarded children decode UTF-8 independently across stdout and stderr chunks', async () => {
@@ -107,27 +187,8 @@ test('cancellation stops detached descendants holding job pipes and spares unrel
   }
 });
 
-test('the deadline stops an inherited-output worker even after its direct parent exits', {timeout:5_000}, async t => {
-  if(process.platform!=='linux'){t.skip('Linux inherited output identities');return;}
-  let escaped;
-  const code="const {spawn}=require('child_process');const grand=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:['ignore',process.stdout,process.stderr]});grand.unref();process.stdout.write(grand.pid+'\\n')";
-  let timer;
-  try {
-    const pending=run(code,{timeoutMs:150,onLine(line){escaped=Number(line);}});
-    await assert.rejects(Promise.race([pending,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('orphan output writer exceeded the deadline bound')),1_500);})]),/exceeded/);
-    assert.ok(Number.isSafeInteger(escaped));
-    await assertOrphanStopped(escaped);
-  }finally{clearTimeout(timer);if(escaped)try{process.kill(-escaped,'SIGKILL');}catch{}}
-});
-
-test('the deadline finds inherited output retained at a non-standard descriptor', {timeout:5_000}, async t => {
-  if(process.platform!=='linux'){t.skip('Linux inherited output identities');return;}
-  let escaped, timer;
-  const code="const {spawn}=require('child_process');const grand=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:['ignore','ignore','ignore',process.stdout]});grand.unref();process.stdout.write(grand.pid+'\\n')";
-  try {
-    const pending=run(code,{timeoutMs:150,onLine(line){escaped=Number(line);}});
-    await assert.rejects(Promise.race([pending,new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('inherited fd3 writer exceeded the deadline bound')),1_500);})]),/exceeded/);
-    assert.ok(Number.isSafeInteger(escaped));
-    await assertOrphanStopped(escaped);
-  }finally{clearTimeout(timer);if(escaped)try{process.kill(-escaped,'SIGKILL');}catch{}}
-});
+const linuxOutputOwnership = { skip: process.platform !== 'linux', timeout: 6_000 };
+test('the deadline stops an inherited-output worker even after its direct parent exits', linuxOutputOwnership, t => deadlineAfterLeaderExit(t));
+test('the deadline finds inherited output retained at a non-standard descriptor', linuxOutputOwnership, t => deadlineAfterLeaderExit(t, { descriptor: 3 }));
+test('a second cleanup scan finds the inherited writer missed when the deadline fired', linuxOutputOwnership, t => deadlineAfterLeaderExit(t, { miss: 'first' }));
+test('unverified inherited writers cannot keep a stopped command pending indefinitely', linuxOutputOwnership, t => deadlineAfterLeaderExit(t, { miss: 'all' }));

@@ -1,3 +1,11 @@
+## 0.56.23 — Faster guarded shell startup, reliable receipts, and bounded binary previews
+
+- Guarded Bash gives safety checks their own bounded startup phase. Concurrent calls can share a verified hard-link inventory, and Stop works while the guard is starting.
+- Cancelled local jobs can reclaim inherited output after their direct process exits, with a bounded diagnostic if cleanup cannot be verified.
+- OpenRouter chat and Responses retain actual charges from the official US and EU endpoints, including zero, and preserve known personal-provider charges when the rest of the receipt is missing.
+- Binary and Office readers reject replaced files and named pipes. ZIP previews read the member directory without loading file bodies.
+- Reclaim slots when a verified Linux launcher dies during slot publication or before a prepared workflow can dispatch. Existing started jobs still require their usual terminal evidence.
+
 ## 0.56.22 — Recover abandoned slots, cancel stalled capture, and protect file writes
 
 - Reclaim unstarted runner and workflow slots after verifying the Linux launcher died. Interrupted revivals restore their prior reservation, and stale owners cannot mutate the restored slot.

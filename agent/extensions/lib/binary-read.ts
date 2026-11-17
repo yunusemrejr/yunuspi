@@ -7,11 +7,13 @@
  * the structure and text of an Office file, the entries of an archive, the schema of a SQLite
  * database, the streams of an audio or video file, and for anything else a plain statement of what it
  * is and which tool looks at it. Everything is bounded and read-only. */
-import fs from "node:fs";
+import { stat, type FileHandle } from "node:fs/promises";
+import { type BigIntStats } from "node:fs";
+import { withRegularReadFile } from "@yunuspi/agent-core/node";
 import path from "node:path";
 import { run, probe } from "./media-process.ts";
-import { officeKindForPath, readOffice } from "./office-read.ts";
-import { openZip } from "./office-zip.ts";
+import { officeKindForPath, readOffice, readOfficeBuffer } from "./office-read.ts";
+import { listZipEntries, ZIP_LIMITS, type ZipEntry } from "./office-zip.ts";
 import { openLegacyOffice, isLegacyOffice } from "./office-render.ts";
 
 export type BinaryKind = "pdf" | "office" | "legacy" | "zip" | "archive" | "sqlite" | "media" | "font" | "executable" | "other";
@@ -100,24 +102,71 @@ async function mediaView(file: string, signal?: AbortSignal): Promise<Pick<Binar
   } catch { return { text: "ffprobe could not read it (missing, or the file is damaged). deliverable_check reports what is wrong; audio_analyze, video_frames and media_info look at working files.", opened: false, facts: {} }; }
 }
 
-function zipView(file: string): Pick<BinaryView, "text" | "opened" | "facts"> {
-  try {
-    const entries = openZip(fs.readFileSync(file)).entries.filter(entry => !entry.directory);
-    const rows = entries.slice(0, 60).map(entry => `${entry.name} (${size(entry.size)})`);
-    return { text: `${entries.length} files:\n${rows.join("\n")}${entries.length > rows.length ? `\n… ${entries.length - rows.length} more` : ""}\nList members with unzip -l or tar -tf and read one member with unzip -p or tar -xOf. To extract, use a new folder (unzip -d <new folder> file.zip), never the folder it came from.`, opened: true, facts: { entries: entries.length } };
-  } catch (error: any) { return { text: `Not a readable ZIP (${String(error?.message ?? error).slice(0, 140)}).`, opened: false, facts: {} }; }
+function zipView(directory: ZipEntry[]): Pick<BinaryView, "text" | "opened" | "facts"> {
+  const entries = directory.filter(entry => !entry.directory);
+  const rows = entries.slice(0, 60).map(entry => `${entry.name} (${size(entry.size)})`);
+  return { text: `${entries.length} files:\n${rows.join("\n")}${entries.length > rows.length ? `\n… ${entries.length - rows.length} more` : ""}\nList members with unzip -l or tar -tf and read one member with unzip -p or tar -xOf. To extract, use a new folder (unzip -d <new folder> file.zip), never the folder it came from.`, opened: true, facts: { entries: entries.length } };
 }
 
-export async function describeBinary(file: string, options: { offset?: number; maxChars?: number; signal?: AbortSignal; head?: Buffer } = {}): Promise<BinaryView> {
-  const stat = fs.statSync(file);
-  const head = options.head ?? (() => { const fd = fs.openSync(file, "r"); try { const buffer = Buffer.alloc(Math.min(8192, stat.size)); fs.readSync(fd, buffer, 0, buffer.length, 0); return buffer; } finally { fs.closeSync(fd); } })();
-  const { kind, label } = sniffKind(head, file);
+type BinaryOptions = { offset?: number; maxChars?: number; signal?: AbortSignal };
+const READ_CHUNK = 1024 * 1024;
+
+async function readKnownBytes(file: FileHandle, bytes: Buffer, alreadyRead: number, fileOffset: number, signal?: AbortSignal) {
+  let position = alreadyRead;
+  while (position < bytes.length) {
+    signal?.throwIfAborted();
+    const { bytesRead } = await file.read(bytes, position, Math.min(READ_CHUNK, bytes.length - position), fileOffset + position);
+    if (!bytesRead) throw new Error("File changed during binary inspection");
+    position += bytesRead;
+  }
+}
+
+function sameRevision(before: BigIntStats, after: BigIntStats): boolean {
+  return before.dev === after.dev && before.ino === after.ino && before.size === after.size &&
+    before.mtimeNs === after.mtimeNs && before.ctimeNs === after.ctimeNs;
+}
+
+export function describeBinary(file: string, options?: BinaryOptions): Promise<BinaryView>;
+export function describeBinary(file: string, options: BinaryOptions & { onlyIfBinary: true }): Promise<BinaryView | undefined>;
+export function describeBinary(file: string, options: BinaryOptions & { onlyIfBinary?: boolean } = {}): Promise<BinaryView | undefined> {
+  return withRegularReadFile(file, options.signal, async (handle, stats) => {
+    const bytes = Number(stats.size);
+    const head = Buffer.allocUnsafe(Math.min(8192, bytes));
+    await readKnownBytes(handle, head, 0, 0, options.signal);
+    const { kind, label } = sniffKind(head, file);
+    if (options.onlyIfBinary && !looksBinary(head) && !["pdf", "sqlite", "legacy"].includes(kind)) return;
+    const assertCurrent = async () => {
+      options.signal?.throwIfAborted();
+      if (!sameRevision(stats, await stat(file, { bigint: true }))) throw new Error("File changed during binary inspection");
+      options.signal?.throwIfAborted();
+    };
+    // Path-based external readers must observe the current named revision.
+    // A stable descriptor provides the actual bytes for in-process readers.
+    await assertCurrent();
+    const readRange = async (offset: number, length: number) => {
+      if (offset + length <= head.length) return head.subarray(offset, offset + length);
+      const data = Buffer.allocUnsafe(length);
+      const read = offset < head.length ? head.copy(data, 0, offset) : 0;
+      await readKnownBytes(handle, data, read, offset, options.signal);
+      await assertCurrent();
+      return data;
+    };
+    const view = await renderBinary(file, options, head, { kind, label, bytes }, readRange);
+    await assertCurrent();
+    return view;
+  });
+}
+
+async function renderBinary(file: string, options: BinaryOptions, head: Buffer,
+  { kind, label, bytes }: { kind: BinaryKind; label: string; bytes: number },
+  readRange: (offset: number, length: number) => Promise<Buffer>): Promise<BinaryView> {
   const maxChars = Math.min(Math.max(options.maxChars ?? 18000, 2000), 40000);
   let part: Pick<BinaryView, "text" | "opened" | "facts">;
   if (kind === "pdf") part = await pdfView(file, options.offset, maxChars, options.signal);
   else if (kind === "office") {
     try {
-      const read = readOffice(file, { maxChars: Math.min(maxChars, 20000) });
+      if (bytes > ZIP_LIMITS.maxFileBytes) throw new Error(`Archive exceeds ${ZIP_LIMITS.maxFileBytes / 1048576} MiB`);
+      const read = readOfficeBuffer(file, await readRange(0, bytes), { maxChars: Math.min(maxChars, 20000) });
       const errors = read.findings.filter(finding => finding.severity === "error").slice(0, 3).map(finding => `- ${finding.message}`);
       part = { text: `${read.text}${read.truncated ? "\n[Text cut. office_doc read with maxChars (up to 60000) or sheet shows more.]" : ""}${errors.length ? `\n\nProblems found while opening it:\n${errors.join("\n")}` : ""}\n\nFor structure, formulas, slide notes and every finding use office_doc read or verify.`, opened: true, facts: { words: read.words, findings: read.findings.length } };
     } catch (error: any) { part = { text: `Could not open it as a document (${String(error?.message ?? error).slice(0, 160)}). deliverable_check reports what is wrong with it.`, opened: false, facts: {} }; }
@@ -131,12 +180,15 @@ export async function describeBinary(file: string, options: { offset?: number; m
       } finally { converted.cleanup(); }
     } catch (error: any) { part = { text: `This is a legacy format that needs LibreOffice to read (${String(error?.message ?? error).slice(0, 200)}). Where LibreOffice is installed, office_doc read or office_doc convert (to docx, xlsx or pptx) opens it.`, opened: false, facts: {} }; }
   }
-  else if (kind === "zip") part = zipView(file);
+  else if (kind === "zip") {
+    try { part = zipView(await listZipEntries(bytes, readRange)); }
+    catch (error: any) { part = { text: `Not a readable ZIP (${String(error?.message ?? error).slice(0, 140)}).`, opened: false, facts: {} }; }
+  }
   else if (kind === "sqlite") part = await sqliteView(file, options.signal);
   else if (kind === "media") part = await mediaView(file, options.signal);
   else {
     const extra = kind === "archive" ? "List ZIP and TAR (also gzip, bzip2, xz) members with unzip -l or tar -tf without extracting; for 7z and RAR use 7z l. Extract into a new folder." : kind === "font" ? "Use fc-scan or fonts tooling to inspect glyphs and metrics." : kind === "executable" ? "Inspect with file, ldd or strings through bash if that is really needed." : "Use file, xxd -l 256 or strings through bash if the bytes matter.";
     part = { text: `${extra}\nFirst bytes: ${hex(head)}`, opened: false, facts: {} };
   }
-  return { kind, label, text: `[read: ${label}, not text] ${path.basename(file)} (${size(stat.size)})\nThe file is binary, so it is shown as what it contains instead of raw bytes.\n\n${part.text}`, opened: part.opened, facts: { kind, label, bytes: stat.size, ...part.facts } };
+  return { kind, label, text: `[read: ${label}, not text] ${path.basename(file)} (${size(bytes)})\nThe file is binary, so it is shown as what it contains instead of raw bytes.\n\n${part.text}`, opened: part.opened, facts: { kind, label, bytes, ...part.facts } };
 }

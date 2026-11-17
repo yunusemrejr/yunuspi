@@ -11,6 +11,8 @@ import { memoryBudgetMb, watchMemory, treeUsage } from "./memory-guard.ts";
 import { ownProcessGroup, processIdentity } from "./process-owner.ts";
 
 export type Progress = (text: string) => void;
+const OUTPUT_CLEANUP_RETRY_MS = 75;
+const OUTPUT_CLEANUP_GRACE_MS = 800;
 /** Spawn a (guarded) process, stream lines, enforce a deadline, kill the
  * whole process group on abort. Returns stdout/stderr tails. */
 export async function runGuarded(command: string, args: string[], options: { cwd: string; signal?: AbortSignal; timeoutMs: number; guard?: boolean; gpu?: boolean; nice?: number; memoryMb?: number; env?: Record<string, string | undefined>; replaceEnv?: boolean; onLine?: (line: string) => void }) {
@@ -31,6 +33,8 @@ export async function runGuarded(command: string, args: string[], options: { cwd
     ownProcessGroup(child.pid);
     const stdoutDecoder = new StringDecoder("utf8"), stderrDecoder = new StringDecoder("utf8");
     let stdout = "", stderr = "", pending = "", lineTruncated = false, settled = false, failure: Error | undefined;
+    let leaderExited = false, outputRescanned = false;
+    let outputCleanupUntil: number | undefined, outputCleanupTimer: ReturnType<typeof setTimeout> | undefined;
     const tail = (text: string, add: string) => {
       const joined = text + add;
       let start = Math.max(0, joined.length - 200_000);
@@ -42,9 +46,9 @@ export async function runGuarded(command: string, args: string[], options: { cwd
       if (!child.pid) return;
       // Snapshot descendants before killing their parent: detached workers can
       // own another process group while still inheriting this job's pipes.
-      if (childIdentity) {
+      if (childIdentity && (!leaderExited || outputLinks.length > 0)) {
         const tree = treeUsage(child.pid, true, outputLinks);
-        const descendants = tree.identities?.[child.pid] === childIdentity ? tree.pids.slice(1) : [];
+        const descendants = !leaderExited && tree.identities?.[child.pid] === childIdentity ? tree.pids.slice(1) : [];
         // Exact inherited output handles still identify job writers after a
         // parent exits and the kernel reparents detached descendants.
         for (const pid of [...new Set([...descendants, ...(tree.outputOwners ?? [])])].reverse()) {
@@ -54,7 +58,12 @@ export async function runGuarded(command: string, args: string[], options: { cwd
         }
       }
       // A reaped leader's numeric PID must never authorize an unrelated group.
-      if (!childIdentity || processIdentity(child.pid) === childIdentity) try { process.kill(-child.pid, "SIGKILL"); } catch { /* already exited */ }
+      if (!leaderExited) {
+        try {
+          if (childIdentity && processIdentity(child.pid) === childIdentity) process.kill(-child.pid, "SIGKILL");
+          else if (!childIdentity) child.kill("SIGKILL");
+        } catch { /* already exited */ }
+      }
     };
     const timer = options.timeoutMs > 0 ? setTimeout(() => { stop(new Error(`${path.basename(command)} exceeded ${Math.round(options.timeoutMs / 1000)}s`)); }, options.timeoutMs) : undefined;
     timer?.unref();
@@ -62,6 +71,27 @@ export async function runGuarded(command: string, args: string[], options: { cwd
       stop(new Error(`${path.basename(command)} stopped: ${message}. Nothing else was affected. Lower the resolution (render scale), render scene by scene with scene/from/to, or shorten the audio, then retry.`));
     }) : () => {};
     const abort = () => { stop(new Error(`${path.basename(command)} cancelled`)); };
+    function scheduleOutputCleanup() {
+      if (settled || !failure || !leaderExited || outputCleanupTimer) return;
+      const cleanupUntil = outputCleanupUntil ??= performance.now() + OUTPUT_CLEANUP_GRACE_MS;
+      outputCleanupTimer = setTimeout(() => {
+        outputCleanupTimer = undefined;
+        if (settled || !failure) return;
+        if (outputRescanned && performance.now() >= cleanupUntil) {
+          // The direct child is reaped. With no closed-stream confirmation,
+          // release our handles and report uncertainty instead of guessing PIDs.
+          const unconfirmed = new Error(`${failure.message}. Could not confirm that inherited output writers exited.`, { cause: failure });
+          child.stdout.destroy();
+          child.stderr.destroy();
+          finish(unconfirmed);
+          return;
+        }
+        kill();
+        outputRescanned = true;
+        scheduleOutputCleanup();
+      }, OUTPUT_CLEANUP_RETRY_MS);
+      outputCleanupTimer.unref();
+    }
     function stop(error: Error) {
       if (settled || failure) return;
       failure = error;
@@ -69,13 +99,15 @@ export async function runGuarded(command: string, args: string[], options: { cwd
       stopWatching();
       options.signal?.removeEventListener("abort", abort);
       kill();
-      // Killing is asynchronous. Release output/worker ownership only after
-      // close confirms that the child and its inherited stdio are gone.
+      // The first scan can miss a descendant that is forking or being
+      // reparented. Rescan its original handles once the leader has exited.
+      scheduleOutputCleanup();
     }
     function finish(error?: Error) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      clearTimeout(outputCleanupTimer);
       stopWatching();
       options.signal?.removeEventListener("abort", abort);
       error ? reject(error) : resolve({ stdout, stderr });
@@ -110,6 +142,7 @@ export async function runGuarded(command: string, args: string[], options: { cwd
     });
     child.stderr.on("data", (chunk: Buffer) => { if (!settled && !failure) stderr = tail(stderr, stderrDecoder.write(chunk)); });
     child.on("error", (error: any) => stop(error.code === "ENOENT" ? new Error(`${command} is not installed`) : error));
+    child.on("exit", () => { leaderExited = true; scheduleOutputCleanup(); });
     child.on("close", (code) => {
       if (settled) return;
       if (failure) { finish(failure); return; }

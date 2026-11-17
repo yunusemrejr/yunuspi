@@ -23,7 +23,7 @@ import { registerContinuationSource, collectContinuationLines } from "./lib/cont
 import { isSessionStopped } from "./lib/session-stop.ts";
 import { canonicalMutationPath, containsPath, selfMutationDenial } from "./lib/self-mutation-guard.ts";
 import { outputFolder, textPath } from "./lib/media-process.ts";
-import { describeBinary, looksBinary, sniffKind } from "./lib/binary-read.ts";
+import { describeBinary } from "./lib/binary-read.ts";
 import { collectEvidence, documentFindings } from "./lib/specifics.ts";
 
 const MAX_FOLLOWUPS = 2;
@@ -104,12 +104,12 @@ export default function deliverables(pi: any) {
     if (event.isError ? !/Offset \d+ is beyond end of file/.test(shown) : !(/[\u0000\uFFFD]/.test(shown) || /^%PDF-|^SQLite format 3|^\{\\rtf/.test(shown))) return;
     try {
       const file = canonicalMutationPath(textPath(raw.replace(/^@/, "").replace(/^~(?=\/|$)/, process.env.HOME ?? "~")), ctx?.cwd ?? process.cwd());
-      const stat = fs.statSync(file);
-      if (!stat.isFile() || stat.size === 0) return;
-      const fd = fs.openSync(file, "r"); let head: Buffer;
-      try { head = Buffer.alloc(Math.min(8192, stat.size)); fs.readSync(fd, head, 0, head.length, 0); } finally { fs.closeSync(fd); }
-      if (!looksBinary(head) && !["pdf", "sqlite", "legacy"].includes(sniffKind(head, file).kind)) return; // an ASCII-only PDF is still not readable as text
-      const view = await describeBinary(file, { offset: typeof event.input?.offset === "number" ? event.input.offset : undefined, signal: ctx?.signal, head });
+      const view = await describeBinary(file, {
+        offset: typeof event.input?.offset === "number" ? event.input.offset : undefined,
+        signal: ctx?.signal,
+        onlyIfBinary: true,
+      });
+      if (!view) return;
       if (view.opened) ledger.noteChecked(file, "pass");
       return { content: [{ type: "text", text: view.text }], details: { ...(event.details ?? {}), binaryView: view.facts }, isError: false };
     } catch { /* leave the native result as it is */ }

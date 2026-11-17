@@ -3142,7 +3142,7 @@
       {
         "name": "bash",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 607,
+        "line": 645,
         "kind": "sdk-factory",
         "evidence": "createBashToolDefinition() supplies the builtin bash definition"
       },
@@ -3367,7 +3367,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 655,
+        "line": 693,
         "kind": "literal"
       },
       {
@@ -3707,7 +3707,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 655,
+        "line": 693,
         "kind": "literal"
       },
       {
@@ -3880,7 +3880,7 @@
           "registration receives the SDK createBashToolDefinition() for the active cwd"
         ],
         "lines": [
-          610
+          648
         ],
         "knownNames": [
           "bash",

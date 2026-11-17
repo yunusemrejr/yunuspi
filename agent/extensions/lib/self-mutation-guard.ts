@@ -321,8 +321,8 @@ function hasHarnessInode(target: fs.Stats): boolean {
 export function guardedCommand(
   command: string,
   args: readonly string[],
-  options: { gpu?: boolean } = {},
-): { command: string; args: string[] } {
+  options: { gpu?: boolean; readyPipe?: boolean } = {},
+): { command: string; args: string[]; readyFd?: 3 } {
   if (SELF_MUTATION_ALLOWED) return { command, args: [...args] };
   if (rootDiscoveryFailed) throw new Error(discoveryFailure);
   if (process.platform !== "linux")
@@ -340,10 +340,12 @@ export function guardedCommand(
       ).flatMap((root) => ["--protect", root]),
       // GPU render nodes only for engines that compute on them (Vulkan/GL).
       ...(options.gpu ? ["--gpu"] : []),
+      ...(options.readyPipe ? ["--ready-pipe"] : []),
       "--",
       command,
       ...args,
     ],
+    ...(options.readyPipe ? { readyFd: 3 as const } : {}),
   };
 }
 

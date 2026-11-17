@@ -6,6 +6,7 @@ export interface OpenAIResponsesStreamOptions {
     dispatchedAt?: number;
     serviceTier?: ResponseCreateParamsStreaming["service_tier"];
     hostedToolRates?: ResponsesHostedToolRates;
+    openRouterBilling?: boolean;
     grammarToolInputProperties?: ReadonlyMap<string, string>;
     resolveServiceTier?: (responseServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined, requestServiceTier: ResponseCreateParamsStreaming["service_tier"] | undefined) => ResponseCreateParamsStreaming["service_tier"] | undefined;
     applyServiceTierPricing?: (usage: Usage, serviceTier: ResponseCreateParamsStreaming["service_tier"] | undefined) => void;

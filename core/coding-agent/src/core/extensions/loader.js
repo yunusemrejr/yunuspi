@@ -10,6 +10,7 @@ import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as _bundledPiAgentCore from "@yunuspi/agent-core";
+import * as _bundledPiAgentCoreNode from "@yunuspi/agent-core/node";
 import * as _bundledPiAiCompat from "@yunuspi/ai/compat";
 import * as _bundledPiAiOauth from "@yunuspi/ai/oauth";
 import * as _bundledPiAiProviders from "@yunuspi/ai/providers/all";
@@ -41,6 +42,7 @@ const VIRTUAL_MODULES = {
     "@sinclair/typebox/compile": _bundledTypeboxCompile,
     "@sinclair/typebox/value": _bundledTypeboxValue,
     "@yunuspi/agent-core": _bundledPiAgentCore,
+    "@yunuspi/agent-core/node": _bundledPiAgentCoreNode,
     "@yunuspi/tui": _bundledPiTui,
     // Extensions resolve the pi-ai root to the compat entrypoint (a strict
     // superset of the core entrypoint): existing extensions using the old
@@ -95,6 +97,7 @@ function getAliases() {
     };
     const piCodingAgentEntry = packageIndex;
     const piAgentCoreEntry = resolveWorkspaceOrImport("agent/dist/index.js", "@yunuspi/agent-core");
+    const piAgentCoreNodeEntry = resolveWorkspaceOrImport("agent/dist/node.js", "@yunuspi/agent-core/node");
     const piTuiEntry = resolveWorkspaceOrImport("tui/dist/index.js", "@yunuspi/tui");
     // Extensions resolve the pi-ai root to the compat entrypoint (a strict
     // superset of the core entrypoint): existing extensions using the old
@@ -107,6 +110,7 @@ function getAliases() {
         "@yunuspi/coding-agent/session-accounting": path.resolve(__dirname, "../session-accounting.js"),
         "@yunuspi/coding-agent/session-write-lock": path.resolve(__dirname, "../../utils/session-write-lock.js"),
         "@yunuspi/coding-agent": piCodingAgentEntry,
+        "@yunuspi/agent-core/node": piAgentCoreNodeEntry,
         "@yunuspi/agent-core": piAgentCoreEntry,
         "@yunuspi/tui": piTuiEntry,
         "@yunuspi/ai/providers/all": piAiProvidersEntry,

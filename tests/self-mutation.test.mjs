@@ -337,6 +337,60 @@ shutil.rmtree(base)
  const result = spawnSync("python3", ["-B", "-c", script, wrapper], { encoding: "utf8" });
  assert.equal(result.status, 0, result.stderr);
 });
+test("cold commands share one real inventory, while strict or unsafe cache paths scan again", { skip: process.platform !== 'linux' }, () => {
+ const script = `import importlib.util, multiprocessing, os, shutil, stat, sys, tempfile, time
+from pathlib import Path
+ctx=multiprocessing.get_context('fork')
+with tempfile.TemporaryDirectory(prefix='inventory-guard-') as base:
+ root=Path(base)/'protected'; cache=root/'agent/cache'; cache.mkdir(parents=True)
+ wrapper=root/'agent/scripts/guard.py'; wrapper.parent.mkdir(); shutil.copyfile(sys.argv[1],wrapper)
+ spec=importlib.util.spec_from_file_location('guard',wrapper)
+ guard=importlib.util.module_from_spec(spec);spec.loader.exec_module(guard)
+ backup=root/'agent.backup-fixture'; backup.mkdir(); (backup/'original').write_text('x')
+ marker=cache/guard.INVENTORY_MARKER
+ real=guard.check_protected_hardlinks
+ scans=ctx.Value('i',0)
+ def counted(roots):
+  with scans.get_lock(): scans.value += 1
+  time.sleep(0.2)
+  return real(roots)
+ guard.check_protected_hardlinks=counted
+ def verify(): guard.verified_hardlink_inventory(str(root),{str(root)})
+ def concurrent(ttl):
+  os.environ['PI_HARDLINK_SCAN_TTL_S']=str(ttl)
+  gate=ctx.Barrier(4,timeout=4)
+  def worker(): gate.wait(); verify()
+  children=[ctx.Process(target=worker) for _ in range(4)]
+  try:
+   for child in children: child.start()
+   for child in children: child.join(5)
+   assert all(child.exitcode==0 for child in children),[child.exitcode for child in children]
+  finally:
+   for child in children:
+    if child.is_alive(): child.kill(); child.join()
+ concurrent(120)
+ assert scans.value==1,scans.value
+ lock=Path(str(marker)+'.lock')
+ assert stat.S_IMODE(lock.stat().st_mode)==0o200
+ marker.unlink()
+ concurrent(0)
+ assert scans.value==5 and not marker.exists(),scans.value
+ os.environ['PI_HARDLINK_SCAN_TTL_S']='120'
+ lock.chmod(0o600)
+ os.mkfifo(marker)
+ verify(); verify()
+ assert scans.value==7 and stat.S_ISFIFO(marker.stat().st_mode)
+ marker.unlink()
+ os.link(backup/'original',Path(base)/'writable-alias')
+ try: verify()
+ except RuntimeError as error: assert 'outside protected roots' in str(error)
+ else: raise AssertionError('backup inode alias was accepted')
+ assert not marker.exists()
+`;
+ const result = spawnSync('python3', ['-B', '-c', script, wrapper], { encoding: 'utf8', timeout: 15000 });
+ assert.ifError(result.error);
+ assert.equal(result.status, 0, result.stderr);
+});
 test("SSH projections preserve bytes and never bless untrusted or unavailable files", () => {
  const script = `import importlib.util, os, stat, sys
 from unittest.mock import patch

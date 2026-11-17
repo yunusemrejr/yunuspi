@@ -14,6 +14,7 @@ import { iterateSseMessages, SseBodyReadError } from "../utils/sse.js";
 import { appendGrammarToolInputJsonDelta, createGrammarToolInputProperties, getGrammarToolInput, getJsonSchemaToolParameters, resolveGrammarConstrainedSampling, resolveJsonSchemaStrictSampling, } from "./constrained-sampling.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { clampOpenAIPromptCacheKey, isOpenAIEndpoint } from "./openai-prompt-cache.js";
+import { applyOpenRouterUsage, isOpenRouterBillingEndpoint } from "./openrouter-usage.js";
 import { buildBaseOptions, clampThinkingBudgetToAnswerRoom, thinkingBudgetForLevel } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
 /**
@@ -296,27 +297,18 @@ export const stream = (model, context, options) => {
                 maxRetryDelayMs: options?.maxRetryDelayMs,
                 signal: options?.signal,
             });
+            const routerBilling = isOpenRouterBillingEndpoint(model, response, "chat/completions");
             await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
             stream.push({ type: "start", partial: output });
             let textBlock = null;
             let thinkingBlock = null;
             let hasFinishReason = false;
             let createdAt;
+            let routerReceipt;
             const recordChunkUsage = (rawUsage, serviceTier, responseId) => {
+                if (routerBilling && responseId && responseId !== output.responseId) return;
                 const usage = parseChunkUsage(rawUsage, model, serviceTier, createdAt ?? dispatchedAt);
-                const previous = output.usage.cost;
-                const hadReported = previous.source === "provider-reported";
-                const reportsCost = usage.cost.source === "provider-reported";
-                if ((hadReported || reportsCost) && responseId && responseId !== output.responseId) return;
-                if (hadReported && !reportsCost) {
-                    // A later token snapshot can update the catalog estimate
-                    // while the same response keeps its actual provider bill.
-                    usage.cost = {
-                        ...usage.cost, estimatedTotal: usage.cost.total,
-                        total: previous.total, source: previous.source, complete: previous.complete,
-                        byok: previous.byok, upstreamInferenceCost: previous.upstreamInferenceCost,
-                    };
-                }
+                if (routerBilling) routerReceipt = applyOpenRouterUsage(usage, rawUsage, routerReceipt);
                 output.usage = usage;
             };
             const toolCallBlocksByIndex = new Map();
@@ -1335,15 +1327,6 @@ usage.cacheReadReported = [rawUsage.prompt_tokens_details?.cached_tokens, rawUsa
     usage.reasoning = Number.isSafeInteger(reasoningCount) && reasoningCount >= 0 ? Math.min(reasoningCount, usage.output) : 0;
 calculateCost(model,usage,createdAt);
 usage.cost.source = 'estimate';
-    if (model.provider === 'openrouter' && Number.isFinite(rawUsage.cost) && rawUsage.cost >= 0) {
-      let official = false;
-      try { official = new URL(model.baseUrl).hostname === 'openrouter.ai'; } catch {}
-      if (official) {
-        usage.cost.estimatedTotal = usage.cost.total;
-        usage.cost.total = rawUsage.cost;
-        usage.cost.source = 'provider-reported'; usage.cost.complete = true;
-      }
-    }
     /* PI_PROVIDER_PRICE_ACCURACY_V4 */
     let billingHost = '';
     try { const u = new URL(model.baseUrl); if (u.protocol === 'https:') billingHost = u.hostname; } catch {}
@@ -1356,10 +1339,6 @@ usage.cost.source = 'estimate';
         ![rawUsage.prompt_tokens, rawUsage.completion_tokens].every(value => Number.isSafeInteger(value) && value >= 0) || !usage.cacheReadReported);
     if (!['provider-reported','provider-estimate'].includes(usage.cost.source) &&
         [rawUsage.prompt_tokens_details?.audio_tokens, rawUsage.completion_tokens_details?.audio_tokens].some(n => Number.isFinite(n) && n > 0)) usage.cost.complete = false;
-    if (usage.cost.source === 'provider-reported' && Number.isFinite(rawUsage.cost_details?.upstream_inference_cost))
-      usage.cost.upstreamInferenceCost = rawUsage.cost_details.upstream_inference_cost;
-    if (usage.cost.source === 'provider-reported' && rawUsage.is_byok === true) usage.cost.byok = true;
-
     /* PI_CHAT_SERVICE_PRICING_V1 */
     if (model.provider === 'openai') {
       function getServiceTierCostMultiplier(model, serviceTier) {

@@ -5,6 +5,7 @@ import { parseStreamingJson } from "../utils/json-parse.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
 import { appendGrammarToolInputJsonDelta, getGrammarToolInput, getJsonSchemaToolParameters, resolveGrammarConstrainedSampling, resolveJsonSchemaStrictSampling, } from "./constrained-sampling.js";
 import { createResponsesHostedUsageMeter } from "./openai-responses-hosted-usage.js";
+import { applyOpenRouterUsage } from "./openrouter-usage.js";
 import { transformMessages } from "./transform-messages.js";
 // =============================================================================
 // Utilities
@@ -454,14 +455,17 @@ async function decodeResponsesStream(openaiStream, output, stream, model, option
         }
     };
     let createdAt;
+    let routerReceipt;
     const rememberResponseId = (response) => {
         if (typeof response?.id === "string" && response.id.length > 0) {
+            if (options?.openRouterBilling && output.responseId && response.id !== output.responseId) return false;
             output.responseId = response.id;
         }
+        return true;
     };
     const recordResponseBilling = (response) => {
         // Optional output/replay metadata must not erase an observed bill or ID.
-        rememberResponseId(response);
+        if (!rememberResponseId(response)) return false;
         if (response?.usage) {
             const inputDetails = response.usage.input_tokens_details;
             const cachedTokens = inputDetails?.cached_tokens || 0;
@@ -493,21 +497,18 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
   const raw = response?.usage, cost = output.usage.cost;
   if (raw) applyDeepSeekPricing(model, output.usage, raw, requestAt,
       ![raw.input_tokens, raw.output_tokens].every(value => Number.isSafeInteger(value) && value >= 0) || !output.usage.cacheReadReported);
-  if (model.provider === 'openrouter' && host === 'openrouter.ai' && Number.isFinite(raw?.cost) && raw.cost >= 0) {
-    cost.estimatedTotal = cost.total; cost.total = raw.cost; cost.source = 'provider-reported'; cost.complete = true;
-    if (Number.isFinite(raw.cost_details?.upstream_inference_cost)) cost.upstreamInferenceCost = raw.cost_details.upstream_inference_cost;
-    if (raw.is_byok === true) cost.byok = true;
-  }
+  if (options?.openRouterBilling && raw) routerReceipt = applyOpenRouterUsage(output.usage, raw, routerReceipt);
   if (model.provider === 'deepinfra' && host === 'api.deepinfra.com' && Number.isFinite(raw?.estimated_cost) && raw.estimated_cost >= 0) {
     cost.estimatedTotal = cost.total; cost.total = raw.estimated_cost; cost.source = 'provider-estimate'; cost.complete = true;
   }
   if (!['provider-reported','provider-estimate'].includes(cost.source) &&
       [raw?.input_tokens_details?.audio_tokens, raw?.output_tokens_details?.audio_tokens].some(n => Number.isFinite(n) && n > 0)) cost.complete = false;
 }
+        return true;
     };
     const finalizeResponse = (response) => {
+        if (!recordResponseBilling(response)) return;
         sawTerminalResponseEvent = true;
-        recordResponseBilling(response);
         backfillReasoningSignatures(response?.output);
         // Map status to stop reason. For incomplete responses, retain the provider's
         // specific reason so max-output truncation and content filtering stay distinct.
@@ -528,8 +529,7 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
     for await (const event of openaiStream) {
         observeHostedUsage(event);
         if (event.type === "response.created" || event.type === "response.in_progress") {
-            rememberResponseId(event.response);
-            createdAt ??= providerCreatedMs(event.response?.created_at);
+            if (rememberResponseId(event.response)) createdAt ??= providerCreatedMs(event.response?.created_at);
         }
         else if (event.type === "response.output_item.added") {
             createSlot(event.output_index, event.item);
@@ -694,8 +694,8 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
             throw new Error(`Error Code ${event.code}: ${event.message}` || "Unknown error");
         }
         else if (event.type === "response.failed") {
+            if (!recordResponseBilling(event.response)) continue;
             sawTerminalResponseEvent = true;
-            recordResponseBilling(event.response);
             if (event.response?.usage) backfillReasoningSignatures(event.response.output);
             output.rawStopReason = event.response?.status;
             if (event.error instanceof Error) throw event.error;

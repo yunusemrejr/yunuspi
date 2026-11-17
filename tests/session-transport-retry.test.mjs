@@ -36,6 +36,107 @@ const fixtureSse = (origin, endpoint, frames) => async input => {
     {headers:{"content-type":"text/event-stream"}});
 };
 
+test("regional OpenRouter charges require the verified SDK response endpoint and retain authoritative zero", async () => {
+  for (const api of routerBillingApis) {
+    const fixtures = [
+      {origin:"https://openrouter.ai", bill:.125, label:"$0.125000"},
+      {origin:"https://eu.openrouter.ai", bill:.125, label:"$0.125000"},
+      {origin:"https://us.openrouter.ai", bill:0, label:"$0.000"},
+      {origin:"https://eu.openrouter.ai.example.invalid", bill:.125, label:"$~0.000015"},
+      {origin:"https://openrouter.ai", actual:"https://redirect.example.invalid", bill:.125, label:"$~0.000015"},
+      {origin:"https://openrouter.ai", actual:"https://us.openrouter.ai", bill:.125, label:"$~0.000015"},
+      {origin:"https://openrouter.ai", actualPath:"/api/v1/other-endpoint", bill:.125, label:"$~0.000015"},
+      {origin:"https://openrouter.ai", redirected:true, bill:.125, label:"$~0.000015"},
+      {origin:"http://openrouter.ai", bill:.125, label:"$~0.000015"},
+      {origin:"https://openrouter.ai", provider:"custom-router", bill:.125, label:"$~0.000015"},
+    ];
+    for (const f of fixtures) {
+      const result = await routerBillingResult(api, [{cost:f.bill}], f);
+      assert.equal(footerLabel(result), f.label, `${api.name} ${f.origin} ${f.actual ?? ""}`);
+    }
+  }
+});
+
+test("verified OpenRouter partial BYOK charges settle independently and survive sparse same-response updates", async () => {
+  for (const api of routerBillingApis) {
+    const byok = {is_byok:true, cost_details:{upstream_inference_cost:.25}};
+    const cases = [
+      {usage:[byok], label:"$0.250000+?"},
+      {usage:[{is_byok:true,cost_details:{upstream_inference_cost:0}}], label:"$0.000+?"},
+      {usage:[{...byok,cost:0}], label:"$0.250000"},
+      {usage:[{is_byok:true,cost:0}], label:"$0.000+?"},
+      {usage:[{is_byok:true,cost:0,cost_details:{upstream_inference_cost:0}}], label:"$0.000"},
+      {usage:[{...byok,cost:.125},{}], label:"$0.375000"},
+      {usage:[{...byok,cost:.125},{cost:-1,cost_details:{upstream_inference_cost:"0.5"}}], label:"$0.375000"},
+      {usage:[byok,{cost:.125}], label:"$0.375000"},
+      {usage:[{cost:.125,cost_details:byok.cost_details},{is_byok:true}], label:"$0.375000"},
+      {usage:[{...byok,cost:.125},{cost:0}], label:"$0.250000"},
+      {usage:[{...byok,cost:.125},{cost:0,is_byok:false}], label:"$0.000"},
+      {usage:[{cost:.125,is_byok:false,cost_details:byok.cost_details}], label:"$0.125000"},
+      {usage:[{cost:.125,cost_details:byok.cost_details}], label:"$0.125000"},
+      {usage:[byok,{id:"unrelated-router-response",cost:.5,is_byok:false}], label:"$0.250000+?"},
+    ];
+    for (const {usage, label} of cases) {
+      const result = await routerBillingResult(api, usage, {origin:"https://eu.openrouter.ai"});
+      assert.equal(result.responseId, routerBillingId);
+      const entry = JSON.parse(JSON.stringify({type:"message",message:result}));
+      assert.equal(collectSessionCost([entry,entry]).formatted, label, `${api.name} ${JSON.stringify(usage)}`);
+    }
+  }
+});
+
+test("verified OpenRouter failure retains its partial BYOK receipt and measured cache usage", async () => {
+  for (const api of routerBillingApis) {
+    const result = await routerBillingResult(api,
+      [{terminal:"failed", is_byok:true, cost_details:{upstream_inference_cost:.25}}],
+      {origin:"https://us.openrouter.ai", stop:"error", cacheRead:4, cacheWrite:2});
+    assert.equal(result.responseId, routerBillingId);
+    assert.match(result.errorMessage, /Synthetic router failure/);
+    assert.equal(result.usage.cacheRead, 4);
+    assert.equal(result.usage.cacheWrite, 2);
+    assert.equal(result.usage.input, 6);
+    assert.equal(footerLabel(result), "$0.250000+?");
+  }
+});
+
+const routerBillingId = "synthetic-regional-router-response";
+const routerBillingApis = [
+  {name:"openai-completions", run:openAICompletions, endpoint:"/api/v1/chat/completions"},
+  {name:"openai-responses", run:openAIResponses, endpoint:"/api/v1/responses"},
+];
+
+async function routerBillingResult(api, snapshots, {
+  origin, actual, actualPath, redirected, provider = "openrouter", stop = "stop", cacheRead = 0, cacheWrite = 0,
+}) {
+  const selected = model("fixture", provider, api.name, `${origin}/api/v1`);
+  const isChat = api.name === "openai-completions";
+  const tokenDetails = {cached_tokens:cacheRead, cache_write_tokens:cacheWrite};
+  const updates = snapshots.map(({id = routerBillingId, terminal = "completed", ...raw}) => isChat
+    ? {id, choices:[{index:0,delta:{content:""},finish_reason:"stop"}],
+      usage:{prompt_tokens:12, prompt_tokens_details:tokenDetails, completion_tokens:3, total_tokens:15, ...raw}}
+    : {type:`response.${terminal}`, response:{id, status:terminal, output:[],
+      ...(terminal === "failed" ? {error:{code:"fixture", message:"Synthetic router failure"}} : {}),
+      usage:{input_tokens:12, input_tokens_details:tokenDetails, output_tokens:3, total_tokens:15, ...raw}}});
+  const frames = isChat
+    ? [{id:routerBillingId, choices:[{index:0,delta:{content:"Synthetic answer"},finish_reason:"stop"}]}, ...updates]
+    : updates;
+  if (isChat && stop === "error") frames.push({id:routerBillingId,
+    error:{code:502,message:"Synthetic router failure"}, choices:[{index:0,delta:{content:""},finish_reason:"error"}]});
+  const respond = fixtureSse(origin, api.endpoint, frames);
+  let posts = 0;
+  const result = await api.run(selected, prompt, {...session, fetch:async (input, options) => {
+    assert.equal(options.method, "POST");
+    posts++;
+    const response = await respond(input);
+    Object.defineProperty(response, "url", {value:`${actual ?? origin}${actualPath ?? api.endpoint}`});
+    if (redirected) Object.defineProperty(response, "redirected", {value:true});
+    return response;
+  }}).result();
+  assert.equal(result.stopReason, stop, result.errorMessage);
+  assert.equal(posts, 1);
+  return result;
+}
+
 const responsesTokens = {input_tokens:12, output_tokens:3, total_tokens:15, input_tokens_details:{cached_tokens:0}};
 const hostedSearch = {type:"web_search_call", id:"synthetic-web-search", status:"completed", action:{type:"search"}};
 const hostedImage = {type:"image_generation_call", id:"synthetic-image", status:"completed"};

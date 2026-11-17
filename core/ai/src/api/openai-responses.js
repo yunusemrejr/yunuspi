@@ -12,6 +12,7 @@ import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copi
 import { clampOpenAIPromptCacheKey, isOpenAIEndpoint } from "./openai-prompt-cache.js";
 import { responsesHostedToolRates } from "./openai-responses-hosted-usage.js";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
+import { isOpenRouterBillingEndpoint } from "./openrouter-usage.js";
 import { buildBaseOptions } from "./simple-options.js";
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 // OpenAI Responses rejects max_output_tokens below 16: https://github.com/earendil-works/pi/issues/6265
@@ -132,12 +133,14 @@ export const stream = (model, context, options) => {
                 signal: options?.signal,
             });
             const hostedToolRates = responsesHostedToolRates(model, params?.tools, response, params?.service_tier);
+            const openRouterBilling = isOpenRouterBillingEndpoint(model, response, "responses");
             await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
             stream.push({ type: "start", partial: output });
             await processResponsesStream(openaiStream, output, stream, model, {
                 dispatchedAt,
                 serviceTier: options?.serviceTier,
                 hostedToolRates,
+                openRouterBilling,
                 grammarToolInputProperties,
                 applyServiceTierPricing: (usage, serviceTier) => applyServiceTierPricing(usage, serviceTier, model),
             });

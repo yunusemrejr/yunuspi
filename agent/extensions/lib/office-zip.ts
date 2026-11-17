@@ -29,6 +29,7 @@ export type ZipReader = {
 };
 
 const EOCD = 0x06054b50, CENTRAL = 0x02014b50, LOCAL = 0x04034b50;
+const MAX_ZIP_END_BYTES = 22 + 65535;
 
 /** Names are archive-relative paths; reject anything that could land outside a target directory. */
 export function safeEntryName(name: string): boolean {
@@ -36,9 +37,12 @@ export function safeEntryName(name: string): boolean {
   return !name.split("/").some(part => part === "..");
 }
 
-export function openZip(buffer: Buffer): ZipReader {
-  if (buffer.length < 22) throw new Error("Not a ZIP archive (file is shorter than a ZIP end record)");
-  if (buffer.length > ZIP_LIMITS.maxFileBytes) throw new Error(`Archive is larger than ${ZIP_LIMITS.maxFileBytes / 1048576} MiB`);
+function checkArchiveSize(bytes: number): void {
+  if (bytes < 22) throw new Error("Not a ZIP archive (file is shorter than a ZIP end record)");
+  if (bytes > ZIP_LIMITS.maxFileBytes) throw new Error(`Archive is larger than ${ZIP_LIMITS.maxFileBytes / 1048576} MiB`);
+}
+
+function zipDirectoryPosition(buffer: Buffer, fileBytes: number) {
   let eocd = -1;
   for (let at = buffer.length - 22; at >= Math.max(0, buffer.length - 22 - 65535); at--) {
     if (buffer.readUInt32LE(at) === EOCD && at + 22 + buffer.readUInt16LE(at + 20) === buffer.length) { eocd = at; break; }
@@ -49,17 +53,19 @@ export function openZip(buffer: Buffer): ZipReader {
   if (buffer.readUInt16LE(eocd + 4) !== 0 || buffer.readUInt16LE(eocd + 6) !== 0 || buffer.readUInt16LE(eocd + 8) !== total) throw new Error("Multi-disk ZIP archives are not supported");
   if (total === 0xffff || centralOffset === 0xffffffff) throw new Error("ZIP64 archives are not supported");
   if (total > ZIP_LIMITS.maxEntries) throw new Error(`Archive lists ${total} entries; the limit is ${ZIP_LIMITS.maxEntries}`);
-  if (centralOffset + centralSize > eocd) throw new Error("Corrupt ZIP: the central directory runs past its end record");
-  const centralEnd = centralOffset + centralSize;
-  const entries: ZipEntry[] = [];
-  const byName = new Map<string, ZipEntry>();
-  let at = centralOffset, declared = 0;
+  if (centralOffset + centralSize > fileBytes - buffer.length + eocd) throw new Error("Corrupt ZIP: the central directory runs past its end record");
+  return { total, centralOffset, centralSize };
+}
+
+function zipDirectoryEntries(buffer: Buffer, total: number): Map<string, ZipEntry> {
+  const entries = new Map<string, ZipEntry>();
+  let at = 0, declared = 0;
   for (let index = 0; index < total; index++) {
-    if (at + 46 > centralEnd || buffer.readUInt32LE(at) !== CENTRAL) throw new Error(`Corrupt ZIP: central directory entry ${index + 1} is malformed`);
+    if (at + 46 > buffer.length || buffer.readUInt32LE(at) !== CENTRAL) throw new Error(`Corrupt ZIP: central directory entry ${index + 1} is malformed`);
     const method = buffer.readUInt16LE(at + 10), crc = buffer.readUInt32LE(at + 16);
     const compressedSize = buffer.readUInt32LE(at + 20), size = buffer.readUInt32LE(at + 24);
     const nameLength = buffer.readUInt16LE(at + 28), extraLength = buffer.readUInt16LE(at + 30), commentLength = buffer.readUInt16LE(at + 32);
-    if (at + 46 + nameLength + extraLength + commentLength > centralEnd) throw new Error(`Corrupt ZIP: central directory entry ${index + 1} exceeds its declared bounds`);
+    if (at + 46 + nameLength + extraLength + commentLength > buffer.length) throw new Error(`Corrupt ZIP: central directory entry ${index + 1} exceeds its declared bounds`);
     if (buffer.readUInt16LE(at + 8) & 1) throw new Error("Encrypted ZIP entries are not supported");
     const offset = buffer.readUInt32LE(at + 42);
     const name = buffer.toString("utf8", at + 46, at + 46 + nameLength);
@@ -67,11 +73,30 @@ export function openZip(buffer: Buffer): ZipReader {
     const entry: ZipEntry = { name, method, compressedSize, size, crc, offset, directory: name.endsWith("/") };
     declared += size;
     if (!safeEntryName(name)) throw new Error(`Unsafe entry name in archive: ${JSON.stringify(name.slice(0, 80))}`);
-    if (byName.has(name)) throw new Error(`Duplicate entry name in archive: ${JSON.stringify(name.slice(0, 80))}`);
-    entries.push(entry);
-    byName.set(name, entry);
+    if (entries.has(name)) throw new Error(`Duplicate entry name in archive: ${JSON.stringify(name.slice(0, 80))}`);
+    entries.set(name, entry);
   }
   if (declared > ZIP_LIMITS.maxTotalBytes) throw new Error(`Archive inflates to ${Math.round(declared / 1048576)} MiB; the limit is ${ZIP_LIMITS.maxTotalBytes / 1048576} MiB`);
+  return entries;
+}
+
+/** List archive members without reading the file bodies. */
+export async function listZipEntries(bytes: number, read: (offset: number, length: number) => Promise<Buffer>): Promise<ZipEntry[]> {
+  checkArchiveSize(bytes);
+  const tailOffset = Math.max(0, bytes - MAX_ZIP_END_BYTES);
+  const tail = await read(tailOffset, bytes - tailOffset);
+  const { total, centralOffset, centralSize } = zipDirectoryPosition(tail, bytes);
+  const directory = centralOffset >= tailOffset
+    ? tail.subarray(centralOffset - tailOffset, centralOffset + centralSize - tailOffset)
+    : await read(centralOffset, centralSize);
+  return [...zipDirectoryEntries(directory, total).values()];
+}
+
+export function openZip(buffer: Buffer): ZipReader {
+  checkArchiveSize(buffer.length);
+  const { total, centralOffset, centralSize } = zipDirectoryPosition(buffer, buffer.length);
+  const byName = zipDirectoryEntries(buffer.subarray(centralOffset, centralOffset + centralSize), total);
+  const entries = [...byName.values()];
 
   const read = (name: string): Buffer => {
     const entry = byName.get(name);
@@ -107,10 +132,30 @@ export function openZip(buffer: Buffer): ZipReader {
 }
 
 export function readZipFile(file: string): ZipReader {
-  const stat = fs.statSync(file);
-  if (!stat.isFile()) throw new Error(`${file} is not a file`);
-  if (stat.size > ZIP_LIMITS.maxFileBytes) throw new Error(`${file} is larger than ${ZIP_LIMITS.maxFileBytes / 1048576} MiB`);
-  return openZip(fs.readFileSync(file));
+  return withZipFile(file, (_bytes, read) => openZip(read()));
+}
+
+/** Keep synchronous Office readers bounded and tied to the verified input. */
+export function withZipFile<T>(file: string, use: (bytes: number, read: () => Buffer) => T): T {
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK ?? 0));
+  try {
+    const before = fs.fstatSync(fd, { bigint: true });
+    if (!before.isFile()) throw new Error(`${file} is not a file`);
+    const bytes = Number(before.size);
+    return use(bytes, () => {
+      checkArchiveSize(bytes);
+      const buffer = Buffer.allocUnsafe(bytes);
+      for (let offset = 0; offset < bytes;) {
+        const count = fs.readSync(fd, buffer, offset, bytes - offset, offset);
+        if (!count) throw new Error("Archive changed during reading");
+        offset += count;
+      }
+      const after = fs.statSync(file, { bigint: true });
+      if (after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size ||
+          after.mtimeNs !== before.mtimeNs || after.ctimeNs !== before.ctimeNs) throw new Error("Archive changed during reading");
+      return buffer;
+    });
+  } finally { fs.closeSync(fd); }
 }
 
 export type ZipSource = { name: string; data: Buffer | string };

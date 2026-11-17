@@ -7,9 +7,8 @@
  * Output is bounded (text, sample rows, findings) so a large file cannot flood a context, and
  * everything is derived from the file bytes: nothing here claims to know how Word, Excel or
  * PowerPoint will paginate or lay out the result. Rendering is a separate, optional step. */
-import fs from "node:fs";
 import path from "node:path";
-import { openZip, type ZipReader } from "./office-zip.ts";
+import { openZip, withZipFile, type ZipReader } from "./office-zip.ts";
 import { parseXml, XmlError, childOf, childrenOf, descendantsOf, elementsOf, textOf, type XmlNode } from "./xml-lite.ts";
 import { unprefixedFutureFunctions } from "./sheet-formula.ts";
 
@@ -398,24 +397,31 @@ function readOpenDocument(zip: ZipReader, kind: "odt" | "ods" | "odp", findings:
 
 export function readOffice(file: string, options: ReadOptions = {}): OfficeRead {
   const resolved = path.resolve(file);
-  const stat = fs.statSync(resolved);
-  if (!stat.isFile()) throw new Error(`${resolved} is not a file`);
+  return withZipFile(resolved, (bytes, read) => readOfficePackage(resolved, bytes, read, options));
+}
+
+/** Parse already verified input bytes without reopening their source path. */
+export function readOfficeBuffer(file: string, buffer: Buffer, options: ReadOptions = {}): OfficeRead {
+  return readOfficePackage(path.resolve(file), buffer.length, () => buffer, options);
+}
+
+function readOfficePackage(resolved: string, bytes: number, getBuffer: () => Buffer, options: ReadOptions): OfficeRead {
   const findings: Finding[] = [];
   const opts = { maxChars: Math.min(Math.max(options.maxChars ?? 6000, 200), 60000), maxRows: Math.min(Math.max(options.maxRows ?? 25, 1), 200), maxCols: Math.min(Math.max(options.maxCols ?? 12, 1), 40), maxSlides: Math.min(Math.max(options.maxSlides ?? 40, 1), 200), sheet: options.sheet };
   let zip: ZipReader;
-  try { zip = openZip(fs.readFileSync(resolved)); }
+  try { zip = openZip(getBuffer()); }
   catch (error) {
-    return { kind: officeKindForPath(resolved) ?? "docx", path: resolved, bytes: stat.size, parts: 0, meta: {}, text: "", truncated: false, words: 0, stats: {},
+    return { kind: officeKindForPath(resolved) ?? "docx", path: resolved, bytes, parts: 0, meta: {}, text: "", truncated: false, words: 0, stats: {},
       findings: [{ severity: "error", code: "not-a-zip", message: String((error as Error).message).slice(0, 240), hint: "An Office file is a ZIP container. If this file came from a script, check that it wrote the whole file and did not write text or an error page instead." }] };
   }
   let kind = officeKindForPath(resolved);
   const sniffed: OfficeKind | undefined = zip.has("word/document.xml") ? "docx" : zip.has("xl/workbook.xml") ? "xlsx" : zip.has("ppt/presentation.xml") ? "pptx" : zip.has("content.xml") ? (path.extname(resolved).toLowerCase() === ".ods" ? "ods" : path.extname(resolved).toLowerCase() === ".odp" ? "odp" : "odt") : undefined;
   if (kind && sniffed && kind !== sniffed && !(kind.startsWith("od") && sniffed.startsWith("od"))) findings.push({ severity: "error", code: "extension-mismatch", message: `The file is named .${path.extname(resolved).slice(1)} but its content is a ${sniffed} package.`, hint: `Rename it to .${sniffed} or rebuild it in the format that was asked for.` });
   kind = sniffed ?? kind;
-  if (!kind) return { kind: "docx", path: resolved, bytes: stat.size, parts: zip.entries.length, meta: {}, text: "", truncated: false, words: 0, stats: {}, findings: [{ severity: "error", code: "unknown-package", message: "The ZIP archive is not a recognizable Office package (no word/, xl/, ppt/ or content.xml part).", hint: "It may be a different kind of archive." }] };
+  if (!kind) return { kind: "docx", path: resolved, bytes, parts: zip.entries.length, meta: {}, text: "", truncated: false, words: 0, stats: {}, findings: [{ severity: "error", code: "unknown-package", message: "The ZIP archive is not a recognizable Office package (no word/, xl/, ppt/ or content.xml part).", hint: "It may be a different kind of archive." }] };
   if (!zip.has("[Content_Types].xml") && !kind.startsWith("od")) findings.push({ severity: "error", code: "missing-part", message: "The package has no [Content_Types].xml.", hint: "Office refuses files without it.", where: "[Content_Types].xml" });
   for (const problem of zip.integrityProblems()) findings.push({ severity: "error", code: "damaged-entry", message: problem, hint: "The archive is corrupt or was truncated while being written; regenerate the file." });
-  const base = { kind, path: resolved, bytes: stat.size, parts: zip.entries.length, meta: documentMeta(zip), findings };
+  const base = { kind, path: resolved, bytes, parts: zip.entries.length, meta: documentMeta(zip), findings };
   let body: { text: string; words: number; stats: Record<string, number>; headings?: OfficeRead["headings"]; tables?: OfficeRead["tables"]; sheets?: SheetRead[]; slides?: SlideRead[] };
   if (kind === "docx") body = readDocx(zip, opts, findings);
   else if (kind === "xlsx") body = readXlsx(zip, opts, findings);
