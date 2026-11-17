@@ -5,15 +5,26 @@ const hostedToolTypes = new Set(["web_search_call", "file_search_call", "image_g
 const hostedProgress = /^response\.(web_search_call|file_search_call|image_generation_call|code_interpreter_call)\.(in_progress|searching|generating|interpreting|partial_image|completed)$/;
 const terminalTypes = new Set(["response.completed", "response.incomplete", "response.failed"]);
 const standardImageModels = new Set(["gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "gpt-image-2.6-sunburst", "gpt-image-2.6-flare"]);
+const metaGroundingModels = new Set(["muse-wonder-1.0", "muse-spark-1.1", "muse-spark-1.2", "muse-spark-1.3",
+    "muse-spark-1.2-contributor", "muse-spark-1.3-contributor", "muse-ember-1.0"]);
 const meterCount = value => Number.isSafeInteger(value) && value >= 0 ? value : undefined;
 const standardImageTier = value => value == null || ["auto", "default", "standard"].includes(value);
 
-export function responsesHostedToolRates(model, tools, response, serviceTier) {
-    if (model.provider !== "openai" || !isOpenAIEndpoint(model.baseUrl) || !Array.isArray(tools)) return undefined;
-    const url = new URL(model.baseUrl);
+export function responsesHostedToolRates(model, tools, response, serviceTier, submittedModel) {
+    if (!Array.isArray(tools) || (model.provider !== "meta" &&
+        (model.provider !== "openai" || !isOpenAIEndpoint(model.baseUrl)))) return undefined;
+    let url;
+    try { url = new URL(model.baseUrl); } catch { return undefined; }
     if (!/^\/v1\/?$/.test(url.pathname) || url.port || url.username || url.password || url.search || url.hash) return undefined;
-    if (response?.redirected || response?.url && response.url !== `${url.origin}/v1/responses`) return undefined;
+    const effectiveUrl = `${url.origin}/v1/responses`;
+    if (response?.redirected || response?.url && response.url !== effectiveUrl) return undefined;
     const types = new Set(tools.map(tool => tool?.type));
+    if (model.provider === "meta") {
+        if (url.origin !== "https://api.meta.ai" || response?.url !== effectiveUrl || !metaGroundingModels.has(submittedModel) ||
+            (!types.has("web_search") && !types.has("web_search_2025_08_26"))) return undefined;
+        // https://dev.meta.ai/docs/pricing-rate-limits
+        return { metaWebSearch: 0.0025 };
+    }
     // The output item type alone cannot distinguish standard and preview tool pricing.
     const standardWeb = types.has("web_search") && !types.has("web_search_preview") && !types.has("web_search_preview_2025_03_11");
     // https://developers.openai.com/api/docs/pricing#tools
@@ -23,6 +34,19 @@ export function responsesHostedToolRates(model, tools, response, serviceTier) {
         standardImageModels.has(imageModel) && images.every(tool => tool.model === imageModel);
     return { webSearch: standardWeb ? 0.01 : undefined, fileSearch: types.has("file_search") ? 0.0025 : undefined,
         imageModel: standardImage ? imageModel : undefined };
+}
+
+function metaQueryMeter(action) {
+    if (action?.type !== "search") return undefined;
+    // This array lists issued queries, not citations or returned pages.
+    // https://dev.meta.ai/docs/api-reference/responses/schemas
+    const validQuery = query => typeof query === "string" && query.trim().length > 0;
+    if (Array.isArray(action.queries)) {
+        const count = action.queries.filter(validQuery).length;
+        if (count > 0) return { count, complete: count === action.queries.length };
+    }
+    if (validQuery(action.query)) return { count: 1, complete: false };
+    return undefined;
 }
 
 function imageUsage(raw) {
@@ -123,6 +147,14 @@ export function createResponsesHostedUsageMeter(provider, rates) {
             (saved.action !== undefined && tool.action !== undefined && saved.action !== tool.action);
         saved.completed ||= tool.completed;
         saved.action ??= tool.action;
+        const before = saved.metaQueries;
+        const after = tool.metaQueries;
+        if (!after || before?.conflict) return;
+        if (before?.complete && after.complete && before.count !== after.count) {
+            saved.metaQueries = { count: Math.min(before.count, after.count), complete: false, conflict: true };
+        } else if (!before || !before.complete && (after.complete || after.count > before.count)) {
+            saved.metaQueries = after;
+        }
     }
 
     function recordItem(id, item) {
@@ -130,7 +162,9 @@ export function createResponsesHostedUsageMeter(provider, rates) {
         const hostedShell = type === "shell_call" && item.environment?.type === "container_reference";
         if (!hostedToolTypes.has(type) && !hostedShell) return;
         const action = type === "web_search_call" && typeof item.action?.type === "string" ? item.action.type : undefined;
-        recordTool(getResponse(id), item.id, { type, completed: item.status === "completed", action });
+        const completed = item.status === "completed";
+        const metaQueries = rates?.metaWebSearch !== undefined && completed ? metaQueryMeter(item.action) : undefined;
+        recordTool(getResponse(id), item.id, { type, completed, action, metaQueries });
     }
 
     return {
@@ -139,6 +173,7 @@ export function createResponsesHostedUsageMeter(provider, rates) {
             if (event.type === "response.created" || event.type === "response.in_progress" || terminal) {
                 const id = event.response?.id;
                 if (typeof id === "string" && id) {
+                    if (rates?.metaWebSearch !== undefined && responseId && id !== responseId) return;
                     // Ordinary tool frames omit response ID. The first response
                     // envelope can identify those provisional frames, even at EOF.
                     const provisional = !responseId && responses.get(undefined);
@@ -184,10 +219,25 @@ function applyHostedUsage(usage, provider, rates, response) {
     let fees = 0;
     let incomplete = response.unidentified || !response.tokenUsageReported;
     let webObserved = false;
-    for (const { type, completed, action, conflict } of response.calls.values()) {
+    for (const { type, completed, action, conflict, metaQueries } of response.calls.values()) {
         webObserved ||= type === "web_search_call";
         if (!completed || conflict) {
             incomplete = true;
+            continue;
+        }
+        if (type === "web_search_call" && rates?.metaWebSearch !== undefined) {
+            if (action === "search") {
+                counts.web_search_call = (counts.web_search_call ?? 0) + 1;
+                if (metaQueries) {
+                    counts.meta_web_search_queries = (counts.meta_web_search_queries ?? 0) + metaQueries.count;
+                    fees += metaQueries.count * rates.metaWebSearch;
+                }
+                incomplete ||= !metaQueries?.complete;
+            } else if (action === "open_page" || action === "find_in_page") {
+                counts.meta_web_search_queries ??= 0;
+            } else {
+                incomplete = true;
+            }
             continue;
         }
         if (type === "web_search_call" && action !== "search") {
@@ -226,9 +276,10 @@ function applyHostedUsage(usage, provider, rates, response) {
     // A trusted provider-reported total already covers the request.
     if (cost.source === "provider-reported") return;
     const knownZeroWeb = webObserved && response.finalWebMeter && webMeter === 0 && rates?.webSearch !== undefined;
-    if (fees > 0 || knownZeroWeb) {
+    if (fees > 0 || knownZeroWeb || counts.meta_web_search_queries === 0) {
         cost.serverToolCost = fees;
-        cost.serverToolPriceBasis = pricedImage ? "openai-api-published-tool-and-image-token-rates" : "openai-api-published-tool-rates";
+        cost.serverToolPriceBasis = rates?.metaWebSearch !== undefined ? "meta-api-published-search-query-rate"
+            : pricedImage ? "openai-api-published-tool-and-image-token-rates" : "openai-api-published-tool-rates";
         cost.total += fees;
     }
     if (incomplete) {

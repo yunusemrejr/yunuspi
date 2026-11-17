@@ -4,12 +4,15 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { EventEmitter } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
 import { createJiti } from 'jiti';
+import { SessionManager } from '../core/coding-agent/src/core/session-manager.js';
 
 const jiti = createJiti(import.meta.dirname);
 const { registerBackgroundWorkProvider, snapshotBackgroundWork } = await jiti.import('../agent/extensions/pi-subagents/src/api/background-work.ts');
 const { waitForSubagents } = await jiti.import('../agent/extensions/pi-subagents/src/runs/background/subagent-wait.ts');
 const { default: registerBackground } = await jiti.import('../agent/extensions/pi-background-tasks/src/extension.ts');
+const { default: registerRuntime } = await jiti.import('../agent/extensions/pi-subagents/src/runs/shared/subagent-prompt-runtime.ts');
 
 const SESSION = 'session-a';
 const text = out => out.content.map(item => item.text ?? '').join('\n');
@@ -52,6 +55,29 @@ for (const id of ['be228f4da', 'be22']) {
     assert.equal(f.polls(), 2);
   });
 }
+
+test('an exact provider wait resolves native ownership once even when it wakes', async t => {
+  const { waitForSubagents: waitWithLiveFs } = await import('../agent/extensions/pi-subagents/src/runs/background/subagent-wait.ts');
+  const id = 'be228f4da';
+  const items = [{ id, sessionId: SESSION }];
+  const f = fixture(t, items, () => { items.length = 0; });
+  const lookup = path.join(f.deps.asyncDirRoot, id);
+  const original = fs.lstatSync;
+  let lookups = 0;
+  const lstat = t.mock.method(fs, 'lstatSync', (file, ...args) => {
+    if (file === lookup) lookups++;
+    return original(file, ...args);
+  });
+  syncBuiltinESMExports();
+  try {
+    assert.match(text(await waitWithLiveFs({ id }, undefined, f.deps)), /done/);
+  } finally {
+    lstat.mock.restore();
+    syncBuiltinESMExports();
+  }
+  assert.equal(f.polls(), 1);
+  assert.equal(lookups, 1);
+});
 
 test('bg_wait with an unknown id still reports that nothing matched', async t => {
   const f = fixture(t, [{ id: 'be228f4da', sessionId: SESSION }]);
@@ -103,7 +129,7 @@ test('a running bg_run task is listed as bg work in a UI session and bg_wait by 
   ctx.hasUI = false;
   await lifecycle('session_start');
   const headless = await tools.get('bg_run').execute('bg-wait-headless', { command: 'sleep 1', name: 'build', isAgent: false, notifyOnCompletion: false }, undefined, undefined, ctx);
-  assert.deepEqual(snapshotBackgroundWork(sessionFile).items, [], 'a headless session registers no provider, so its auto-drain never waits on bg_run tasks');
+  assert.deepEqual(snapshotBackgroundWork(sessionFile).items, [], 'automatic discovery excludes headless bg_run tasks');
   await tools.get('bg_kill').execute('kill-headless', { taskId: headless.details.task.id }, undefined, undefined, ctx).catch(() => {});
   ctx.hasUI = true;
   await lifecycle('session_start');
@@ -116,4 +142,88 @@ test('a running bg_run task is listed as bg work in a UI session and bg_wait by 
   assert.notEqual(out.isError, true, text(out));
   assert.match(text(out), /done/);
   assert.deepEqual(snapshotBackgroundWork(sessionFile).items, []);
+});
+
+test('headless bg_wait joins a named finite shell task without making auto-drain or services waitable', { timeout: 10_000 }, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yunuspi-headless-explicit-bg-wait-'));
+  const sessionManager = SessionManager.create(dir, path.join(dir, 'sessions'));
+  sessionManager.flush();
+  const sessionId = sessionManager.getSessionFile();
+  const hooks = new Map(), tools = new Map(), bus = new EventEmitter(), controller = new AbortController();
+  const actualWait = Promise.withResolvers(), repeatAutomaticWait = Promise.withResolvers();
+  const automaticWake = 'fixture:auto-drain';
+  let automaticSubscriptions = 0;
+  const ctx = {
+    cwd: dir, hasUI: false, signal: controller.signal, isIdle: () => true, modelRegistry: { getAll: () => [] },
+    sessionManager,
+  };
+  const pi = {
+    events: {
+      on(name, fn) {
+        bus.on(name, fn);
+        if (name === automaticWake) (++automaticSubscriptions === 1 ? actualWait : repeatAutomaticWait).resolve();
+        return () => bus.off(name, fn);
+      },
+      emit: (name, value) => bus.emit(name, value),
+    },
+    on(name, fn) { const handlers = hooks.get(name) ?? []; handlers.push(fn); hooks.set(name, handlers); },
+    registerTool: tool => tools.set(tool.name, tool), registerMessageRenderer() {}, registerCommand() {}, registerShortcut() {},
+    sendMessage() {}, appendEntry() {},
+  };
+  await registerRuntime(pi);
+  registerBackground(pi);
+  const lifecycle = async name => { for (const fn of hooks.get(name) ?? []) await fn({ type: name, messages: [], aborted: false }, ctx); };
+  const execute = (name, params, onUpdate, id = name) => tools.get(name).execute(id, params, controller.signal, onUpdate, ctx);
+  await lifecycle('session_start');
+  let shutdown = false;
+  t.after(async () => {
+    controller.abort();
+    if (!shutdown) await lifecycle('session_shutdown');
+    process.once('beforeExit', () => fs.rmSync(dir, { recursive: true, force: true }));
+  });
+
+  const finite = await execute('bg_run', { command: 'while [ ! -e release ]; do sleep 0.02; done; printf done > marker; printf "retained fixture output\\n"',
+    name: 'finite fixture', isAgent: false, notifyOnCompletion: false });
+  const service = await execute('bg_run', { command: 'while [ ! -e stop-service ]; do sleep 0.02; done',
+    name: 'service fixture', isAgent: false, service: true, notifyOnCompletion: false }, undefined, 'start-fixture-service');
+  const taskId = finite.details.task.id;
+  assert.equal((await execute('bg_status', { taskId })).details.tasks[0].status, 'running');
+  assert.deepEqual(snapshotBackgroundWork(sessionId).items, []);
+
+  let automaticWork = true;
+  const unregister = registerBackgroundWorkProvider({ name: 'automatic-fixture', wakeChannels: [automaticWake],
+    listActiveWork: () => automaticWork ? [{ id: 'automatic-job', sessionId }] : [] });
+  try {
+    const drained = lifecycle('agent_end');
+    await actualWait.promise;
+    automaticWork = false;
+    bus.emit(automaticWake, {});
+    assert.equal(await Promise.race([drained.then(() => 'drained'), repeatAutomaticWait.promise.then(() => 'waited on shell')]), 'drained');
+    assert.equal((await execute('bg_status', { taskId })).details.tasks[0].status, 'running');
+  } finally { unregister(); }
+
+  assert.match(text(await execute('bg_wait', { id: service.details.task.id })), /No active run matched/);
+  const stopped = new AbortController(), stopping = Promise.withResolvers();
+  const interrupted = tools.get('bg_wait').execute('stop-fixture-wait', { id: taskId, timeoutMs: 5_000 }, stopped.signal,
+    () => stopping.resolve(), ctx);
+  const stopBoundary = await Promise.race([interrupted.then(() => 'returned'), stopping.promise.then(() => 'waiting')]);
+  assert.equal(stopBoundary, 'waiting');
+  assert.deepEqual(snapshotBackgroundWork(sessionManager.getSessionId(), Date.now(), 'explicit').items, [], 'the header ID alone is not the live session key');
+  assert.deepEqual(snapshotBackgroundWork(sessionId, Date.now(), 'explicit').items.map(item => item.id), [taskId]);
+  stopped.abort();
+  await assert.rejects(interrupted, /Wait aborted/);
+  assert.equal((await execute('bg_status', { taskId })).details.tasks[0].status, 'running');
+  assert.equal(fs.existsSync(path.join(dir, 'marker')), false);
+
+  const entered = Promise.withResolvers();
+  const waited = execute('bg_wait', { id: taskId, timeoutMs: 5_000 }, () => entered.resolve());
+  assert.equal(await Promise.race([waited.then(() => 'returned'), entered.promise.then(() => 'waiting')]), 'waiting');
+  fs.writeFileSync(path.join(dir, 'release'), '');
+  assert.match(text(await waited), /done/);
+  assert.equal(fs.readFileSync(path.join(dir, 'marker'), 'utf8'), 'done');
+  assert.equal((await execute('bg_status', { taskId })).details.tasks[0].status, 'completed');
+  assert.equal((await execute('bg_status', { taskId: service.details.task.id })).details.tasks[0].status, 'running');
+  await lifecycle('session_shutdown');
+  shutdown = true;
+  assert.match(text(await execute('bg_logs', { taskId })), /retained fixture output/);
 });

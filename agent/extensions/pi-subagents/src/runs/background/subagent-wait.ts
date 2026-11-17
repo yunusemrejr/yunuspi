@@ -44,6 +44,7 @@ import type { AgentToolResult } from "@yunuspi/agent-core";
 import {
 	listBackgroundWorkWakeChannels,
 	snapshotBackgroundWork,
+	type BackgroundWorkPurpose,
 	type BackgroundWorkSnapshot,
 	type RegisteredBackgroundWorkItem,
 } from "../../api/background-work.ts";
@@ -119,6 +120,8 @@ export interface SubagentWaitDeps {
 	failOnFailedRuns?: boolean;
 	/** Internal auto-drain mode surfaces actionable attention as an error. */
 	failOnAttention?: boolean;
+	/** Explicit tool waits can discover work that opts out of automatic drain. */
+	backgroundWorkPurpose?: BackgroundWorkPurpose;
 	/** Arm a durable exact-target wait subscription in a long-lived interactive runtime. */
 	subscribe?: (input: { targetKind: "async" | "foreground"; runId: string; requestedId: string; timeoutMs: number }) => { token: string; expiresAt: number };
 	/** Injectable provider protocol surfaces for deterministic tests. */
@@ -277,7 +280,7 @@ function targetProviderItems(snapshot: BackgroundWorkSnapshot, target: Registere
 function backgroundWorkForSession(deps: SubagentWaitDeps, nowMs: number): BackgroundWorkSnapshot {
 	const sessionId = deps.state.currentSessionId;
 	if (!sessionId) throw new Error("bg_wait requires an active session identity to scope background work safely.");
-	return deps.backgroundWork?.snapshot(sessionId, nowMs) ?? snapshotBackgroundWork(sessionId, nowMs);
+	return deps.backgroundWork?.snapshot(sessionId, nowMs) ?? snapshotBackgroundWork(sessionId, nowMs, deps.backgroundWorkPurpose ?? "explicit");
 }
 
 /** Queued/running runs from this session, including runs that need attention. */
@@ -294,11 +297,6 @@ function activeRunsForSession(params: SubagentWaitParams, deps: SubagentWaitDeps
 		...(params.id ? { runId: params.id } : {}),
 	});
 	return params.id ? runs.filter((run) => matchesId(run, params.id!)) : runs;
-}
-
-/** Runs (from the initial set) currently flagged needs_attention, for reporting. */
-function attentionRunsForSession(params: SubagentWaitParams, deps: SubagentWaitDeps, initialIds: Set<string>): AsyncRunSummary[] {
-	return activeRunsForSession(params, deps).filter((run) => needsAttention(run) && initialIds.has(run.id));
 }
 
 /** Exact initial runs in any state, for the final summary. */
@@ -679,8 +677,10 @@ export async function waitForSubagents(
 		}
 		try {
 			await waitForWake(pollIntervalMs, signal, deps);
-			active = activeRunsForSession(waitParams, deps);
-			attention = attentionRunsForSession(waitParams, deps, initialAsyncIds);
+			if (initialAsyncIds.size > 0) {
+				active = activeRunsForSession(waitParams, deps);
+				attention = active.filter((run) => initialAsyncIds.has(run.id) && needsAttention(run));
+			}
 			if (!params.id) providerSnapshot = backgroundWorkForSession(deps, now());
 			else if (providerTarget) providerSnapshot = targetProviderItems(backgroundWorkForSession(deps, now()), providerTarget);
 			for (const provider of initialProviderNames) {

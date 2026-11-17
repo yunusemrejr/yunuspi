@@ -1,3 +1,10 @@
+## 0.56.24 — Explicit headless waits, provider charges, and lighter checks
+
+- Headless `bg_wait` can join a finite shell task owned by the current session. Stop cancels the wait, and automatic shutdown keeps its existing scope.
+- Preserve reported xAI Chat Completions and Responses charges, including explicit zero. Estimate Meta native search spend from observed queries and mark incomplete evidence as partial.
+- Track files produced by compound shell commands. Directory scans stop reading at their entry and time budgets.
+- Overlapping memory watchdogs share a brief host sample. They verify the live process identity before reporting a budget breach.
+
 ## 0.56.23 — Faster guarded shell startup, reliable receipts, and bounded binary previews
 
 - Guarded Bash gives safety checks their own bounded startup phase. Concurrent calls can share a verified hard-link inventory, and Stop works while the guard is starting.

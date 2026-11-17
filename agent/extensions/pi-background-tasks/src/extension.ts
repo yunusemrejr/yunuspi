@@ -277,20 +277,18 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       isShuttingDown: () => registry.isShuttingDown(),
     });
 
-  // bg_wait blocks on these tasks through the background-work protocol. Services
-  // are persistent by design and never finish, so they are not waitable. Only
-  // sessions with a UI register: headless runs auto-drain provider work before
-  // exiting, and a child's long build must not hold its parent for 30 minutes.
+  // Finite tasks are waitable by request. Headless tasks opt out of automatic
+  // draining so a child's build does not silently prolong the parent turn.
   let unregisterBackgroundWork: (() => void) | undefined;
   // The session key is fixed at registration: a failed UI update clears currentCtx.
-  const backgroundWorkProvider = (sessionKey: string): BackgroundWorkProvider => ({
+  const backgroundWorkProvider = (sessionKey: string, ownerSessionId: string, hasUI: boolean): BackgroundWorkProvider => ({
     name: "bg_run",
     wakeChannels: [BG_TERMINAL_CHANNEL],
     listActiveWork(context) {
-      if (!context || context.sessionId !== sessionKey) return [];
+      if (!context || context.sessionId !== sessionKey || (!hasUI && context.purpose !== "explicit")) return [];
       return registry
         .allTasks()
-        .filter((task) => task.status === "running" && task.service !== true)
+        .filter((task) => task.ownerSessionId === ownerSessionId && task.status === "running" && task.service !== true)
         .map((task) => ({ id: task.id, sessionId: sessionKey }));
     },
   });
@@ -555,7 +553,9 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
     unregisterBackgroundWork?.();
     unregisterBackgroundWork = undefined;
     try {
-      if (ctx.hasUI) unregisterBackgroundWork = registerBackgroundWorkProvider(backgroundWorkProvider(resolveCurrentSessionId(ctx.sessionManager)));
+      unregisterBackgroundWork = registerBackgroundWorkProvider(backgroundWorkProvider(
+        resolveCurrentSessionId(ctx.sessionManager), ctx.sessionManager.getSessionId(), ctx.hasUI,
+      ));
     } catch { /* without a session identity bg_wait cannot scope this work; bg_status still reports it */ }
     registerContinuationNotice(ctx);
     await registry.ensureRuntimeDir(ctx);
@@ -748,11 +748,11 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
   pi.registerTool<typeof BgRunParams, BgRunDetails>({
     name: "bg_run",
     label: "Background Run",
-    description: "Start a long-running shell command in the background and return at once with a task ID and output path. Its end arrives as a <background-task-notification>; do not sleep or poll for it. Manage it with bg_status, bg_logs and bg_kill.",
+    description: "Start a long-running shell command and return at once with a task ID and output path. Finite tasks can be waited on with bg_wait. Interactive sessions can receive a <background-task-notification>. Manage tasks with bg_status, bg_logs and bg_kill.",
     promptSnippet:
-      "Start background work; finished tasks wake the agent once, services update only the UI",
+      "Start background work. Wait explicitly for a result needed in a headless turn.",
     promptGuidelines: [
-      "Use bash for short commands and bg_run for long tests, builds and servers. Do other work while a task runs; report its result only after its notification.",
+      "Use bash for short commands and bg_run for long tests, builds and servers. Do other work while a task runs. Use bg_wait for a finite task when this turn needs its result.",
     ],
     parameters: BgRunParams,
     prepareArguments: prepareBgRunArguments,
@@ -779,7 +779,9 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
       const task = await startTask(ctx, params.command, taskOptions);
       const completionDelivery = serviceNotificationOnly(task)
         ? { text: `Persistent service${task.port ? ` on port ${String(task.port)}` : ""}: its exit is recorded in task status and the UI only; no agent turn will start. Continue without waiting for it; stop it with bg_kill ${JSON.stringify(taskDisplayName(task))} (never pkill/kill).` }
-        : deriveCompletionDeliveryGuidance(task.notifyOnCompletion, taskTriggersCompletion(task));
+        : ctx.hasUI
+          ? deriveCompletionDeliveryGuidance(task.notifyOnCompletion, taskTriggersCompletion(task))
+          : { text: `If this turn needs the result and bg_wait is available, call bg_wait({ id: ${JSON.stringify(task.id)} }). Session shutdown stops unfinished tasks.` };
       return {
         content: textContent(
           `Started background task ${taskDisplayName(task)} (${task.id})\nStatus: ${task.status}\nPID: ${String(task.pid ?? "unknown")}\nOutput: ${task.outputPath}\n${completionDelivery.text}`,

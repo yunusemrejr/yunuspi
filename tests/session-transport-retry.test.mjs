@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
+import { mkdtemp, rm } from "node:fs/promises";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { WebSocketServer } from "ws";
 import { streamSimple as openAICompletions } from "../core/ai/src/api/openai-completions.js";
@@ -138,15 +141,93 @@ async function routerBillingResult(api, snapshots, {
 }
 
 const responsesTokens = {input_tokens:12, output_tokens:3, total_tokens:15, input_tokens_details:{cached_tokens:0}};
+test("direct xAI SDK responses use the reported USD ticks, including zero, only on attested endpoints", async () => {
+  for (const api of routerBillingApis) {
+    for (const [origin, ticks, label] of [
+      ["https://api.x.ai", 40_000_000, "$0.004000"],
+      ["https://us.api.x.ai", 0, "$0.000"],
+      ["https://us.api.x.ai", 40_000_000, "$0.004000"],
+      ["https://api.x.ai.example.invalid", 40_000_000, "$~0.000015"],
+      ["https://api.x.ai:8443", 40_000_000, "$~0.000015"],
+      ["https://api.x.ai", undefined, "$~0.000015"],
+      ["https://api.x.ai", null, "$~0.000015"],
+      ["https://api.x.ai", -1, "$~0.000015"],
+      ["https://api.x.ai", 1.5, "$~0.000015"],
+      ["https://api.x.ai", Number.MAX_SAFE_INTEGER + 1, "$~0.000015"],
+      ["https://api.x.ai", "40000000", "$~0.000015"],
+    ]) {
+      const result = await xaiBillingResult(api, [{ticks}], {origin});
+      const entry = JSON.parse(JSON.stringify({type:"message",message:result}));
+      assert.equal(collectSessionCost([entry,entry]).formatted, label, `${api.name}: ${origin}, ${ticks}`);
+    }
+    for (const provenance of [{effectiveOrigin:"https://us.api.x.ai"}, {redirected:true}, {provider:"custom-xai"}, {omitEffectiveUrl:true}]) {
+      assert.equal(footerLabel(await xaiBillingResult(api, [{ticks:40_000_000}], provenance)), "$~0.000015");
+    }
+    assert.equal(footerLabel(await xaiBillingResult(api, [{unmetered:true}])), "$?");
+  }
+});
+
+test("xAI SDK adapters retain same-response charges through sparse snapshots and isolate foreign receipts", async () => {
+  for (const api of routerBillingApis) {
+    for (const [snapshots, label] of [
+      [[{ticks:40_000_000}, {}, {ticks:0,id:"foreign-xai-response"}], "$0.004000"],
+      [[{ticks:0}, {ticks:-1}], "$0.000"],
+      [[{ticks:40_000_000}, {ticks:0}], "$0.000"],
+    ]) {
+      const result = await xaiBillingResult(api, snapshots);
+      assert.equal(footerLabel(result), label);
+    }
+  }
+});
+
+async function xaiBillingResult(api, snapshots, {
+  origin = "https://api.x.ai", effectiveOrigin = origin, redirected = false, provider = "xai", omitEffectiveUrl = false, output = [],
+} = {}) {
+  const chat = api.name === "openai-completions";
+  const id = "synthetic-xai-response";
+  const endpoint = chat ? "/v1/chat/completions" : "/v1/responses";
+  const chatTokens = {prompt_tokens:12, completion_tokens:3, total_tokens:15};
+  const updates = snapshots.map(({ticks, unmetered, id:responseId = id}) => {
+    const usage = unmetered ? undefined : {...(chat ? chatTokens : responsesTokens), cost_in_usd_ticks:ticks};
+    return chat ? {id:responseId, choices:[], usage}
+      : {type:"response.completed", response:{id:responseId, status:"completed", output, usage}};
+  });
+  const start = chat ? {id, choices:[{index:0,delta:{content:"Synthetic answer"},finish_reason:"stop"}]}
+    : {type:"response.created", response:{id}};
+  const respond = fixtureSse(origin, endpoint, [start, ...updates]);
+  const result = await api.run(model("grok-4.7", provider, api.name, `${origin}/v1`), prompt, {
+    ...session,
+    onPayload: params => output.length ? {...params, tools:[{type:"web_search"}]} : params,
+    fetch:async (input, options) => {
+      assert.equal(options.method, "POST");
+      if (chat) assert.equal(JSON.parse(options.body).stream_options.include_usage, true);
+      const response = await respond(input);
+      if (!omitEffectiveUrl) Object.defineProperty(response, "url", {value:`${effectiveOrigin}${endpoint}`});
+      if (redirected) Object.defineProperty(response, "redirected", {value:true});
+      return response;
+    },
+  }).result();
+  assert.equal(result.stopReason, "stop", result.errorMessage);
+  assert.equal(result.responseId, id);
+  return result;
+}
+
 const hostedSearch = {type:"web_search_call", id:"synthetic-web-search", status:"completed", action:{type:"search"}};
+test("a direct xAI Responses total covers hosted search while retaining its observed unit", async () => {
+  const result = await xaiBillingResult(routerBillingApis[1], [{ticks:40_000_000}], {output:[hostedSearch]});
+  assert.equal(result.usage.cost.serverToolUse.web_search_call, 1);
+  assert.equal(footerLabel(result), "$0.004000");
+  const missing = await xaiBillingResult(routerBillingApis[1], [{}], {output:[hostedSearch]});
+  assert.equal(footerLabel(missing), "$~0.000015+?");
+});
 const hostedImage = {type:"image_generation_call", id:"synthetic-image", status:"completed"};
 const reportTool = (item, output_index = 0) => ({type:"response.output_item.done", output_index, item});
 const hostedTerminal = (output, usage = responsesTokens, type = "response.completed", id = "synthetic-hosted-response") => ({type,
   response:{id, status:type.slice("response.".length), output, usage, ...(type === "response.failed" ? {error:{message:"Fixture failed"}} : {})}});
 
-async function hostedResponse(frames, toolTypes = ["web_search"], origin = "https://api.openai.com", provider = "openai", responseUrl) {
+async function hostedResponse(frames, toolTypes = ["web_search"], origin = "https://api.openai.com", provider = "openai", responseUrl, modelId = "fixture") {
   const basePath = provider === "openrouter" ? "/api/v1" : "/v1";
-  const selected = model("fixture", provider, "openai-responses", `${origin}${basePath}`);
+  const selected = model(modelId, provider, "openai-responses", `${origin}${basePath}`);
   const tools = toolTypes.map(tool => typeof tool === "string" ? {type:tool} : tool);
   const respond = fixtureSse(origin, `${basePath}/responses`, frames);
   return await openAIResponses(selected, prompt, {...session, onPayload:params => ({...params, tools}),
@@ -157,6 +238,109 @@ async function hostedResponse(frames, toolTypes = ["web_search"], origin = "http
       return response;
     }}).result();
 }
+
+const metaOrigin = "https://api.meta.ai";
+const metaSearchCall = {...hostedSearch, action:{type:"search", query:"synthetic first", queries:["synthetic first", "synthetic second"]}};
+const metaHostedResponse = (frames, effectiveUrl = metaOrigin+"/v1/responses", modelId = "muse-spark-1.3") =>
+  hostedResponse(frames, ["web_search"], metaOrigin, "meta", effectiveUrl, modelId);
+
+test("direct Meta Responses estimates issued search queries once, separately from token usage", async () => {
+  const legacy = {...metaSearchCall, action:{type:"search", query:"synthetic first"}};
+  const navigation = {...hostedSearch, id:"synthetic-navigation", action:{type:"open_page", url:"https://fixture.example"}};
+  const result = await metaHostedResponse([reportTool(legacy), reportTool(metaSearchCall),
+    hostedTerminal([legacy, navigation, metaSearchCall])]);
+  assert.deepEqual(result.usage.cost.serverToolUse, {web_search_call:1, meta_web_search_queries:2});
+  assert.equal(result.usage.cost.serverToolCost, .005);
+  assert.equal(result.usage.cost.serverToolPriceBasis, "meta-api-published-search-query-rate");
+  const entry = JSON.parse(JSON.stringify({type:"message",message:result}));
+  assert.equal(collectSessionCost([entry,entry]).formatted, "$~0.005015");
+  const zero = await metaHostedResponse([hostedTerminal([navigation])]);
+  assert.equal(zero.usage.cost.serverToolUse.meta_web_search_queries, 0);
+  assert.equal(footerLabel(zero), "$~0.000015");
+});
+
+test("Meta search retains proven units across sparse or failed responses and checks route provenance", async () => {
+  const legacy = {...metaSearchCall, action:{type:"search", query:"synthetic first"}};
+  const sparse = {...metaSearchCall, action:undefined};
+  const repeatedTerms = {...metaSearchCall, action:{...metaSearchCall.action, queries:["same query", "same query"]}};
+  const conflicting = {...metaSearchCall, action:{...metaSearchCall.action, queries:["one"]}};
+  for (const {frames,label,units,stop="stop"} of [
+    {frames:[hostedTerminal([legacy])], label:"$~0.002515+?", units:1},
+    {frames:[hostedTerminal([sparse])], label:"$~0.000015+?"},
+    {frames:[hostedTerminal([repeatedTerms])], label:"$~0.005015", units:2},
+    {frames:[reportTool(metaSearchCall), hostedTerminal([conflicting])], label:"$~0.002515+?", units:1},
+    {frames:[reportTool(metaSearchCall), hostedTerminal([sparse], null, "response.failed")],
+      label:"$~0.005000+?", units:2, stop:"error"},
+    {frames:[{type:"response.created", response:{id:"synthetic-hosted-response"}},
+      hostedTerminal([conflicting], responsesTokens, "response.completed", "foreign-meta-response"),
+      reportTool(metaSearchCall), hostedTerminal([sparse])], label:"$~0.005015", units:2},
+  ]) {
+    const result = await metaHostedResponse(frames);
+    assert.equal(result.stopReason, stop, result.errorMessage);
+    assert.equal(result.usage.cost.serverToolUse?.meta_web_search_queries, units);
+    assert.equal(footerLabel(result), label);
+  }
+  for (const [effectiveUrl, modelId] of [[false, "muse-spark-1.3"], ["https://meta.example.invalid/v1/responses", "muse-spark-1.3"],
+    [metaOrigin+"/v1/responses", "muse-image-1.0"]]) {
+    const result = await metaHostedResponse([hostedTerminal([metaSearchCall])], effectiveUrl, modelId);
+    assert.equal(result.usage.cost.serverToolCost, undefined);
+    assert.equal(footerLabel(result), "$~0.000015+?");
+  }
+});
+
+test("Meta grounding estimates affect the metered SDK session footer and preserve Muse Code subscription attribution", async t => {
+  const [{AuthStorage}, {ModelRuntime}, {DefaultResourceLoader}, {SessionManager}, {SettingsManager}, {createAgentSession}, {metaProvider}] =
+    await Promise.all([
+      import("../core/coding-agent/src/core/auth-storage.js"),
+      import("../core/coding-agent/src/core/model-runtime.js"),
+      import("../core/coding-agent/src/core/resource-loader.js"),
+      import("../core/coding-agent/src/core/session-manager.js"),
+      import("../core/coding-agent/src/core/settings-manager.js"),
+      import("../core/coding-agent/src/core/sdk.js"),
+      import("../core/ai/src/providers/meta.js"),
+    ]);
+  const cwd = await mkdtemp(join(tmpdir(), "meta-grounding-session-"));
+  t.after(() => rm(cwd, {recursive:true, force:true}));
+  const respond = fixtureSse(metaOrigin, "/v1/responses", [hostedTerminal([metaSearchCall])]);
+  for (const {credential, label, billing} of [
+    {credential:{type:"api_key", key:"synthetic-metered"}, label:"$~0.005028", billing:"metered"},
+    {credential:{type:"oauth", access:"synthetic-plan", refresh:"synthetic-refresh", expires:Date.now()+600_000}, label:"sub", billing:"subscription"},
+  ]) {
+    const settingsManager = SettingsManager.inMemory({compaction:{enabled:false}, retry:{enabled:false}, providerRetry:{maxRetries:0}});
+    const resourceLoader = new DefaultResourceLoader({cwd, agentDir:cwd, settingsManager, noExtensions:true, noSkills:true,
+      noContextFiles:true, noPromptTemplates:true, noThemes:true});
+    await resourceLoader.reload();
+    const modelRuntime = await ModelRuntime.create({credentials:AuthStorage.inMemory({meta:credential}), modelsPath:null, allowModelNetwork:false});
+    let requests = 0;
+    modelRuntime.registerNativeProvider({...metaProvider(), streamSimple:selectedMetaStream});
+    await modelRuntime.whenRegistrationsRestored();
+    function selectedMetaStream(selected, context, options) {
+      return openAIResponses(selected, context, {...options,
+        onPayload:async (...args) => ({...(await options.onPayload?.(...args) ?? args[0]), tools:[{type:"web_search"}]}),
+        fetch:async (input, init) => {
+          requests++;
+          assert.equal(new Headers(init.headers).get("authorization"), `Bearer ${credential.key ?? credential.access}`);
+          const response = await respond(input);
+          Object.defineProperty(response, "url", {value:metaOrigin+"/v1/responses"});
+          return response;
+        }});
+    }
+    const selected = modelRuntime.getModel("meta", "muse-spark-1.3");
+    const sessionManager = SessionManager.inMemory(cwd);
+    const {session: agentSession} = await createAgentSession({cwd, agentDir:cwd, model:selected, modelRuntime, settingsManager, resourceLoader, sessionManager});
+    try {
+      await agentSession.prompt("Run synthetic grounding.");
+      const entries = sessionManager.getEntries();
+      const assistant = entries.find(entry => entry.message?.role === "assistant")?.message;
+      assert.equal(requests, 1);
+      assert.equal(assistant?.usage.cost.billing, billing);
+      assert.equal(assistant?.usage.cost.serverToolUse.meta_web_search_queries, 2);
+      assert.equal(collectSessionCost(entries).formatted, label);
+    } finally {
+      agentSession.dispose();
+    }
+  }
+});
 
 test("native Responses search prices each actual search and file call once", async () => {
   const openPage = {...hostedSearch, id:"synthetic-open-page", action:{type:"open_page"}};

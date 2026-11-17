@@ -25,7 +25,10 @@ export interface BackgroundWorkReconcileContext {
 export interface BackgroundWorkListContext {
 	sessionId: string;
 	nowMs: number;
+	purpose?: BackgroundWorkPurpose;
 }
+
+export type BackgroundWorkPurpose = "automatic" | "explicit";
 
 export interface BackgroundWorkProvider {
 	name: string;
@@ -160,7 +163,7 @@ export function listBackgroundWorkWakeChannels(): readonly string[] {
 }
 
 /** Reconcile and snapshot active provider work owned by one exact Pi session. */
-export function snapshotBackgroundWork(sessionId: string, nowMs = Date.now()): BackgroundWorkSnapshot {
+export function snapshotBackgroundWork(sessionId: string, nowMs = Date.now(), purpose: BackgroundWorkPurpose = "automatic"): BackgroundWorkSnapshot {
 	validateString(sessionId, "Background-work snapshot sessionId", MAX_SESSION_ID_LENGTH);
 	const providers = listBackgroundWorkProviders();
 	const items: RegisteredBackgroundWorkItem[] = [];
@@ -176,7 +179,7 @@ export function snapshotBackgroundWork(sessionId: string, nowMs = Date.now()): B
 		}
 		let active: readonly BackgroundWorkItem[];
 		try {
-			active = provider.listActiveWork({ sessionId, nowMs });
+			active = provider.listActiveWork({ sessionId, nowMs, purpose });
 		} catch (error) {
 			throw new Error(
 				`Background-work provider '${provider.name}' listActiveWork failed: ${error instanceof Error ? error.message : String(error)}`,

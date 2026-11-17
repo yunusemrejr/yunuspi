@@ -7,6 +7,7 @@ import { appendGrammarToolInputJsonDelta, getGrammarToolInput, getJsonSchemaTool
 import { createResponsesHostedUsageMeter } from "./openai-responses-hosted-usage.js";
 import { applyOpenRouterUsage } from "./openrouter-usage.js";
 import { transformMessages } from "./transform-messages.js";
+import { applyXaiUsage } from "./xai-usage.js";
 // =============================================================================
 // Utilities
 // =============================================================================
@@ -455,10 +456,12 @@ async function decodeResponsesStream(openaiStream, output, stream, model, option
         }
     };
     let createdAt;
-    let routerReceipt;
+    const applyReportedUsage = options?.openRouterBilling ? applyOpenRouterUsage : options?.xaiBilling ? applyXaiUsage : undefined;
+    const isolateResponse = applyReportedUsage || options?.hostedToolRates?.metaWebSearch !== undefined;
+    let providerReceipt;
     const rememberResponseId = (response) => {
         if (typeof response?.id === "string" && response.id.length > 0) {
-            if (options?.openRouterBilling && output.responseId && response.id !== output.responseId) return false;
+            if (isolateResponse && output.responseId && response.id !== output.responseId) return false;
             output.responseId = response.id;
         }
         return true;
@@ -497,7 +500,7 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
   const raw = response?.usage, cost = output.usage.cost;
   if (raw) applyDeepSeekPricing(model, output.usage, raw, requestAt,
       ![raw.input_tokens, raw.output_tokens].every(value => Number.isSafeInteger(value) && value >= 0) || !output.usage.cacheReadReported);
-  if (options?.openRouterBilling && raw) routerReceipt = applyOpenRouterUsage(output.usage, raw, routerReceipt);
+  if (applyReportedUsage && raw) providerReceipt = applyReportedUsage(output.usage, raw, providerReceipt);
   if (model.provider === 'deepinfra' && host === 'api.deepinfra.com' && Number.isFinite(raw?.estimated_cost) && raw.estimated_cost >= 0) {
     cost.estimatedTotal = cost.total; cost.total = raw.estimated_cost; cost.source = 'provider-estimate'; cost.complete = true;
   }

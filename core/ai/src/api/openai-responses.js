@@ -14,6 +14,7 @@ import { responsesHostedToolRates } from "./openai-responses-hosted-usage.js";
 import { convertResponsesMessages, convertResponsesTools, processResponsesStream } from "./openai-responses-shared.js";
 import { isOpenRouterBillingEndpoint } from "./openrouter-usage.js";
 import { buildBaseOptions } from "./simple-options.js";
+import { isXaiBillingEndpoint } from "./xai-usage.js";
 const OPENAI_TOOL_CALL_PROVIDERS = new Set(["openai", "openai-codex", "opencode"]);
 // OpenAI Responses rejects max_output_tokens below 16: https://github.com/earendil-works/pi/issues/6265
 const OPENAI_RESPONSES_MIN_OUTPUT_TOKENS = 16;
@@ -132,8 +133,9 @@ export const stream = (model, context, options) => {
                 maxRetryDelayMs: options?.maxRetryDelayMs,
                 signal: options?.signal,
             });
-            const hostedToolRates = responsesHostedToolRates(model, params?.tools, response, params?.service_tier);
+            const hostedToolRates = responsesHostedToolRates(model, params?.tools, response, params?.service_tier, params?.model);
             const openRouterBilling = isOpenRouterBillingEndpoint(model, response, "responses");
+            const xaiBilling = isXaiBillingEndpoint(model, response, "responses");
             await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
             stream.push({ type: "start", partial: output });
             await processResponsesStream(openaiStream, output, stream, model, {
@@ -141,6 +143,7 @@ export const stream = (model, context, options) => {
                 serviceTier: options?.serviceTier,
                 hostedToolRates,
                 openRouterBilling,
+                xaiBilling,
                 grammarToolInputProperties,
                 applyServiceTierPricing: (usage, serviceTier) => applyServiceTierPricing(usage, serviceTier, model),
             });

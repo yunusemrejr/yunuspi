@@ -17,6 +17,7 @@ import { clampOpenAIPromptCacheKey, isOpenAIEndpoint } from "./openai-prompt-cac
 import { applyOpenRouterUsage, isOpenRouterBillingEndpoint } from "./openrouter-usage.js";
 import { buildBaseOptions, clampThinkingBudgetToAnswerRoom, thinkingBudgetForLevel } from "./simple-options.js";
 import { transformMessages } from "./transform-messages.js";
+import { applyXaiUsage, isXaiBillingEndpoint } from "./xai-usage.js";
 /**
  * Check if conversation messages contain tool calls or tool results.
  * This is needed because Anthropic (via proxy) requires the tools param
@@ -297,18 +298,20 @@ export const stream = (model, context, options) => {
                 maxRetryDelayMs: options?.maxRetryDelayMs,
                 signal: options?.signal,
             });
-            const routerBilling = isOpenRouterBillingEndpoint(model, response, "chat/completions");
+            const applyReportedUsage = isOpenRouterBillingEndpoint(model, response, "chat/completions")
+                ? applyOpenRouterUsage
+                : isXaiBillingEndpoint(model, response, "chat/completions") ? applyXaiUsage : undefined;
             await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
             stream.push({ type: "start", partial: output });
             let textBlock = null;
             let thinkingBlock = null;
             let hasFinishReason = false;
             let createdAt;
-            let routerReceipt;
+            let providerReceipt;
             const recordChunkUsage = (rawUsage, serviceTier, responseId) => {
-                if (routerBilling && responseId && responseId !== output.responseId) return;
+                if (applyReportedUsage && responseId && responseId !== output.responseId) return;
                 const usage = parseChunkUsage(rawUsage, model, serviceTier, createdAt ?? dispatchedAt);
-                if (routerBilling) routerReceipt = applyOpenRouterUsage(usage, rawUsage, routerReceipt);
+                if (applyReportedUsage) providerReceipt = applyReportedUsage(usage, rawUsage, providerReceipt);
                 output.usage = usage;
             };
             const toolCallBlocksByIndex = new Map();

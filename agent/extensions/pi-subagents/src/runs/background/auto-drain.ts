@@ -58,6 +58,7 @@ export async function drainOutstandingWork(deps: AutoDrainDeps): Promise<void> {
 				state: deps.state,
 				events: deps.events,
 				now,
+				backgroundWorkPurpose: "automatic",
 				stopOnAttention: false,
 				failOnFailedRuns: true,
 				failOnAttention: true,

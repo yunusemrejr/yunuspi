@@ -32,6 +32,65 @@ test("large process trees count each descendant exactly once and exclude unrelat
   } finally { fs.readdirSync = readdir; fs.readFileSync = read; syncBuiltinESMExports(); }
 });
 
+test("overlapping memory checks share a sample and explicit ownership checks read fresh", t => {
+  const processes = new Map([
+    [2001, { parent: 1, identity: '101', mb: 64 }],
+    [2002, { parent: 2001, identity: '102', mb: 16 }],
+    [3001, { parent: 1, identity: '201', mb: 96 }],
+  ]);
+  const { readdirSync, readFileSync } = fs;
+  let scans = 0, memoryReads = 0, now = performance.now() + 1000;
+  t.mock.method(performance, 'now', () => now);
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  fs.readdirSync = (file, ...args) => {
+    if (file !== '/proc') return readdirSync(file, ...args);
+    scans++;
+    return [...processes.keys()].map(String);
+  };
+  fs.readFileSync = (file, ...args) => {
+    if (file === '/proc/meminfo') { memoryReads++; return 'MemAvailable: 4000000 kB\n'; }
+    const match = /^\/proc\/(\d+)\/stat$/.exec(file);
+    if (!match) return readFileSync(file, ...args);
+    const { parent, identity, mb } = processes.get(Number(match[1]));
+    const fields = Array(22).fill('0');
+    fields[0] = 'S';
+    fields[1] = String(parent);
+    fields[19] = identity;
+    fields[21] = String(mb * 256);
+    return `${match[1]} (synthetic job) ${fields.join(' ')}`;
+  };
+  syncBuiltinESMExports();
+  t.after(() => { fs.readdirSync = readdirSync; fs.readFileSync = readFileSync; syncBuiltinESMExports(); });
+
+  const warnings = [];
+  const stopFirst = guard.watchMemory(2001, 75, (text, pids) => warnings.push({ text, pids }), { intervalMs: 100 });
+  const stopSecond = guard.watchMemory(3001, 92, (text, pids) => warnings.push({ text, pids }), { intervalMs: 100 });
+  t.after(() => { stopFirst(); stopSecond(); });
+  t.mock.timers.tick(100);
+  assert.equal(scans, 1);
+  assert.equal(memoryReads, 1);
+  assert.deepEqual(warnings.map(item => item.pids), [[2001, 2002], [3001]]);
+  assert.match(warnings[0].text, /using 80 MB/);
+  assert.match(warnings[1].text, /using 96 MB/);
+
+  processes.set(2001, { parent: 1, identity: '999', mb: 1024 });
+  t.mock.timers.tick(100);
+  assert.equal(scans, 1, 'the shared sample still falls inside its age limit');
+  assert.deepEqual(warnings.slice(2).map(item => item.pids), [[3001]], 'a reused root cannot trigger a cached warning');
+  assert.equal(guard.treeUsage(2001, true).identities[2001], '999');
+  assert.equal(scans, 2, 'an explicit identity scan cannot read a cached PID');
+  now += 100;
+  t.mock.timers.tick(100);
+  assert.equal(scans, 3);
+  assert.equal(memoryReads, 2);
+  assert.deepEqual(warnings.slice(3).map(item => item.pids), [[3001]], 'the watchdog does not report a reused root PID');
+
+  stopFirst();
+  stopSecond();
+  t.mock.timers.tick(100);
+  assert.equal(scans, 3);
+});
+
 test("tree usage counts a process and its children", async () => {
   const child = spawn("sh", ["-c", "node -e 'const b = Buffer.alloc(120 * 1024 * 1024, 1); setTimeout(() => {}, 4000)' & wait"], { stdio: "ignore" });
   try {

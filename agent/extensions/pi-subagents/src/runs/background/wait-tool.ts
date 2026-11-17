@@ -12,7 +12,7 @@ export function registerWaitTool(
 	subscriptions?: Pick<WaitSubscriptionManager, "arm">,
 	defaultTimeoutMs?: number,
 ): void {
-	const description = `Wait for background work that sends no completion notice (provider jobs, detached runs), then return. Async subagent runs and bg_run tasks report on their own (in a headless run, when the turn ends): wait for those only when this turn needs the result. With no arguments it returns when the first active run or provider job finishes, or a subagent needs attention.${enabled ? "" : "\n\nDisabled by config: returns at once without blocking."}`;
+	const description = `Wait for background work needed in this turn, including finite bg_run tasks in headless sessions. Pass id to wait for one task. With no arguments it returns when the first active run or provider job finishes, or a subagent needs attention.${enabled ? "" : "\n\nDisabled by config: returns at once without blocking."}`;
 	const execute: ToolDefinition<typeof SubagentWaitParams, Details>["execute"] = async (_id, params, signal, onUpdate, ctx) => finalizeToolResult(await waitForSubagents(params, signal, {
 		state,
 		events: pi.events,

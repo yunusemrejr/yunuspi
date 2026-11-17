@@ -3149,13 +3149,13 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 878,
+        "line": 880,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 835,
+        "line": 837,
         "kind": "literal"
       },
       {
@@ -3167,7 +3167,7 @@
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 807,
+        "line": 809,
         "kind": "literal"
       },
       {
@@ -3587,13 +3587,13 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 878,
+        "line": 880,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 835,
+        "line": 837,
         "kind": "literal"
       },
       {
@@ -3605,7 +3605,7 @@
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 807,
+        "line": 809,
         "kind": "literal"
       },
       {

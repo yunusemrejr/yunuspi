@@ -309,7 +309,7 @@ export interface Usage {
             "image_generation_call" | "code_interpreter_call" | "shell_call" | "web_search_requests" |
             "web_fetch_requests" | "code_execution_requests" | "web_search_successes" | "google_tool_prompt_tokens" |
             "google_url_context_input_tokens" | "google_search_queries" | "google_web_grounded_prompts" |
-            "web_search_billable_requests" | "image_generation_input_tokens" | "image_generation_output_tokens" |
+            "web_search_billable_requests" | "meta_web_search_queries" | "image_generation_input_tokens" | "image_generation_output_tokens" |
             "image_generation_cached_tokens" | "image_generation_text_input_tokens" | "image_generation_image_input_tokens" |
             "image_generation_image_output_tokens" | "image_generation_cached_text_tokens" | "image_generation_cached_image_tokens", number>>;
     };

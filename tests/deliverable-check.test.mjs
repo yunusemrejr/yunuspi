@@ -6,6 +6,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { createBashToolDefinition } from '../core/coding-agent/src/core/tools/bash.js';
 
 const root = path.resolve(import.meta.dirname, '..');
 const load = (rel) => import(pathToFileURL(path.join(root, rel)));
@@ -143,6 +144,72 @@ test('detection stays narrow: final-product types, plausible places, no fixtures
   assert.ok(scanRecentDeliverables(dir, 0, { maxEntries: 1 }).length <= 1, 'the scan honors its entry budget');
 });
 
+test('shell detection follows literal segments and keeps uncertain operators and output options visible', () => {
+  const readOnly = [
+    'pwd; ls -la', 'cd "out && archive" && ls', 'cat "a | b.pdf" |& head',
+    'grep -r x . || pwd', 'find . -type f -name "*.pdf"', 'git branch --show-current',
+    'pdftotext report.pdf -', 'ffprobe -of json report.mp4', 'curl -sSL "https://example.invalid/?x=1&y=2"',
+  ];
+  const mayProduce = [
+    'pwd && cp input report.pdf', 'pwd; cp input report.pdf', 'pwd # comment\ncp input report.pdf',
+    'cat input | tee report.pdf', 'ls || cp input report.pdf', 'echo "$(cp input report.pdf)"',
+    'echo <(cp input report.pdf)', 'pwd & cp input report.pdf', 'ls &>listing.pdf',
+    'find . -fprint0 listing.pdf', 'find . -e\\\nxec touch report.pdf \\;',
+    'git branch fixture', 'git diff --output=report.pdf', 'rg --pre=make_report term',
+    'pdftotext input.pdf output.pdf', 'ffprobe -o report.pdf input.mp4', 'tree -a -o listing.pdf',
+    'curl -s -o report.pdf https://example.invalid/', 'cat "bad quote',
+  ];
+  for (const command of readOnly) assert.equal(commandMayProduceFiles(command), false, command);
+  for (const command of mayProduce) assert.equal(commandMayProduceFiles(command), true, command);
+});
+
+test('directory discovery streams a bounded batch and closes each handle, including on read failure', t => {
+  const dir = tmp();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const crowded = path.join(dir, 'crowded');
+  fs.mkdirSync(crowded);
+  for (let i = 0; i < 256; i++) fs.writeFileSync(path.join(crowded, `${i}.pdf`), 'fixture');
+  put(dir, 'denied/not-seen.pdf', 'fixture');
+  const expected = put(dir, 'visible/report.pdf', 'fixture');
+  fs.symlinkSync(path.join(dir, 'visible'), path.join(dir, 'alias'), 'dir');
+  const { opendirSync, readdirSync } = fs;
+  const batchSizes = [], opened = [], closed = [];
+  let crowdedNames = 0;
+  fs.readdirSync = (file, ...args) => {
+    const entries = readdirSync(file, ...args);
+    if (file === crowded) crowdedNames += entries.length;
+    return entries;
+  };
+  fs.opendirSync = (file, options) => {
+    const handle = opendirSync(file, options);
+    const read = handle.readSync.bind(handle), close = handle.closeSync.bind(handle);
+    opened.push(file);
+    if (file === crowded) batchSizes.push(options.bufferSize);
+    handle.readSync = () => {
+      if (file === path.join(dir, 'denied')) throw new Error('fixture directory read error');
+      const entry = read();
+      if (entry && file === crowded) crowdedNames++;
+      return entry;
+    };
+    handle.closeSync = () => { closed.push(file); return close(); };
+    return handle;
+  };
+  try {
+    assert.equal(scanRecentDeliverables(crowded, 0, { maxEntries: 3, maxMs: 5000 }).length, 3);
+    assert.equal(crowdedNames, 3);
+    assert.deepEqual(batchSizes, [3]);
+    assert.deepEqual(closed, [crowded]);
+    const found = scanRecentDeliverables(dir, 0, { maxMs: 5000 });
+    assert.ok(found.includes(expected));
+    assert.ok(!found.some(file => file.includes(`${path.sep}denied${path.sep}`)));
+    assert.ok(!opened.includes(path.join(dir, 'alias')));
+    assert.deepEqual(closed, opened);
+  } finally {
+    fs.opendirSync = opendirSync;
+    fs.readdirSync = readdirSync;
+  }
+});
+
 /** A host API double: records handlers, tools and the messages the extension sends. */
 function host() {
   const handlers = new Map(), tools = new Map(), sent = [];
@@ -158,6 +225,34 @@ const scriptWrites = async (h, ctx, name, command = 'python make_report.py', out
   put(ctx.cwd, name, buildDocx({ blocks: [{ type: 'paragraph', text: 'Body text of the report.' }] }, () => png()).buffer);
   await h.emit('tool_result', { toolName: 'bash', toolCallId: `c-${name}`, input: { command }, content: [{ type: 'text', text: output }], isError: false }, ctx);
 };
+
+test('extension tracks files created by native Bash after an orienting command', async t => {
+  const dir = tmp();
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  await withEnv({ PI_DELIVERABLES: undefined, PI_SUBAGENT_CHILD: undefined }, async () => {
+    const h = host(), ctx = makeCtx(dir);
+    ctx.sessionManager.getSessionFile = () => undefined;
+    deliverables(h.pi);
+    await h.emit('session_start', {}, ctx);
+    put(dir, 'input.bin', 'fixture');
+    const bash = createBashToolDefinition(dir);
+    const variants = [
+      ['pwd && cp input.bin report-and.pdf', 'report-and.pdf'],
+      ['pwd; cp input.bin report-semi.pdf', 'report-semi.pdf'],
+      ['pwd # orient\ncp input.bin report-next.pdf', 'report-next.pdf'],
+      ['cat input.bin | tee report-pipe.pdf', 'report-pipe.pdf'],
+    ];
+    for (const [command, file] of variants) {
+      const call = { toolCallId: file, toolName: 'bash', input: { command } };
+      await h.emit('tool_call', call, ctx);
+      const output = await bash.execute(file, call.input, undefined, undefined, ctx);
+      await h.emit('tool_result', { ...call, ...output, isError: false }, ctx);
+      assert.equal(fs.readFileSync(path.join(dir, file), 'utf8'), 'fixture');
+      assert.ok(collectVerificationReceipts(8, ctx.sessionManager).some(receipt => receipt.id === path.join(dir, file)), command);
+    }
+    await h.emit('session_shutdown', {}, ctx);
+  });
+});
 
 test('extension: a script-made document that nobody opened wakes the model once, and checking it ends the matter', async () => {
   await withEnv({ PI_DELIVERABLES: undefined, PI_SUBAGENT_CHILD: undefined }, async () => {
