@@ -1,3 +1,10 @@
+## 0.56.19 — Google tool billing and duplicate dispatch prevention
+
+- Gemini Developer API and Vertex include separately reported URL Context input tokens in session accounting. Google Search attempts retain usage evidence, and the total stays partial when the project’s charge is unknown.
+- Recovering a background child run preserves a result and its usage when the worker commits them during the liveness check.
+- A Stop during a terminal hook preserves completed background receipts and prevents a completion wake from dispatching another model request.
+- Concurrent Span evaluations of the same trace on the same model route share one physical request and one charge. Each caller can cancel independently.
+
 ## 0.56.18 — Anthropic billing and reliable timeout evidence
 
 - The Claude API ledger estimates fees for distinct successful hosted searches. It preserves known fees on interrupted streams and marks unresolved activity as partial. Explicit US-only token prices apply once the provider confirms that routing.

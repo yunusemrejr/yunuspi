@@ -208,6 +208,74 @@ test('Span reuses scores only on the selected model and endpoint', async () => {
   } finally { clearSpanCache(); }
 });
 
+test('identical live Span requests share one charge through a caller cancellation', { timeout: 4000 }, async () => {
+  const trace = traceFrom(fixtures.traces[0].events);
+  const reply = Promise.withResolvers(), submitted = Promise.withResolvers();
+  const model = { provider: 'audit', id: 'fixture', api: 'openai-completions', baseUrl: 'https://fixture.invalid' };
+  const primary = [], follower = [];
+  const pi = rows => ({
+    appendEntry: (customType, data) => rows.push({ type: 'custom', customType, data }),
+    bindAuxiliaryUsage: () => data => { rows.push({ type: 'custom', customType: 'auxiliary-model-usage-v1', data }); return true; },
+  });
+  let dispatches = 0, transportSignal;
+  const ctx = { model, modelRegistry: { completeSimple(_model, _messages, options) {
+    dispatches++;
+    transportSignal = options.signal;
+    submitted.resolve();
+    return reply.promise;
+  } } };
+  const controller = new AbortController();
+  clearSpanCache();
+  const first = scoreSpanTrace(trace, sessionSpanScorer(ctx), { pi: pi(primary), signal: controller.signal });
+  await submitted.promise;
+  const second = scoreSpanTrace(trace, sessionSpanScorer(ctx), { pi: pi(follower) });
+  let result;
+  try {
+    controller.abort();
+    assert.equal((await first).skipped, 'aborted');
+    assert.equal(transportSignal.aborted, false, 'the active follower still needs the physical request');
+    assert.equal(dispatches, 1);
+  } finally {
+    reply.resolve({ stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify(scoresFor([])) }],
+      usage: { input: 4, output: 2, cost: { total: .027, source: 'provider-reported' } } });
+    result = await second;
+    clearSpanCache();
+  }
+  assert.equal(result.ok, true);
+  assert.equal(result.costUsd, 0);
+  assert.equal(collectSessionCost(primary).formatted, '$0.027000');
+  assert.equal(collectSessionCost(primary).pending, 0);
+  assert.equal(collectSessionCost(follower).total, 0);
+  assert.equal(follower.filter(row => row.customType === 'auxiliary-model-usage-v1').length, 0);
+});
+
+test('Span retains an abandoned transport identity until the physical request settles', { timeout: 4000 }, async () => {
+  const trace = traceFrom(fixtures.traces[0].events);
+  const reply = Promise.withResolvers(), submitted = Promise.withResolvers();
+  const controller = new AbortController();
+  const model = { provider: 'audit', id: 'late-fixture', api: 'openai-completions', baseUrl: 'https://fixture.invalid' };
+  let calls = 0;
+  const answer = { stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify(scoresFor([])) }] };
+  const scorer = sessionSpanScorer({ model, modelRegistry: { completeSimple() {
+    submitted.resolve();
+    if (++calls === 1) return reply.promise;
+    return Promise.resolve(answer);
+  } } });
+  clearSpanCache();
+  const scoring = scoreSpanTrace(trace, scorer, { signal: controller.signal });
+  await submitted.promise;
+  try {
+    controller.abort();
+    assert.equal((await scoring).skipped, 'aborted');
+    assert.equal((await scoreSpanTrace(trace, scorer, { timeoutMs: 100 })).skipped, 'busy');
+    assert.equal(calls, 1);
+  } finally { reply.resolve(answer); }
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal((await scoreSpanTrace(trace, scorer)).cached, false, 'the abandoned score never enters the cache');
+  assert.equal(calls, 2);
+  clearSpanCache();
+});
+
 test('Span keeps paid physical responses when the scorer cannot use them', async () => {
   const trace = traceFrom(fixtures.traces[0].events);
   const entries = [];

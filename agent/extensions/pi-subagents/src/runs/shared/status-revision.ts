@@ -239,12 +239,14 @@ export function writePrivateGuardedStatus(statusPath: string, next: RevisionedSt
 export function updateGuardedStatus(
 	statusPath: string,
 	update: (current: RevisionedStatus) => RevisionedStatus | undefined,
+	options?: { initial?: RevisionedStatus },
 ): GuardedStatusWriteResult {
 	return withStatusWriteLock(statusPath, () => {
 		const { current, unreadable } = readCurrentStatus(statusPath);
-		if (!current) return { written: false, revision: 0, ...(unreadable ? { reason: "unreadable-current" as const } : {}) };
-		const next = update(current);
-		if (!next) return { written: false, revision: current.revision ?? 0 };
+		const base = current ?? (unreadable ? undefined : options?.initial);
+		if (!base) return { written: false, revision: 0, ...(unreadable ? { reason: "unreadable-current" as const } : {}) };
+		const next = update(base);
+		if (!next) return { written: false, revision: current?.revision ?? 0 };
 		return writeGuardedStatusLocked(statusPath, next, current, unreadable);
 	});
 }

@@ -37,6 +37,7 @@ export const SPAN_MAX_EVENT_CHARS = 400;
 export const SPAN_MAX_INPUT_CHARS = 12_000;
 export const SPAN_CACHE_MAX = 128;
 export const SPAN_CACHE_TTL_MS = 10 * 60 * 1000;
+const SPAN_MAX_IN_FLIGHT = 32;
 /** Minimum P(present) before a signal is even eligible for advisory use. */
 export const SPAN_ADVISE_THRESHOLD = 0.8;
 /** Below this P(present) the signal is recorded as not detected. */
@@ -131,11 +132,7 @@ export interface SpanScoreResult {
   shadow: boolean;
 }
 
-export type SpanScorer = ((prompt: string, opts: {
-  signal?: AbortSignal;
-  timeoutMs?: number;
-  pi?: unknown;
-}) => Promise<{
+interface SpanAnswer {
   text: string;
   model: string;
   inputTokens?: number;
@@ -143,7 +140,13 @@ export type SpanScorer = ((prompt: string, opts: {
   costSource?: "provider-reported" | "estimate";
   billingReceiptId?: string;
   ms: number;
-}>) & { cacheRoute?: string };
+}
+
+export type SpanScorer = ((prompt: string, opts: {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  pi?: unknown;
+}) => Promise<SpanAnswer>) & { cacheRoute?: string };
 
 export function spanEnabled(env: Record<string, string | undefined> = process.env): boolean {
   return !["1", "true", "yes"].includes((env.PI_OFFLINE ?? "").toLowerCase())
@@ -208,6 +211,72 @@ interface SpanCacheEntry {
 }
 
 const spanCache = new Map<string, SpanCacheEntry>();
+type SpanJudgment = { answer: SpanAnswer; scores?: Record<string, SpanSignalScores> };
+type SpanFlightOutcome = { ok: true; value: SpanJudgment } | { ok: false; error: unknown };
+type SpanFlight = { controller: AbortController; waiters: Set<(outcome: SpanFlightOutcome) => void> };
+const spanFlights = new Map<string, SpanFlight>();
+
+function rememberSpan(key: string, judgment: SpanJudgment, at: number) {
+  if (!judgment.scores) return;
+  spanCache.delete(key);
+  if (spanCache.size >= SPAN_CACHE_MAX) spanCache.delete(spanCache.keys().next().value!);
+  spanCache.set(key, { scores: judgment.scores, model: judgment.answer.model, at });
+}
+
+async function judgeSpan(prompt: string, scorer: SpanScorer, signal: AbortSignal, timeoutMs: number, pi: unknown): Promise<SpanJudgment> {
+  signal.throwIfAborted();
+  const finish = beginHarnessActivity("span");
+  let scores: SpanJudgment["scores"];
+  try {
+    const answer = await scorer(prompt, { signal, timeoutMs, pi });
+    signal.throwIfAborted();
+    try { scores = parseSpanScores(JSON.parse(answer.text)); } catch { /* Malformed answers are unusable. */ }
+    return { answer, scores };
+  } finally {
+    try { finish(scores ? "ok" : signal.aborted && signal.reason?.name !== "TimeoutError" ? "cancelled" : "error"); }
+    catch { /* Display only. */ }
+  }
+}
+
+function startSpanFlight(key: string, prompt: string, scorer: SpanScorer, timeoutMs: number, pi: unknown, now: () => number): SpanFlight {
+  const flight: SpanFlight = { controller: new AbortController(), waiters: new Set() };
+  spanFlights.set(key, flight);
+  const settle = (outcome: SpanFlightOutcome) => {
+    if (outcome.ok && flight.waiters.size && !flight.controller.signal.aborted) {
+      try { rememberSpan(key, outcome.value, now()); }
+      catch { /* Cache maintenance cannot strand the waiters. */ }
+    }
+    spanFlights.delete(key);
+    for (const notify of flight.waiters) notify(outcome);
+  };
+  // Register ownership before invoking the scorer. Only the submitting
+  // caller's SDK context can create the request's billing receipt.
+  void Promise.resolve().then(() => judgeSpan(prompt, scorer, flight.controller.signal, timeoutMs, pi))
+    .then(value => settle({ ok: true, value }), error => settle({ ok: false, error }));
+  return flight;
+}
+
+function waitForSpanFlight(flight: SpanFlight, signal: AbortSignal): Promise<SpanJudgment> {
+  return new Promise((resolve, reject) => {
+    const remove = () => {
+      signal.removeEventListener("abort", cancel);
+      flight.waiters.delete(notify);
+    };
+    const cancel = () => {
+      remove();
+      if (flight.waiters.size === 0) flight.controller.abort(signal.reason);
+      reject(signal.reason);
+    };
+    const notify = (outcome: SpanFlightOutcome) => {
+      remove();
+      if (outcome.ok) resolve(outcome.value);
+      else reject(outcome.error);
+    };
+    if (signal.aborted) { cancel(); return; }
+    flight.waiters.add(notify);
+    signal.addEventListener("abort", cancel, { once: true });
+  });
+}
 
 export function clearSpanCache(): void {
   spanCache.clear();
@@ -250,51 +319,58 @@ export async function scoreSpanTrace(
   metrics.offer("span");
   const cacheKey = scorer?.cacheRoute ? `${scorer.cacheRoute}:${fingerprint}` : fingerprint;
   const cached = spanCache.get(cacheKey);
-  if (cached && now() - cached.at < SPAN_CACHE_TTL_MS) {
-    metrics.run("span", 0);
+  const reuse = (cached: Pick<SpanCacheEntry, "scores" | "model">, ms = 0): SpanScoreResult => {
+    metrics.run("span", ms);
     metrics.cacheHit("span");
     noteHealth("ml.span.used", { count: 1, cached: true, signals: Object.keys(cached.scores).length, shadow });
     // Cached rescores ledger like cached Jev answers: no new spend, but
     // /metrics still counts the reuse.
     ledger(opts.pi, {
-      model: cached.model, inputTokens: 0, costUsd: 0, ms: 0, cached: true,
+      model: cached.model, inputTokens: 0, costUsd: 0, ms, cached: true,
       signals: Object.keys(cached.scores).length,
       present: Object.values(cached.scores).filter((scores) => scores.present >= SPAN_ADVISE_THRESHOLD).length,
       shadow,
     });
-    return { ok: true, ...base, scores: structuredClone(cached.scores), model: cached.model, inputTokens: 0, costUsd: 0, ms: 0, cached: true };
-  }
+    return { ok: true, ...base, scores: structuredClone(cached.scores), model: cached.model, inputTokens: 0, costUsd: 0, ms, cached: true };
+  };
+  if (cached && now() - cached.at < SPAN_CACHE_TTL_MS) return reuse(cached);
   if (!scorer) {
     metrics.skip("span", "no-scorer");
     noteHealth("ml.span.skipped", { count: 1, reason: "no-scorer" });
     return { ok: false, ...base, ms: 0, cached: false, skipped: "no-scorer" };
   }
-  const finish = beginHarnessActivity("span");
+  const flight = scorer.cacheRoute ? spanFlights.get(cacheKey) : undefined;
+  if (flight?.controller.signal.aborted || (!flight && scorer.cacheRoute && spanFlights.size >= SPAN_MAX_IN_FLIGHT)) {
+    metrics.skip("span", "busy");
+    return { ok: false, ...base, ms: 0, cached: false, skipped: "busy" };
+  }
   const controller = new AbortController();
   const signal = opts.signal ? AbortSignal.any([opts.signal, controller.signal]) : controller.signal;
   const timeoutMs = Number.isFinite(opts.timeoutMs) ? Math.max(1, Math.min(2_147_483_647, opts.timeoutMs!)) : SPAN_REQUEST_TIMEOUT_MS;
   const timer = setTimeout(() => controller.abort(new DOMException("Span timeout", "TimeoutError")), timeoutMs);
-  let succeeded = false;
   try {
-    const prompt = spanPrompt({ events });
-    const answer = await raceWithAbortSignal(Promise.resolve(scorer(prompt, { signal, timeoutMs, pi: opts.pi })), signal);
+    let judgment: SpanJudgment;
+    let promptLength = 0;
+    if (flight) {
+      judgment = await waitForSpanFlight(flight, signal);
+    } else {
+      const prompt = spanPrompt({ events });
+      promptLength = prompt.length;
+      judgment = scorer.cacheRoute
+        ? await waitForSpanFlight(startSpanFlight(cacheKey, prompt, scorer, timeoutMs, opts.pi, now), signal)
+        : await raceWithAbortSignal(judgeSpan(prompt, scorer, signal, timeoutMs, opts.pi), signal);
+    }
     signal.throwIfAborted();
     const ms = Math.max(0, now() - started);
-    let parsed: Record<string, SpanSignalScores> | undefined;
-    try {
-      parsed = parseSpanScores(JSON.parse(answer.text));
-    } catch {
-      parsed = undefined;
-    }
+    const { answer, scores: parsed } = judgment;
     if (!parsed) {
       metrics.skip("span", "malformed");
       noteHealth("ml.span.skipped", { count: 1, reason: "malformed", durationMs: ms });
       return { ok: false, ...base, ms, cached: false, skipped: "malformed" };
     }
-    metrics.run("span", ms, prompt.length);
-    spanCache.delete(cacheKey);
-    if (spanCache.size >= SPAN_CACHE_MAX) spanCache.delete(spanCache.keys().next().value!);
-    spanCache.set(cacheKey, { scores: structuredClone(parsed), model: answer.model, at: now() });
+    if (flight) return reuse({ scores: parsed, model: answer.model }, ms);
+    metrics.run("span", ms, promptLength);
+    if (!scorer.cacheRoute) rememberSpan(cacheKey, judgment, now());
     const presentCount = Object.values(parsed).filter((scores) => scores.present >= SPAN_ADVISE_THRESHOLD).length;
     const costSource = "costSource" in answer ? answer.costSource
       : typeof answer.costUsd === "number" && Number.isFinite(answer.costUsd) && answer.costUsd >= 0 ? "provider-reported" : undefined;
@@ -311,8 +387,7 @@ export async function scoreSpanTrace(
     });
     if (!shadow && present.length) metrics.accept("span");
     else metrics.skip("span", shadow ? "shadow" : "absent");
-    succeeded = true;
-    return { ok: true, ...base, scores: parsed, model: answer.model, inputTokens: answer.inputTokens, costUsd: answer.costUsd, ms, cached: false };
+    return { ok: true, ...base, scores: structuredClone(parsed), model: answer.model, inputTokens: answer.inputTokens, costUsd: answer.costUsd, ms, cached: false };
   } catch (error) {
     const ms = Math.max(0, now() - started);
     const message = error instanceof Error ? error.message : String(error);
@@ -323,7 +398,6 @@ export async function scoreSpanTrace(
     return { ok: false, ...base, ms, cached: false, skipped: reason };
   } finally {
     clearTimeout(timer);
-    try { finish(succeeded ? 'ok' : opts.signal?.aborted ? 'cancelled' : 'error'); } catch { /* display only */ }
   }
 }
 

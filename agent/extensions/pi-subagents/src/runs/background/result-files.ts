@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { randomUUID } from "node:crypto";
 import { writeAtomicJson } from "../../shared/atomic-json.ts";
 import { MISSION_BINDING_FILE } from "../../missions/lifecycle.ts";
 import { encodeIndexSegment, indexSegmentAliases, MAX_INDEX_SEGMENT_BYTES } from "./index-segment.ts";
@@ -180,6 +181,31 @@ export function writeAsyncResultFile(resultPath: string, data: Record<string, un
 	return promotePendingResultFile(resultsDir, sessionId, runId, path.basename(resultPath), { logFailure: false }) === "promoted"
 		? { state: "public" }
 		: { state: "pending" };
+}
+
+/** Publish a recovery payload for a dead writer without replacing a real receipt. */
+export function writeAsyncResultFileIfAbsent(resultPath: string, data: Record<string, unknown>): boolean {
+	const runId = nonEmptyString(data.runId) ?? nonEmptyString(data.id) ?? path.basename(resultPath, ".json");
+	const sessionId = nonEmptyString(data.sessionId);
+	if (!sessionId) throw new Error(`Cannot write async result '${resultPath}' without a sessionId.`);
+	const resultsDir = path.dirname(resultPath);
+	if (resultPayloadPathForSessionRun(resultsDir, sessionId, runId) || existingResultFile(resultPath)) return false;
+	fs.mkdirSync(resultsDir, { recursive: true });
+	const staged = path.join(resultsDir, `.repair-${randomUUID()}.tmp`);
+	try {
+		fs.writeFileSync(staged, JSON.stringify(data, null, 2), { encoding: "utf-8", mode: 0o600, flag: "wx" });
+		// Index before publish so a successful link remains discoverable after a crash.
+		writeResultIndexForData(resultPath, data);
+		if (pendingResultExists(resultsDir, sessionId, runId)) return false;
+		try { fs.linkSync(staged, resultPath); }
+		catch (error) {
+			if ((error as NodeJS.ErrnoException).code === "EEXIST") return false;
+			throw error;
+		}
+		return true;
+	} finally {
+		try { fs.rmSync(staged, { force: true }); } catch { /* The staged file is not a result. */ }
+	}
 }
 
 export function removeResultIndex(resultsDir: string, sessionId: string | undefined, runId: string | undefined, toolCallId?: string): void {

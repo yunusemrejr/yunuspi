@@ -1,11 +1,12 @@
 import { GoogleGenAI, ResourceScope, ThinkingLevel, } from "@google/genai";
-import { calculateCost, clampThinkingLevel } from "../models.js";
+import { clampThinkingLevel } from "../models.js";
 import { formatProviderError, normalizeProviderError } from "../utils/error-body.js";
 import { AssistantMessageEventStream } from "../utils/event-stream.js";
 import { providerHeadersToRecord } from "../utils/headers.js";
 import { getPiUserAgent } from "../utils/pi-user-agent.js";
 import { getProviderEnvValue } from "../utils/provider-env.js";
 import { sanitizeSurrogates } from "../utils/sanitize-unicode.js";
+import { createGoogleHostedUsage } from "./google-hosted-usage.js";
 import { convertMessages, convertTools, isThinkingPart, mapStopReason, resolveGoogleFunctionCallingMode, resolveGoogleThinkingLevel, retainThoughtSignature, retryGoogleRequest, supportsGoogleStrictToolSampling, } from "./google-shared.js";
 import { captureProviderRetryAdvice } from "../utils/provider-retry.js";
 import { buildBaseOptions } from "./simple-options.js";
@@ -40,6 +41,7 @@ export const stream = (model, context, options) => {
             stopReason: "pending",
             timestamp: Date.now(),
         };
+        let hostedUsage;
         try {
             if (options?.fetch && options.fetch !== globalThis.fetch) {
                 throw new Error("Custom fetch is not supported by the Google Vertex adapter");
@@ -54,15 +56,14 @@ export const stream = (model, context, options) => {
             if (nextParams !== undefined) {
                 params = nextParams;
             }
+            hostedUsage = createGoogleHostedUsage(model, params, client);
             const googleStream = await retryGoogleRequest(() => client.models.generateContentStream(params), options);
             stream.push({ type: "start", partial: output });
             let currentBlock = null;
             const blocks = output.content;
             const blockIndex = () => blocks.length - 1;
             for await (const chunk of googleStream) {
-                // Vertex uses the same @google/genai GenerateContentResponse type as Gemini.
-                // responseId is documented there as an output-only identifier for each response.
-                output.responseId ||= chunk.responseId;
+                if (!hostedUsage.observe(chunk, output)) continue;
                 const candidate = chunk.candidates?.[0];
                 if (candidate?.content?.parts) {
                     for (const part of candidate.content.parts) {
@@ -172,25 +173,6 @@ export const stream = (model, context, options) => {
                         output.stopReason = "toolUse";
                     }
                 }
-                if (chunk.usageMetadata) {
-                    output.usage = {
-                        input: (chunk.usageMetadata.promptTokenCount || 0) - (chunk.usageMetadata.cachedContentTokenCount || 0),
-                        output: (chunk.usageMetadata.candidatesTokenCount || 0) + (chunk.usageMetadata.thoughtsTokenCount || 0),
-                        cacheRead: chunk.usageMetadata.cachedContentTokenCount || 0,
-                        cacheWrite: 0,
-                        ...(Number.isFinite(chunk.usageMetadata.cachedContentTokenCount) ? { cacheReadReported: true } : {}),
-                        reasoning: chunk.usageMetadata.thoughtsTokenCount || 0,
-                        totalTokens: chunk.usageMetadata.totalTokenCount || 0,
-                        cost: {
-                            input: 0,
-                            output: 0,
-                            cacheRead: 0,
-                            cacheWrite: 0,
-                            total: 0,
-                        },
-                    };
-                    calculateCost(model, output.usage);
-                }
             }
             if (currentBlock) {
                 if (currentBlock.type === "text") {
@@ -222,10 +204,12 @@ export const stream = (model, context, options) => {
                     : "An unknown error occurred";
                 throw new Error(errorMessage);
             }
+            hostedUsage.finish(output, true);
             stream.push({ type: "done", reason: output.stopReason, message: output });
             stream.end();
         }
         catch (error) {
+            hostedUsage?.finish(output, false);
             // Remove internal index property used during streaming
             for (const block of output.content) {
                 if ("index" in block) {

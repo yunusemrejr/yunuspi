@@ -27,6 +27,7 @@ export function createCompletionNotifier(
   let wakeTimer: ReturnType<typeof setTimeout> | undefined;
   let compactTimer: ReturnType<typeof setTimeout> | undefined;
   let wakeSignal: AbortSignal | undefined, wakeAbort: (() => void) | undefined;
+  let runSignal: AbortSignal | undefined;
   let receiptEpoch = 0;
   const receiptRetries = new Set<ReturnType<typeof setTimeout>>();
   const clearReceiptRetries = () => {
@@ -42,6 +43,11 @@ export function createCompletionNotifier(
   };
   const clearCompact = () => { if (compactTimer) clearTimeout(compactTimer); compactTimer = undefined; };
   const pause = () => { blocked = true; clearWake(); clearCompact(); };
+  const onRunAbort = () => pause();
+  const clearRunSignal = () => {
+    runSignal?.removeEventListener("abort", onRunAbort);
+    runSignal = undefined;
+  };
   const flush = async () => {
     if (inFlight) { drainRequested = true; return; }
     if (!active || !pending || blocked || compactionBlocked || context()?.signal?.aborted || !context()?.isIdle()) return;
@@ -112,6 +118,7 @@ export function createCompletionNotifier(
   };
   pi.on("session_start", (_event, ctx) => {
     clearReceiptRetries();
+    clearRunSignal();
     generation++; clearWake(); clearCompact(); graceDeadline = undefined; inFlight = undefined; drainRequested = false; active = true; compactionBlocked = false; pending = 0;
     const last = [...ctx.sessionManager.getBranch()]
       .reverse()
@@ -120,10 +127,19 @@ export function createCompletionNotifier(
       ) as any;
     blocked = pausesCompletionWake(last?.message);
   });
+  pi.on("agent_start", (_event, ctx) => {
+    clearRunSignal();
+    // Stop can arrive after this extension's agent_end handler but before
+    // another terminal hook releases the run. Hold its signal to settlement.
+    runSignal = ctx.signal;
+    if (runSignal?.aborted) onRunAbort();
+    else runSignal?.addEventListener("abort", onRunAbort, { once: true });
+  });
   pi.on("message_end", (event) => {
     if (pausesCompletionWake(event.message)) pause();
     else if (
       event.message.role === "assistant" &&
+      !runSignal?.aborted &&
       !["error", "aborted"].includes(event.message.stopReason)
     )
       blocked = false;
@@ -152,9 +168,10 @@ export function createCompletionNotifier(
     compactTimer = timer;
     timer.unref?.();
   });
-  pi.on("agent_settled", requestFlush);
+  pi.on("agent_settled", () => { clearRunSignal(); requestFlush(); });
   pi.on("session_shutdown", () => {
     clearReceiptRetries();
+    clearRunSignal();
     generation++; clearWake(); clearCompact(); graceDeadline = undefined; inFlight = undefined; drainRequested = false; active = false; pending = 0;
   });
   return (message: any, options: { triggerTurn: boolean }) => {

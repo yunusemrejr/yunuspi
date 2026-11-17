@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { writeGuardedStatus } from "../shared/status-revision.ts";
-import { resultFilePath, resultPayloadPathForSessionRun, writeAsyncResultFile } from "./result-files.ts";
+import { updateGuardedStatus } from "../shared/status-revision.ts";
+import { resultFilePath, resultPayloadPathForSessionRun, writeAsyncResultFileIfAbsent } from "./result-files.ts";
+import { readCompletionReplay } from "./completion-replay.ts";
 import { updateActiveRunIndex } from "./active-run-index.ts";
 import { readStatus } from "../../shared/utils.ts";
 import { readProcessStartIdentity } from "../../shared/process-start-identity.ts";
@@ -119,20 +120,25 @@ function regularFileExists(filePath: string): boolean {
 	}
 }
 
+function parseResultRepairData(data: { success?: boolean; state?: string; exitCode?: number; results?: unknown }, source: string): ResultRepairData {
+	const state = data.success || (data.success === undefined && data.state === "complete") ? "complete"
+		: data.state === "stopped" || data.state === "rejected" || data.state === "partial" ? data.state
+		: data.state === "paused" || data.exitCode === 0 ? "paused" : "failed";
+	const results = Array.isArray(data.results)
+		? data.results.map((entry, index) => {
+			if (!entry || typeof entry !== "object" || Array.isArray(entry)) return {};
+			const child = entry as ResultChildOutcome;
+			if (child.model !== undefined && typeof child.model !== "string") throw new Error(`Invalid async result file '${source}': results[${index}].model must be a string.`);
+			if (child.thinking !== undefined && typeof child.thinking !== "string") throw new Error(`Invalid async result file '${source}': results[${index}].thinking must be a string.`);
+			return child;
+		})
+		: undefined;
+	return { state, ...(results ? { results } : {}) };
+}
+
 function readResultRepairData(resultPath: string): ResultRepairData | undefined {
 	try {
-		const data = JSON.parse(fs.readFileSync(resultPath, "utf-8")) as { success?: boolean; state?: string; exitCode?: number; results?: unknown };
-		const state = data.success ? "complete" : data.state === "stopped" ? "stopped" : data.state === "rejected" ? "rejected" : data.state === "partial" ? "partial" : data.state === "paused" || data.exitCode === 0 ? "paused" : "failed";
-		const results = Array.isArray(data.results)
-			? data.results.map((entry, index) => {
-				if (!entry || typeof entry !== "object" || Array.isArray(entry)) return {};
-				const child = entry as ResultChildOutcome;
-				if (child.model !== undefined && typeof child.model !== "string") throw new Error(`Invalid async result file '${resultPath}': results[${index}].model must be a string.`);
-				if (child.thinking !== undefined && typeof child.thinking !== "string") throw new Error(`Invalid async result file '${resultPath}': results[${index}].thinking must be a string.`);
-				return child;
-			})
-			: undefined;
-		return { state, ...(results ? { results } : {}) };
+		return parseResultRepairData(JSON.parse(fs.readFileSync(resultPath, "utf-8")), resultPath);
 	} catch (error) {
 		if (isNotFoundError(error)) return undefined;
 		throw new Error(`Failed to read async result file '${resultPath}': ${getErrorMessage(error)}`, {
@@ -147,9 +153,7 @@ function childState(overallState: ResultRepairData["state"], child: ResultChildO
 	return overallState;
 }
 
-function terminalStatusFromResult(status: AsyncStatus, resultPath: string, now: number): AsyncStatus | undefined {
-	const repair = readResultRepairData(resultPath);
-	if (!repair) return undefined;
+function terminalStatusFromResult(status: AsyncStatus, repair: ResultRepairData, now: number): AsyncStatus {
 	const steps = (status.steps ?? []).map((step, index) => {
 		if (step.status !== "running" && step.status !== "pending") return step;
 		const child = repair.results?.[index];
@@ -217,10 +221,10 @@ function buildStartedStatus(asyncDir: string, startedRun: StartedRunMetadata, no
 	};
 }
 
-function buildFailedRepair(status: AsyncStatus, asyncDir: string, now: number, reason?: string): { status: AsyncStatus; result: Record<string, unknown>; message: string } {
+function buildFailedRepair(status: AsyncStatus, asyncDir: string, now: number): { status: AsyncStatus; result: Record<string, unknown>; message: string } {
 	const runId = status.runId || path.basename(asyncDir);
 	const pid = typeof status.pid === "number" ? status.pid : "unknown";
-	const baseMessage = reason ?? `Async runner process ${pid} exited or disappeared before writing a result. Marked run failed by stale-run reconciliation.`;
+	const baseMessage = `Async runner process ${pid} exited or disappeared before writing a result. Marked run failed by stale-run reconciliation.`;
 	const diagnostics = readRunnerStartupDiagnostics(asyncDir);
 	const message = diagnostics ? `${baseMessage}\n\nRunner stderr tail:\n${diagnostics}` : baseMessage;
 	const steps = status.steps?.length ? status.steps : [{ agent: "subagent", status: "running" as const }];
@@ -280,23 +284,76 @@ function buildFailedRepair(status: AsyncStatus, asyncDir: string, now: number, r
 	};
 }
 
-function writeFailedRepair(asyncDir: string, status: AsyncStatus, resultPath: string, now: number, reason?: string): ReconcileAsyncRunResult {
-	const repair = buildFailedRepair(status, asyncDir, now, reason);
-	if (repair.result.sessionId) writeAsyncResultFile(resultPath, repair.result);
-	// Guarded: a live runner may have finalized while the repair was being
-	// built. Losing that race must keep the newer state, not our repair.
-	const guarded = writeGuardedStatus(path.join(asyncDir, "status.json"), repair.status);
-	if (!guarded.written) return { status, repaired: false, message: `Stale-run repair skipped: on-disk status is newer (${guarded.reason ?? "unknown"}).` };
-	updateActiveRunIndex(asyncDir, repair.status.state, repair.status.toolCallId);
-	appendJsonlBestEffort(path.join(asyncDir, "events.jsonl"), {
+function findResultPath(status: AsyncStatus, resultsDir: string, resultPath: string): string | undefined {
+	const indexed = status.sessionId
+		? resultPayloadPathForSessionRun(resultsDir, status.sessionId, status.runId || path.basename(resultPath, ".json"))
+		: undefined;
+	return indexed ?? (regularFileExists(resultPath) ? resultPath : undefined);
+}
+
+function repairFromObservedOutcome(input: {
+	asyncDir: string;
+	observed: AsyncStatus;
+	initial?: AsyncStatus;
+	verifiedDead: boolean;
+	resultsDir: string;
+	resultPath: string;
+	now: number;
+}): ReconcileAsyncRunResult {
+	const { asyncDir, observed, initial, verifiedDead, resultsDir, resultPath, now } = input;
+	let outcome: ReconcileAsyncRunResult = { status: null, repaired: false, resultPath };
+	let synthetic = false;
+	const statusPath = path.join(asyncDir, "status.json");
+	const guarded = updateGuardedStatus(statusPath, (value) => {
+		const current = value as unknown as AsyncStatus;
+		outcome.status = current.displayDismissedAt === undefined ? current : null;
+		if (current.runId !== observed.runId || current.sessionId !== observed.sessionId || !outcome.status) return undefined;
+
+		const recoverExisting = () => {
+			const existing = findResultPath(current, resultsDir, resultPath);
+			if (existing) outcome.resultPath = existing;
+			if (current.state !== "running" && current.state !== "queued") return undefined;
+			const receipt = existing ? readResultRepairData(existing) : undefined;
+			const replay = !receipt && current.sessionId
+				? readCompletionReplay(resultsDir, current.runId, { sessionId: current.sessionId, now })
+				: undefined;
+			if (!receipt && !replay) return undefined;
+			outcome.message = receipt ? "Existing async result file was used to repair stale running status."
+				: "Delivered async completion replay was used to repair stale running status.";
+			return terminalStatusFromResult(current, receipt ?? parseResultRepairData(replay!.completion, replay!.archivePath), now);
+		};
+
+		const existing = recoverExisting();
+		if (existing) return outcome.status = existing;
+		const sameWriter = current.pid === observed.pid && current.runnerProcessStartIdentity === observed.runnerProcessStartIdentity;
+		if (!verifiedDead || current.state !== "running" || !sameWriter) return undefined;
+
+		const repair = buildFailedRepair(current, asyncDir, now);
+		// The pending/public receipt and replay were re-observed after death and
+		// under the status lock. Publish only as a fallback. If publication wins
+		// but the status write is interrupted, the next pass recovers from it.
+		if (current.sessionId && !writeAsyncResultFileIfAbsent(resultPath, repair.result)) {
+			const winner = recoverExisting();
+			if (winner) return outcome.status = winner;
+			return undefined;
+		}
+		synthetic = true;
+		outcome = { status: repair.status, repaired: false, ...(current.sessionId ? { resultPath } : {}), message: repair.message };
+		return repair.status;
+	}, { initial });
+	if (!guarded.written || !outcome.status) return outcome;
+	outcome.status = { ...outcome.status, revision: guarded.revision };
+	outcome.repaired = true;
+	updateActiveRunIndex(asyncDir, outcome.status.state, outcome.status.toolCallId);
+	if (synthetic) appendJsonlBestEffort(path.join(asyncDir, "events.jsonl"), {
 		type: "subagent.run.repaired_stale",
 		ts: now,
-		runId: repair.status.runId,
-		pid: status.pid,
-		...(repair.result.sessionId ? { resultPath } : {}),
-		message: repair.message,
+		runId: outcome.status.runId,
+		pid: observed.pid,
+		...(outcome.resultPath ? { resultPath: outcome.resultPath } : {}),
+		message: outcome.message,
 	});
-	return { status: repair.status, repaired: true, ...(repair.result.sessionId ? { resultPath } : {}), message: repair.message };
+	return outcome;
 }
 
 function terminal(state: AsyncStatus["state"]): boolean {
@@ -344,8 +401,9 @@ export function reconcileNestedAsyncDescendants(route: NestedRoute, options: Rec
 }
 
 export function checkPidLiveness(pid: number, kill: KillFn = process.kill, options: { expectedStartIdentity?: string; readStartIdentity?: (pid: number) => string | undefined } = {}): PidLiveness {
+	if (!Number.isSafeInteger(pid) || pid <= 0) return "unknown";
 	try {
-		kill(pid, 0);
+		if (!kill(pid, 0)) return "unknown";
 	} catch (error) {
 		const code = typeof error === "object" && error !== null && "code" in error
 			? (error as NodeJS.ErrnoException).code
@@ -385,25 +443,16 @@ export function reconcileAsyncRun(asyncDir: string, options: ReconcileAsyncRunOp
 	const runId = effectiveStatus.runId || path.basename(asyncDir);
 	const resultsDir = options.resultsDir ?? DIRS.results;
 	const resultPath = resultFilePath(resultsDir, runId);
-	const existingResultPath = effectiveStatus.sessionId
-		? resultPayloadPathForSessionRun(resultsDir, effectiveStatus.sessionId, runId) ?? (regularFileExists(resultPath) ? resultPath : undefined)
-		: regularFileExists(resultPath) ? resultPath : undefined;
-	if (existingResultPath) {
-		const terminalStatus = effectiveStatus.state === "running" || effectiveStatus.state === "queued"
-			? terminalStatusFromResult(effectiveStatus, existingResultPath, now)
-			: undefined;
-		if (terminalStatus) {
-			// Guarded: the runner's own final write may have landed first and
-			// carries the complete telemetry; a stale repair must not downgrade it.
-			const guarded = writeGuardedStatus(path.join(asyncDir, "status.json"), terminalStatus);
-			if (!guarded.written) return { status: effectiveStatus, repaired: false, resultPath: existingResultPath, message: `Terminal-status repair skipped: on-disk status is newer (${guarded.reason ?? "unknown"}).` };
-			updateActiveRunIndex(asyncDir, terminalStatus.state, terminalStatus.toolCallId);
-			return { status: terminalStatus, repaired: true, resultPath: existingResultPath, message: "Existing async result file was used to repair stale running status." };
-		}
-		if (effectiveStatus.displayDismissedAt === undefined) return { status: effectiveStatus, repaired: false, resultPath: existingResultPath };
-	}
 	if (effectiveStatus.displayDismissedAt !== undefined) {
 		return { status: null, repaired: false, resultPath };
+	}
+	const existingResultPath = findResultPath(effectiveStatus, resultsDir, resultPath);
+	const recovery = { asyncDir, observed: effectiveStatus, initial: startedStatus, resultsDir, resultPath, now };
+	if (existingResultPath) {
+		if (effectiveStatus.state === "running" || effectiveStatus.state === "queued") {
+			return repairFromObservedOutcome({ ...recovery, verifiedDead: false });
+		}
+		return { status: effectiveStatus, repaired: false, resultPath: existingResultPath };
 	}
 
 	if (effectiveStatus.state !== "running" || typeof effectiveStatus.pid !== "number") {
@@ -422,9 +471,9 @@ export function reconcileAsyncRun(asyncDir: string, options: ReconcileAsyncRunOp
 		const staleAfterMs = options.staleAlivePidMs ?? 24 * 60 * 60 * 1000;
 		const lastUpdate = effectiveStatus.lastUpdate ?? effectiveStatus.startedAt;
 		if (now - lastUpdate <= staleAfterMs) return { status: status ?? null, repaired: false, resultPath };
-		const message = `Async runner process ${effectiveStatus.pid} still has a live PID, but status has not updated for ${now - lastUpdate}ms. Marked run failed by stale-run reconciliation because PID ownership cannot be verified.`;
-		return writeFailedRepair(asyncDir, effectiveStatus, resultPath, now, message);
+		const message = `Async runner process ${effectiveStatus.pid} has no confirmed exit and its status has not updated for ${now - lastUpdate}ms.`;
+		return { status: status ?? null, repaired: false, resultPath, message };
 	}
 
-	return writeFailedRepair(asyncDir, effectiveStatus, resultPath, now);
+	return repairFromObservedOutcome({ ...recovery, verifiedDead: true });
 }

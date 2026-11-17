@@ -7,6 +7,7 @@ import { streamSimple as openAICompletions } from "../core/ai/src/api/openai-com
 import { streamSimple as openAIResponses } from "../core/ai/src/api/openai-responses.js";
 import { streamSimple as anthropic } from "../core/ai/src/api/anthropic-messages.js";
 import { streamSimple as google } from "../core/ai/src/api/google-generative-ai.js";
+import { stream as vertex } from "../core/ai/src/api/google-vertex.js";
 import { streamSimple as bedrock } from "../core/ai/src/api/bedrock-converse-stream.js";
 import { streamSimple as codex } from "../core/ai/src/api/openai-codex-responses.js";
 import { readRetryAfterMs, retryProviderRequest } from "../core/ai/src/utils/provider-retry.js";
@@ -252,6 +253,104 @@ test("Anthropic hosted prices require the direct API route and verified US reque
   const oauth = await anthropicHostedResponse(frames, {credentials:{...session, apiKey:"synthetic-sk-ant-oat"}});
   assert.equal(oauth.usage.cost.serverToolCost, undefined);
   assert.equal(footerLabel(oauth), "sub+?");
+});
+
+const googleResponseId = "synthetic-gemini-hosted-response";
+const googleBaseUsage = {promptTokenCount:12, candidatesTokenCount:3, totalTokenCount:15, cachedContentTokenCount:0};
+const urlContext = {urlContext:{}};
+const googleSearch = {googleSearch:{}};
+const urlContextMetadata = {urlMetadata:[{retrievedUrl:"https://example.invalid/synthetic-url", urlRetrievalStatus:"URL_RETRIEVAL_STATUS_SUCCESS"}]};
+const googleUrlUsage = {toolUsePromptTokenCount:1000, toolUsePromptTokensDetails:[{modality:"TEXT", tokenCount:1000}], totalTokenCount:1015};
+const googleFinish = {finishReason:"STOP", content:{role:"model", parts:[{text:"Fixture answer"}]}};
+const googleChunk = (candidate, usageMetadata, responseId = googleResponseId) => ({responseId, candidates:candidate ? [{index:0, ...candidate}] : [], usageMetadata});
+const groundingMetadata = {webSearchQueries:["synthetic one", "synthetic two", "synthetic one", ""],
+  groundingChunks:[{web:{uri:"https://example.invalid/synthetic-source", title:"Fixture"}}], groundingSupports:[{groundingChunkIndices:[0]}]};
+const googleRoutes = [
+  {request:google, provider:"google", api:"google-generative-ai", origin:"https://generativelanguage.googleapis.com", basePath:"/v1beta"},
+  {request:vertex, provider:"google-vertex", api:"google-vertex", origin:"https://aiplatform.googleapis.com", basePath:""},
+];
+
+async function googleHostedResponse(t, route, frames, tools, id = "gemini-3.1-pro-preview") {
+  const fetch = t.mock.method(globalThis, "fetch", async (input, init) => {
+    const url = new URL(String(input.url ?? input));
+    assert.equal(url.origin, route.origin);
+    assert.ok(url.pathname.endsWith(":streamGenerateContent"));
+    assert.deepEqual(JSON.parse(init.body).tools ?? [], tools);
+    return new Response(frames.map(frame => `data: ${JSON.stringify(frame)}\n\n`).join(""), {headers:{"content-type":"text/event-stream"}});
+  });
+  try {
+    const selected = model(id, route.provider, route.api, `${route.origin}${route.basePath}`);
+    const result = await route.request(selected, prompt, {...session, onPayload:params=>({...params, config:{...params.config, tools}})}).result();
+    assert.equal(fetch.mock.callCount(), 1, result.errorMessage);
+    return result;
+  } finally {
+    fetch.mock.restore();
+  }
+}
+
+test("Gemini native URL context prices the separately reported text tokens once across sparse chunks", async t => {
+  for (const route of googleRoutes) {
+    const result = await googleHostedResponse(t, route, [googleChunk({urlContextMetadata}, googleUrlUsage), googleChunk({urlContextMetadata}, googleUrlUsage),
+      googleChunk(googleFinish, {promptTokenCount:12, cachedContentTokenCount:0, candidatesTokenCount:3})], [urlContext]);
+    assert.equal(result.stopReason, "stop", result.errorMessage);
+    assert.equal(result.usage.input, 1012);
+    assert.equal(result.usage.totalTokens, 1015);
+    assert.deepEqual(result.usage.cost.serverToolUse, {google_tool_prompt_tokens:1000, google_url_context_input_tokens:1000});
+    const replay = JSON.parse(JSON.stringify(result));
+    assert.equal(footerLabel(replay), "$~0.001015");
+    assert.equal(collectSessionCost([{type:"message", message:replay}, {type:"message", message:replay}]).formatted, "$~0.001015");
+  }
+});
+
+test("Gemini native search keeps only numeric distinct units and respects grounding source rules", async t => {
+  for (const route of googleRoutes) {
+    const result = await googleHostedResponse(t, route, [googleChunk({groundingMetadata}, googleBaseUsage),
+      googleChunk({...googleFinish, groundingMetadata})], [googleSearch]);
+    assert.equal(result.stopReason, "stop", result.errorMessage);
+    assert.deepEqual(result.usage.cost.serverToolUse, {google_search_queries:2, google_web_grounded_prompts:1});
+    assert.equal(result.usage.cost.googleGroundingUnit, "query");
+    assert.equal(result.usage.cost.serverToolCost, undefined);
+    assert.equal(footerLabel(result), "$~0.000015+?");
+    assert.doesNotMatch(JSON.stringify(result.usage), /synthetic two|https:\/\/example\.invalid/);
+
+    const noSources = {...groundingMetadata, groundingChunks:[], groundingSupports:[]};
+    const sourceFree = await googleHostedResponse(t, route, [googleChunk({...googleFinish, groundingMetadata:noSources}, googleBaseUsage)], [googleSearch], "gemini-2.5-flash");
+    assert.equal(sourceFree.usage.cost.googleGroundingUnit, "grounded-prompt");
+    assert.equal(sourceFree.usage.cost.serverToolUse.google_search_queries, 2);
+    assert.equal(footerLabel(sourceFree), route.provider === "google-vertex" ? "$~0.000015" : "$~0.000015+?");
+    const staleEmpty = await googleHostedResponse(t, route, [googleChunk({groundingMetadata:noSources}, googleBaseUsage),
+      googleChunk(googleFinish)], [googleSearch]);
+    assert.equal(staleEmpty.usage.cost.serverToolUse.google_web_grounded_prompts, undefined);
+    assert.equal(footerLabel(staleEmpty), "$~0.000015+?");
+  }
+});
+
+test("Gemini hosted accounting isolates mixed, foreign and interrupted evidence", async t => {
+  const [developer] = googleRoutes;
+  const usage = {...googleBaseUsage, ...googleUrlUsage};
+  const mixed = await googleHostedResponse(t, developer, [googleChunk({...googleFinish, urlContextMetadata, groundingMetadata}, usage)], [urlContext, googleSearch]);
+  assert.equal(mixed.usage.input, 12);
+  assert.equal(mixed.usage.cost.serverToolUse.google_tool_prompt_tokens, 1000);
+  assert.equal(footerLabel(mixed), "$~0.000015+?");
+  const unverifiable = await googleHostedResponse(t, developer, [googleChunk({...googleFinish, urlContextMetadata},
+    {...usage, toolUsePromptTokensDetails:[{modality:"AUDIO", tokenCount:1000}]})], [urlContext]);
+  assert.equal(unverifiable.usage.input, 12);
+  assert.equal(footerLabel(unverifiable), "$~0.000015+?");
+  const foreign = await googleHostedResponse(t, developer, [googleChunk({}, googleBaseUsage),
+    googleChunk({...googleFinish, urlContextMetadata, groundingMetadata}, usage, "unrelated-google-response"), googleChunk(googleFinish)], [urlContext]);
+  assert.equal(foreign.responseId, googleResponseId);
+  assert.equal(foreign.usage.cost.serverToolUse, undefined);
+  assert.equal(footerLabel(foreign), "$~0.000015");
+  const stopped = await googleHostedResponse(t, developer, [googleChunk({urlContextMetadata}, usage)], [urlContext]);
+  assert.equal(stopped.stopReason, "error");
+  assert.equal(stopped.usage.input, 1012);
+  assert.equal(footerLabel(stopped), "$~0.001015+?");
+  const sparseBase = await googleHostedResponse(t, developer, [googleChunk({...googleFinish, urlContextMetadata}, googleUrlUsage)], [urlContext]);
+  assert.equal(sparseBase.usage.input, 1000);
+  assert.equal(footerLabel(sparseBase), "$~0.001000+?");
+  const gateway = await googleHostedResponse(t, {...developer, origin:"https://google.example.invalid"}, [googleChunk({...googleFinish, urlContextMetadata}, usage)], [urlContext]);
+  assert.equal(gateway.usage.input, 12);
+  assert.equal(footerLabel(gateway), "$~0.000015+?");
 });
 
 test("Responses billing and terminal identity survive malformed optional output", async () => {

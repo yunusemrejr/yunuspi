@@ -303,10 +303,12 @@ export interface Usage {
         tokenPriceMultiplierBasis?: string;
         serverToolCost?: number;
         serverToolPriceBasis?: string;
+        googleGroundingUnit?: "query" | "grounded-prompt";
         serverToolUse?: Partial<Record<
             "tool_search" | "tool_fetch" | "tool_image_search" | "web_search_call" | "file_search_call" |
             "image_generation_call" | "code_interpreter_call" | "shell_call" | "web_search_requests" |
-            "web_fetch_requests" | "code_execution_requests" | "web_search_successes", number>>;
+            "web_fetch_requests" | "code_execution_requests" | "web_search_successes" | "google_tool_prompt_tokens" |
+            "google_url_context_input_tokens" | "google_search_queries" | "google_web_grounded_prompts", number>>;
     };
 }
 export type StopReason = "pending" | "stop" | "length" | "toolUse" | "error" | "aborted" | "deferred";
