@@ -30,14 +30,25 @@ export interface BackgroundWorkListContext {
 
 export type BackgroundWorkPurpose = "automatic" | "explicit";
 
+export interface BackgroundWorkTerminalOutcome extends BackgroundWorkItem {
+	status: "completed" | "failed" | "killed";
+	exitCode?: number;
+}
+
 export interface BackgroundWorkProvider {
 	name: string;
 	listActiveWork(context?: BackgroundWorkListContext): readonly BackgroundWorkItem[];
 	wakeChannels?: readonly string[];
 	reconcile?(context: BackgroundWorkReconcileContext): void;
+	/** Exact, session-owned status after the provider commits its terminal task state. */
+	lookupTerminalWork?(target: BackgroundWorkItem): BackgroundWorkTerminalOutcome | undefined;
 }
 
 export interface RegisteredBackgroundWorkItem extends BackgroundWorkItem {
+	provider: string;
+}
+
+export interface RegisteredBackgroundWorkOutcome extends Omit<BackgroundWorkTerminalOutcome, "sessionId"> {
 	provider: string;
 }
 
@@ -87,7 +98,7 @@ function validateProvider(value: unknown): BackgroundWorkProvider {
 		throw new Error("Background-work provider must be an object.");
 	}
 	const provider = value as Record<string, unknown>;
-	const unknownFields = Object.keys(provider).filter((key) => !["name", "listActiveWork", "wakeChannels", "reconcile"].includes(key));
+	const unknownFields = Object.keys(provider).filter((key) => !["name", "listActiveWork", "wakeChannels", "reconcile", "lookupTerminalWork"].includes(key));
 	if (unknownFields.length > 0) throw new Error(`Background-work provider has unknown fields: ${unknownFields.join(", ")}.`);
 	const name = validateString(provider.name, "Background-work provider name", MAX_PROVIDER_NAME_LENGTH);
 	if (typeof provider.listActiveWork !== "function") {
@@ -95,6 +106,9 @@ function validateProvider(value: unknown): BackgroundWorkProvider {
 	}
 	if (provider.reconcile !== undefined && typeof provider.reconcile !== "function") {
 		throw new Error(`Background-work provider '${name}' reconcile must be a function when provided.`);
+	}
+	if (provider.lookupTerminalWork !== undefined && typeof provider.lookupTerminalWork !== "function") {
+		throw new Error(`Background-work provider '${name}' lookupTerminalWork must be a function when provided.`);
 	}
 	if (provider.wakeChannels !== undefined) {
 		if (!Array.isArray(provider.wakeChannels)) {
@@ -160,6 +174,35 @@ export function listBackgroundWorkWakeChannels(): readonly string[] {
 		for (const channel of provider.wakeChannels ?? []) channels.add(channel);
 	}
 	return [...channels];
+}
+
+function readTerminalWork(provider: BackgroundWorkProvider, { id, sessionId }: BackgroundWorkItem): RegisteredBackgroundWorkOutcome | undefined {
+	const outcome = provider.lookupTerminalWork?.({ id, sessionId });
+	if (outcome === undefined) return undefined;
+	if (!outcome || outcome.id !== id || outcome.sessionId !== sessionId ||
+		(outcome.status !== "completed" && outcome.status !== "failed" && outcome.status !== "killed") ||
+		(outcome.exitCode !== undefined && !Number.isSafeInteger(outcome.exitCode))) {
+		throw new Error(`Background-work provider '${provider.name}' returned an invalid terminal outcome.`);
+	}
+	return { provider: provider.name, id, status: outcome.status,
+		...(outcome.exitCode !== undefined ? { exitCode: outcome.exitCode } : {}) };
+}
+
+export function lookupTerminalBackgroundWork(target: BackgroundWorkItem): RegisteredBackgroundWorkOutcome[] {
+	const outcomes: RegisteredBackgroundWorkOutcome[] = [];
+	for (const provider of listBackgroundWorkProviders()) {
+		const outcome = readTerminalWork(provider, target);
+		if (outcome) outcomes.push(outcome);
+	}
+	return outcomes;
+}
+
+/** Keep a live wait bound to the registration that listed its task. */
+export function bindTerminalBackgroundWork(target: RegisteredBackgroundWorkItem): (() => RegisteredBackgroundWorkOutcome | undefined) | undefined {
+	const providers = registry().providers;
+	const provider = providers.get(target.provider);
+	if (!provider?.lookupTerminalWork) return undefined;
+	return () => providers.get(target.provider) === provider ? readTerminalWork(provider, target) : undefined;
 }
 
 /** Reconcile and snapshot active provider work owned by one exact Pi session. */

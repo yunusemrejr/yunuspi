@@ -1,6 +1,5 @@
 import { collectSessionCost, collectSessionMetrics, collectAuxiliaryModelUsage } from "../../../core/session-accounting.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { isFlatPlanProvider } from "@yunuspi/ai";
 import { sanitizeDisplayText, truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@yunuspi/tui";
 import { areExperimentalFeaturesEnabled } from "../../../core/experimental.js";
 import { theme } from "../theme/theme.js";
@@ -146,12 +145,8 @@ export class FooterComponent {
             snapshot = { manager, revision, entries: manager.getEntries(), name: manager.getSessionName() };
             this.measurements = canCache ? snapshot : undefined;
         }
-        const usingSubscription = state.model
-            ? isFlatPlanProvider(state.model.provider) || this.session.modelRuntime.isUsingSubscription(state.model.provider)
-            : false;
-        if (snapshot.costLabel === undefined || snapshot.billing !== usingSubscription) {
-            snapshot.billing = usingSubscription;
-            snapshot.costLabel = collectSessionCost(snapshot.entries, usingSubscription).formatted;
+        if (snapshot.costLabel === undefined) {
+            snapshot.costLabel = collectSessionCost(snapshot.entries).formatted;
         }
         if (this.expanded && !snapshot.usageTotals) snapshot.usageTotals = expandedUsage(snapshot.entries);
         const live = globalThis[metricsView];

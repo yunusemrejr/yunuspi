@@ -3,6 +3,7 @@ import test from "node:test";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { streamSimple } from "../core/ai/src/api/openai-responses.js";
 import { metaProvider } from "../core/ai/src/providers/meta.js";
 import { AuthStorage } from "../core/coding-agent/src/core/auth-storage.js";
@@ -12,6 +13,8 @@ import { SessionManager } from "../core/coding-agent/src/core/session-manager.js
 import { SettingsManager } from "../core/coding-agent/src/core/settings-manager.js";
 import { createAgentSession } from "../core/coding-agent/src/core/sdk.js";
 import { collectSessionCost } from "../core/coding-agent/src/core/session-accounting.js";
+import { FooterComponent } from "../core/coding-agent/src/modes/interactive/components/footer.js";
+import { closeHistoryReaders, readHistory } from "../desktop/history-reader.mjs";
 
 const origin = "https://api.meta.ai";
 const metered = "synthetic-metered-key";
@@ -50,6 +53,49 @@ async function verifyRotation(t, startsOnPlan) {
   assert.deepEqual(firstBilling, startsOnPlan ? ["subscription", "sub"] : ["metered", meteredLabel]);
   assert.deepEqual(secondBilling, startsOnPlan ? ["metered", meteredLabel] : ["subscription", "sub"]);
 }
+
+test("live SDK and passive history costs depend on dispatched requests rather than active credentials", {timeout:15_000}, async t => {
+  const {runtime, openSession, holdPost, calls} = await fixture(t);
+  t.after(closeHistoryReaders);
+  const session = await openSession();
+  const planOnly = await openSession();
+  const coreRoot = process.env.YUNUSPI_HISTORY_TEST_CORE_ROOT || fileURLToPath(new URL("../core/coding-agent", import.meta.url));
+  const footers = new Map([session, planOnly].map(target => [target, new FooterComponent(target)]));
+  async function labels(target) {
+    const manager = target.sessionManager;
+    const passive = await readHistory({directory:manager.getSessionDir(), sessionId:target.sessionId, cwd:manager.getCwd(), coreRoot});
+    return [target.getSessionStats().costLabel, passive.stats.costLabel, footers.get(target).readMeasurements(target.state).costLabel];
+  }
+  async function prompt(target, id, credential, completed = true) {
+    const post = holdPost();
+    const done = target.prompt("Synthetic request.");
+    try {
+      assert.equal(await committed(post, done), credential);
+    } finally {
+      post.finish.resolve(response(id, "Synthetic answer.", completed));
+    }
+    await done;
+  }
+
+  assert.equal(runtime.isUsingSubscription("meta"), true);
+  const empty = await labels(session);
+  await runtime.setRuntimeApiKey("meta", metered);
+  await prompt(session, "metered-incomplete", metered, false);
+  const incomplete = session.sessionManager.getEntries().find(entry => entry.message?.role === "assistant").message;
+  assert.equal(incomplete.usage.cost.billing, "metered");
+  assert.equal(incomplete.usage.totalTokens, 0);
+  await runtime.removeRuntimeApiKey("meta");
+  assert.equal(runtime.isUsingSubscription("meta"), true);
+  const unpriced = await labels(session);
+  await prompt(planOnly, "plan-only", subscription);
+  const plan = await labels(planOnly);
+  await prompt(session, "plan-after-incomplete", subscription);
+  const mixed = await labels(session);
+  assert.equal(calls(), 3);
+  assert.deepEqual({empty, unpriced, plan, mixed}, {
+    empty:["$?", "$?", "$?"], unpriced:["$?", "$?", "$?"], plan:["sub", "sub", "sub"], mixed:["sub+?", "sub+?", "sub+?"],
+  });
+});
 
 test("a direct SDK request with an explicit API key records metered usage on an OAuth-configured runtime", {timeout:15_000}, async t => {
   const {runtime, model, holdPost, calls} = await fixture(t);
@@ -167,7 +213,7 @@ function committed(gate, done) {
   return Promise.race([gate.arrived.promise, done.then(() => assert.fail("request ended before dispatch"))]);
 }
 
-function response(id, text) {
+function response(id, text, completed = true) {
   const responseId = "synthetic-response-"+id;
   const item = {type:"message", id:"synthetic-item-"+id, role:"assistant", content:[]};
   const frames = text ? [
@@ -176,7 +222,7 @@ function response(id, text) {
     {type:"response.content_part.added", item_id:item.id, output_index:0, content_index:0, part:{type:"output_text", text:"", annotations:[]}},
     {type:"response.output_text.delta", item_id:item.id, output_index:0, content_index:0, delta:text},
   ] : [];
-  frames.push({
+  if (completed) frames.push({
     type:"response.completed",
     response:{id:responseId, status:"completed", output:[],
       usage:{input_tokens:12, output_tokens:3, total_tokens:15, input_tokens_details:{cached_tokens:0}}},

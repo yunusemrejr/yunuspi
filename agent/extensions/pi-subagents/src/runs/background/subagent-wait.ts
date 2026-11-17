@@ -42,11 +42,14 @@ import { addUsageCost } from "../../shared/cost-accounting.ts";
 import * as fs from "node:fs";
 import type { AgentToolResult } from "@yunuspi/agent-core";
 import {
+	bindTerminalBackgroundWork,
 	listBackgroundWorkWakeChannels,
+	lookupTerminalBackgroundWork,
 	snapshotBackgroundWork,
 	type BackgroundWorkPurpose,
 	type BackgroundWorkSnapshot,
 	type RegisteredBackgroundWorkItem,
+	type RegisteredBackgroundWorkOutcome,
 } from "../../api/background-work.ts";
 import { formatAsyncRunList, listAsyncRuns, type AsyncRunSummary } from "./async-status.ts";
 import {
@@ -365,6 +368,15 @@ function result(text: string, isError = false, completions?: WaitCompletion[]): 
 	};
 }
 
+function providerOutcomeResult(outcome: RegisteredBackgroundWorkOutcome, waitMs?: number): AgentToolResult<Details> {
+	const waited = waitMs === undefined ? "" : `Waited ${formatDuration(waitMs)}. `;
+	const exit = outcome.exitCode === undefined ? "" : ` (exit ${outcome.exitCode})`;
+	return {
+		content: [{ type: "text", text: `${waited}Background task "${outcome.id}" ${outcome.status}${exit}.` }],
+		details: { mode: "management", results: [], providerOutcome: outcome },
+	};
+}
+
 function formatCompletionRecovery(completions: WaitCompletion[] | undefined): string {
 	const lines = (completions ?? []).flatMap((completion) =>
 		(completion.results ?? []).flatMap((child) => formatTimeoutRecoveryLines(child.timeoutRecovery)));
@@ -560,9 +572,11 @@ export async function waitForSubagents(
 	if (deps.enabled === false) {
 		return result("bg_wait is disabled by config.waitTool or PI_SUBAGENT_WAIT_TOOL_ENABLED; returning immediately without blocking background work. Active work keeps going, and you can inspect subagents with subagent({ action: \"status\" }) or rely on completion notifications.");
 	}
-	if (!deps.state.currentSessionId) {
+	const sessionId = deps.state.currentSessionId;
+	if (!sessionId) {
 		return result("bg_wait requires an active session identity to scope background work safely.", true);
 	}
+	if (signal?.aborted) return result("Wait aborted before observing background work.", true);
 
 	const now = deps.now ?? Date.now;
 	const pollIntervalMs = Math.max(MIN_POLL_INTERVAL_MS, deps.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
@@ -582,6 +596,7 @@ export async function waitForSubagents(
 	let foreground: ForegroundResumeRun[];
 	let providerSnapshot: BackgroundWorkSnapshot;
 	let providerTarget: RegisteredBackgroundWorkItem | undefined;
+	const allowTerminalLookup = !params.nonBlocking && !deps.backgroundWork && (deps.backgroundWorkPurpose ?? "explicit") === "explicit";
 	try {
 		active = activeRunsForSession(params, deps);
 		foreground = activeDetachedForegroundRuns(params, deps);
@@ -620,6 +635,15 @@ export async function waitForSubagents(
 		active = selected?.kind === "async" ? [selected.run] : [];
 		if (!selected) {
 			const items = matchProviderItems(providerSnapshot.items, params.id);
+			if (allowTerminalLookup && !items.some((item) => item.id === params.id)) {
+				try {
+					const terminal = lookupTerminalBackgroundWork({ id: params.id, sessionId });
+					if (terminal.length === 1) return providerOutcomeResult(terminal[0]!);
+					if (terminal.length > 1) return result(`Background task id "${params.id}" matched multiple terminal providers.`, true);
+				} catch (error) {
+					return result(error instanceof Error ? error.message : String(error), true);
+				}
+			}
 			if (items.length > 1) {
 				return result(`Ambiguous background work id prefix "${params.id}" matched ${items.length} provider items: ${items.map((item) => item.id).join(", ")}. Pass a longer id.`, true);
 			}
@@ -631,6 +655,7 @@ export async function waitForSubagents(
 		providerSnapshot = targetProviderItems(providerSnapshot, providerTarget);
 	}
 
+	const readProviderOutcome = allowTerminalLookup && providerTarget ? bindTerminalBackgroundWork(providerTarget) : undefined;
 	let providerActive = providerSnapshot.items;
 	if (active.length === 0 && providerActive.length === 0) {
 		return result(params.id
@@ -668,7 +693,8 @@ export async function waitForSubagents(
 		if (signal?.aborted) {
 			return result(`Wait aborted after ${formatDuration(now() - startedAt)}. Still active: ${stillActive}.`, true);
 		}
-		if (now() - startedAt >= timeoutMs) {
+		const remainingMs = timeoutMs - (now() - startedAt);
+		if (remainingMs <= 0) {
 			return windowElapsedResult(
 				`Wait window elapsed after ${formatDuration(timeoutMs)} with ${activeInitialRuns.length} async run(s) and ${activeInitialProviderItems.length} provider item(s) still active: ${stillActive}. The work keeps going; call bg_wait again or inspect subagent status.`,
 				activeInitialRuns.map((run) => run.id),
@@ -676,7 +702,8 @@ export async function waitForSubagents(
 			);
 		}
 		try {
-			await waitForWake(pollIntervalMs, signal, deps);
+			await waitForWake(Math.min(pollIntervalMs, remainingMs), signal, deps);
+			if (signal?.aborted) continue;
 			if (initialAsyncIds.size > 0) {
 				active = activeRunsForSession(waitParams, deps);
 				attention = active.filter((run) => initialAsyncIds.has(run.id) && needsAttention(run));
@@ -702,6 +729,11 @@ export async function waitForSubagents(
 	const activeProviderIds = new Set(providerActive.map(backgroundWorkIdentity));
 	const providerFinishedCount = [...initialProviderIds].filter((id) => !activeProviderIds.has(id)).length;
 	try {
+		if (readProviderOutcome && providerFinishedCount === 1) {
+			const outcome = readProviderOutcome();
+			if (outcome) return providerOutcomeResult(outcome, now() - startedAt);
+			return result(`Background task "${providerTarget!.id}" left the active set, but its terminal outcome could not be confirmed.`, true);
+		}
 		const allNow = runsForIds(initialAsyncIds, deps);
 		const terminal = allNow.filter((run) => !ACTIVE_STATES.includes(run.state) && initialAsyncIds.has(run.id));
 		finishedAsyncCount = terminal.length;

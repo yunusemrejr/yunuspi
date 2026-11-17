@@ -154,6 +154,7 @@ export class DefaultResourceLoader {
     appendSystemPrompt;
     appendSystemPromptSourcePaths;
     lastSkillPaths;
+    pendingSkillMetadata;
     extensionSkillSourceInfos;
     extensionPromptSourceInfos;
     extensionThemeSourceInfos;
@@ -237,6 +238,8 @@ export class DefaultResourceLoader {
         return this.appendSystemPromptSourcePaths.map((path) => ({ path }));
     }
     extendResources(paths) {
+        const metadataCache = this.pendingSkillMetadata;
+        this.pendingSkillMetadata = undefined;
         const skillPaths = this.normalizeExtensionPaths(paths.skillPaths ?? []);
         const promptPaths = this.normalizeExtensionPaths(paths.promptPaths ?? []);
         const themePaths = this.normalizeExtensionPaths(paths.themePaths ?? []);
@@ -251,7 +254,7 @@ export class DefaultResourceLoader {
         }
         if (skillPaths.length > 0) {
             this.lastSkillPaths = this.mergePaths(this.lastSkillPaths, skillPaths.map((entry) => entry.path));
-            this.updateSkillsFromPaths(this.lastSkillPaths, this.resourceMetadataByPath);
+            this.updateSkillsFromPaths(this.lastSkillPaths, this.resourceMetadataByPath, metadataCache);
         }
         if (promptPaths.length > 0) {
             this.lastPromptPaths = this.mergePaths(this.lastPromptPaths, promptPaths.map((entry) => entry.path));
@@ -270,6 +273,7 @@ export class DefaultResourceLoader {
         return this.loadCurrentExtensionSet({ includeInlineFactories: true });
     }
     async reload(options) {
+        this.pendingSkillMetadata = undefined;
         resetTimings("extensions");
         if (this.loaded) {
             clearExtensionCache();
@@ -340,7 +344,11 @@ export class DefaultResourceLoader {
             ? this.mergePaths(cliEnabledSkills, this.additionalSkillPaths)
             : this.mergePaths([...cliEnabledSkills, ...enabledSkills], this.additionalSkillPaths);
         this.lastSkillPaths = skillPaths;
-        this.updateSkillsFromPaths(skillPaths, metadataByPath);
+        // Extension discovery runs after this initial catalog is available.
+        // Its one follow-up pass may reuse only unchanged parsed metadata.
+        const skillMetadata = this.extensionsResult.extensions.some(extension => extension.handlers.has("resources_discover")) ? new Map() : undefined;
+        this.updateSkillsFromPaths(skillPaths, metadataByPath, skillMetadata);
+        this.pendingSkillMetadata = skillMetadata;
         for (const p of this.additionalSkillPaths) {
             if (isLocalPath(p)) {
                 const resolved = this.resolveResourcePath(p);
@@ -506,7 +514,7 @@ export class DefaultResourceLoader {
             };
         });
     }
-    updateSkillsFromPaths(skillPaths, metadataByPath) {
+    updateSkillsFromPaths(skillPaths, metadataByPath, metadataCache) {
         let skillsResult;
         if (this.noSkills && skillPaths.length === 0) {
             skillsResult = { skills: [], diagnostics: [] };
@@ -517,6 +525,7 @@ export class DefaultResourceLoader {
                 agentDir: this.agentDir,
                 skillPaths,
                 includeDefaults: false,
+                metadataCache,
             });
         }
         const resolvedSkills = this.skillsOverride ? this.skillsOverride(skillsResult) : skillsResult;

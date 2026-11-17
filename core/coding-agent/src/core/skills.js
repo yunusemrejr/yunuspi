@@ -24,47 +24,49 @@ function readAt(fd, buffer, offset, length, position) {
     return total;
 }
 
+function sameSkillRevision(before, after) {
+    return after.isFile() && before.dev === after.dev && before.ino === after.ino &&
+        before.size === after.size && before.mtimeNs === after.mtimeNs && before.ctimeNs === after.ctimeNs;
+}
+
 /** Locate the same first closing marker as parseFrontmatter before decoding
  * the metadata. Catalog discovery never uses the Markdown body. */
-function readSkillFrontmatter(filePath) {
-    return withRegularResourceFile(filePath, (fd, initial) => {
-        const size = Number(initial.size);
-        const buffer = Buffer.allocUnsafe(Math.min(SKILL_METADATA_CHUNK_BYTES, size) + 3);
-        let overlap = 0;
-        let markerStart = 3;
-        for (let position = 0; position < size;) {
-            const count = readAt(fd, buffer, overlap, Math.min(SKILL_METADATA_CHUNK_BYTES, size - position), position);
-            if (count === 0) break;
-            const block = buffer.subarray(0, overlap + count);
-            if (position === 0) {
-                const bom = block.subarray(0, UTF8_BOM.length).equals(UTF8_BOM) ? UTF8_BOM.length : 0;
-                if (!block.subarray(bom, bom + FRONTMATTER_OPEN.length).equals(FRONTMATTER_OPEN)) return "";
-                markerStart = bom + 3;
-            }
-            const from = Math.max(0, markerStart - position + overlap);
-            const lf = block.indexOf("\n---", from);
-            const cr = block.indexOf("\r---", from);
-            const marker = lf === -1 ? cr : cr === -1 ? lf : Math.min(lf, cr);
-            if (marker !== -1) {
-                const end = marker + 4;
-                if (position === 0) return block.toString("utf8", 0, end);
-                // A long valid header keeps its exact bytes without keeping
-                // every scanned block of a potentially unclosed header.
-                const header = Buffer.allocUnsafe(position - overlap + end);
-                const copied = readAt(fd, header, 0, header.length, 0);
-                const after = fstatSync(fd, { bigint: true });
-                if (copied !== header.length || after.size !== initial.size ||
-                    after.mtimeNs !== initial.mtimeNs || after.ctimeNs !== initial.ctimeNs) {
-                    throw new Error("Skill metadata changed while reading");
-                }
-                return header.toString("utf8");
-            }
-            overlap = Math.min(block.length, 3);
-            buffer.copyWithin(0, block.length - overlap, block.length);
-            position += count;
+function readSkillFrontmatter(fd, initial) {
+    const size = Number(initial.size);
+    const buffer = Buffer.allocUnsafe(Math.min(SKILL_METADATA_CHUNK_BYTES, size) + 3);
+    let overlap = 0;
+    let markerStart = 3;
+    for (let position = 0; position < size;) {
+        const count = readAt(fd, buffer, overlap, Math.min(SKILL_METADATA_CHUNK_BYTES, size - position), position);
+        if (count === 0) break;
+        const block = buffer.subarray(0, overlap + count);
+        if (position === 0) {
+            const bom = block.subarray(0, UTF8_BOM.length).equals(UTF8_BOM) ? UTF8_BOM.length : 0;
+            if (!block.subarray(bom, bom + FRONTMATTER_OPEN.length).equals(FRONTMATTER_OPEN)) return "";
+            markerStart = bom + 3;
         }
-        return "";
-    });
+        const from = Math.max(0, markerStart - position + overlap);
+        const lf = block.indexOf("\n---", from);
+        const cr = block.indexOf("\r---", from);
+        const marker = lf === -1 ? cr : cr === -1 ? lf : Math.min(lf, cr);
+        if (marker !== -1) {
+            const end = marker + 4;
+            if (position === 0) return block.toString("utf8", 0, end);
+            // A long valid header keeps its exact bytes without keeping
+            // every scanned block of a potentially unclosed header.
+            const header = Buffer.allocUnsafe(position - overlap + end);
+            const copied = readAt(fd, header, 0, header.length, 0);
+            const after = fstatSync(fd, { bigint: true });
+            if (copied !== header.length || !sameSkillRevision(initial, after)) {
+                throw new Error("Skill metadata changed while reading");
+            }
+            return header.toString("utf8");
+        }
+        overlap = Math.min(block.length, 3);
+        buffer.copyWithin(0, block.length - overlap, block.length);
+        position += count;
+    }
+    return "";
 }
 
 function toPosixPath(p) {
@@ -138,7 +140,7 @@ export function loadSkillsFromDir(options) {
     const { dir, source } = options;
     return loadSkillsFromDirInternal(dir, source, true);
 }
-function loadSkillsFromDirInternal(dir, source, includeRootFiles, ignoreMatcher, rootDir, visited = new Set()) {
+function loadSkillsFromDirInternal(dir, source, includeRootFiles, metadataCache, ignoreMatcher, rootDir, visited = new Set()) {
     const skills = [];
     const diagnostics = [];
     if (!existsSync(dir)) {
@@ -179,7 +181,7 @@ function loadSkillsFromDirInternal(dir, source, includeRootFiles, ignoreMatcher,
             if (!isFile || ig.ignores(relPath)) {
                 continue;
             }
-            const result = loadSkillFromFile(fullPath, source);
+            const result = loadSkillFromFile(fullPath, source, metadataCache);
             if (result.skill) {
                 skills.push(result.skill);
             }
@@ -215,7 +217,7 @@ function loadSkillsFromDirInternal(dir, source, includeRootFiles, ignoreMatcher,
                 continue;
             }
             if (isDirectory) {
-                const subResult = loadSkillsFromDirInternal(fullPath, source, false, ig, root, visited);
+                const subResult = loadSkillsFromDirInternal(fullPath, source, false, metadataCache, ig, root, visited);
                 skills.push(...subResult.skills);
                 diagnostics.push(...subResult.diagnostics);
                 continue;
@@ -223,7 +225,7 @@ function loadSkillsFromDirInternal(dir, source, includeRootFiles, ignoreMatcher,
             if (!isFile || !includeRootFiles || !entry.name.endsWith(".md")) {
                 continue;
             }
-            const result = loadSkillFromFile(fullPath, source);
+            const result = loadSkillFromFile(fullPath, source, metadataCache);
             if (result.skill) {
                 skills.push(result.skill);
             }
@@ -238,28 +240,50 @@ function loadSkillsFromDirInternal(dir, source, includeRootFiles, ignoreMatcher,
     }
     return { skills, diagnostics };
 }
-function loadSkillFromFile(filePath, source) {
+function loadSkillFromFile(filePath, source, metadataCache) {
     const diagnostics = [];
     const isDeclaredSkill = basename(filePath) === "SKILL.md";
-    let rawContent;
-    try {
-        rawContent = readSkillFrontmatter(filePath);
-    }
-    catch (error) {
-        const message = error instanceof Error ? error.message : "failed to read skill file";
-        diagnostics.push({ type: "warning", message, path: filePath });
-        return { skill: null, diagnostics };
-    }
     let frontmatter;
-    try {
-        ({ frontmatter } = parseFrontmatter(rawContent));
-    }
-    catch (error) {
-        if (isDeclaredSkill) {
-            const message = error instanceof Error ? error.message : "failed to parse skill file";
-            diagnostics.push({ type: "warning", message, path: filePath });
+    const cached = metadataCache?.get(filePath);
+    if (cached) {
+        try {
+            const current = statSync(filePath, { bigint: true, throwIfNoEntry: false });
+            if (current && sameSkillRevision(cached.revision, current)) frontmatter = cached.frontmatter;
         }
-        return { skill: null, diagnostics };
+        catch { /* the normal descriptor read records the failure */ }
+    }
+    if (!frontmatter) {
+        let rawContent, revision;
+        try {
+            ({ rawContent, revision } = withRegularResourceFile(filePath, (fd, initial) => {
+                const rawContent = readSkillFrontmatter(fd, initial);
+                // Snapshot on the descriptor that provided the bytes, not on
+                // a pathname which could have been replaced during the read.
+                const revision = metadataCache && sameSkillRevision(initial, fstatSync(fd, { bigint: true })) ? initial : undefined;
+                return { rawContent, revision };
+            }));
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : "failed to read skill file";
+            diagnostics.push({ type: "warning", message, path: filePath });
+            return { skill: null, diagnostics };
+        }
+        try {
+            const parsed = parseFrontmatter(rawContent).frontmatter;
+            frontmatter = {
+                name: typeof parsed.name === "string" ? parsed.name : undefined,
+                description: typeof parsed.description === "string" ? parsed.description : undefined,
+                "disable-model-invocation": parsed["disable-model-invocation"] === true,
+            };
+        }
+        catch (error) {
+            if (isDeclaredSkill) {
+                const message = error instanceof Error ? error.message : "failed to parse skill file";
+                diagnostics.push({ type: "warning", message, path: filePath });
+            }
+            return { skill: null, diagnostics };
+        }
+        if (revision) metadataCache.set(filePath, { revision, frontmatter });
     }
     const description = frontmatter.description;
     const hasDescription = typeof description === "string" && description.trim() !== "";
@@ -399,7 +423,7 @@ function sameSkillContent(fileA, fileB) {
  * Returns skills and any validation diagnostics.
  */
 export function loadSkills(options) {
-    const { agentDir, skillPaths, includeDefaults } = options;
+    const { agentDir, skillPaths, includeDefaults, metadataCache } = options;
     // Resolve agentDir - if not provided, use default from config
     const resolvedCwd = resolvePath(options.cwd);
     const resolvedAgentDir = resolvePath(agentDir ?? getAgentDir());
@@ -449,8 +473,8 @@ export function loadSkills(options) {
         }
     }
     if (includeDefaults) {
-        addSkills(loadSkillsFromDirInternal(join(resolvedAgentDir, "skills"), "user", true));
-        addSkills(loadSkillsFromDirInternal(resolve(resolvedCwd, CONFIG_DIR_NAME, "skills"), "project", true));
+        addSkills(loadSkillsFromDirInternal(join(resolvedAgentDir, "skills"), "user", true, metadataCache));
+        addSkills(loadSkillsFromDirInternal(resolve(resolvedCwd, CONFIG_DIR_NAME, "skills"), "project", true, metadataCache));
     }
     const getSource = (resolvedPath) => {
         if (!includeDefaults) {
@@ -471,10 +495,10 @@ export function loadSkills(options) {
             const stats = statSync(resolvedPath);
             const source = getSource(resolvedPath);
             if (stats.isDirectory()) {
-                addSkills(loadSkillsFromDirInternal(resolvedPath, source, true));
+                addSkills(loadSkillsFromDirInternal(resolvedPath, source, true, metadataCache));
             }
             else if (stats.isFile() && resolvedPath.endsWith(".md")) {
-                const result = loadSkillFromFile(resolvedPath, source);
+                const result = loadSkillFromFile(resolvedPath, source, metadataCache);
                 if (result.skill) {
                     addSkills({ skills: [result.skill], diagnostics: result.diagnostics });
                 }

@@ -175,12 +175,55 @@ export function collectAuxiliaryModelUsage(entries) {
   return {rows:[...rows.values()], truncated, coveredSummaries};
 }
 
-export function collectSessionCost(entries, subscription = false, auxiliaryRequests = collectAuxiliaryModelUsage(entries), onRecoveryChange) {
+// A stable logical owner is independent of the union tree's representative.
+function createAliasIndex() {
+  const aliases = new Map(), groups = new Map();
+  const group = key => {
+    let item = groups.get(key);
+    if (!item) groups.set(key, item = { key, rank: 0 });
+    return item;
+  };
+  const resolve = alias => {
+    let item = aliases.get(alias);
+    if (!item) return undefined;
+    while (item.parent) {
+      if (item.parent.parent) item.parent = item.parent.parent;
+      item = item.parent;
+    }
+    return item.key;
+  };
+  return {
+    get: resolve,
+    *[Symbol.iterator]() {
+      for (const alias of aliases.keys()) yield [alias, resolve(alias)];
+    },
+    set(alias, key) {
+      aliases.set(alias, group(key));
+    },
+    merge(duplicate, key) {
+      const from = groups.get(duplicate);
+      if (!from) return;
+      const to = group(key);
+      if (from.rank > to.rank) {
+        to.parent = from;
+        from.key = key;
+        groups.set(key, from);
+      } else {
+        from.parent = to;
+        if (from.rank === to.rank) to.rank++;
+      }
+      groups.delete(duplicate);
+    },
+  };
+}
+// Keep the legacy second argument for positional compatibility. The session's
+// billing status comes from recorded requests, independent of the active model.
+export function collectSessionCost(entries, _legacySubscription = false, auxiliaryRequests = collectAuxiliaryModelUsage(entries), onRecoveryChange) {
   entries = Array.isArray(entries) ? entries.filter(entry => entry && typeof entry === "object") : [];
   const sessionId = entries[0]?.type === 'session' ? entries[0].id : undefined;
   const empty = () => ({reported:0, estimated:0, unknown:false, subscription:false, seen:false});
   const valid = n => typeof n === 'number' && Number.isFinite(n) && n >= 0;
-  const rows = new Map(), nodes = new Map(), aliases = new Map();
+  const rows = new Map(), nodes = new Map(), aliases = createAliasIndex();
   const retainedChildren = [];
   const retainedChildAnchors = new Map();
   const pending = new Set(), settled = new Set(), seenEntries = new Set(), responses = new Map();
@@ -224,7 +267,7 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
     for (const duplicate of keys) if (duplicate !== key && nodes.has(duplicate)) {
       nodes.set(key, mergeNode(nodes.get(key), nodes.get(duplicate), key));
       nodes.delete(duplicate);
-      for (const [alias, target] of aliases) if (target === duplicate) aliases.set(alias, key);
+      aliases.merge(duplicate, key);
     }
     for (const value of ids) aliases.set(value, key);
     return key;
@@ -378,18 +421,38 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
   // appear in both a workflow and a step; it is charged once for the session.
   for (const node of nodes.values()) node.nested = new Set([...node.nested].map(key => aliases.get(key) ?? key));
   const totals = new Map();
-  const totalFor = (key, visiting = new Set()) => {
+  const totalFor = key => {
     if (totals.has(key)) return totals.get(key);
-    if (visiting.has(key)) { truncated = true; return 0; }
-    const node = nodes.get(key);
-    if (!node) return 0;
-    visiting.add(key);
-    const nested = [...node.nested].reduce((sum,id)=>sum+totalFor(id,visiting),0);
-    visiting.delete(key);
-    const own = node.own?.seen ? node.own.reported + node.own.estimated : 0;
-    const total = Math.max(node.inclusive ?? 0, own + nested);
-    totals.set(key,total);
-    return total;
+    const root = nodes.get(key);
+    if (!root) return 0;
+    const frameFor = (id, node) => ({ id, node, edges: node.nested.values(), nested: 0 });
+    const stack = [frameFor(key, root)];
+    const visiting = new Set([key]);
+    // Shallow receipts can form deep chains once their child identities join.
+    while (stack.length) {
+      const frame = stack.at(-1);
+      const edge = frame.edges.next();
+      if (!edge.done) {
+        const id = edge.value;
+        if (totals.has(id)) frame.nested += totals.get(id);
+        else if (visiting.has(id)) truncated = true;
+        else {
+          const child = nodes.get(id);
+          if (child) {
+            visiting.add(id);
+            stack.push(frameFor(id, child));
+          }
+        }
+        continue;
+      }
+      const own = frame.node.own?.seen ? frame.node.own.reported + frame.node.own.estimated : 0;
+      const total = Math.max(frame.node.inclusive ?? 0, own + frame.nested);
+      totals.set(frame.id, total);
+      visiting.delete(frame.id);
+      stack.pop();
+      if (stack.length) stack.at(-1).nested += total;
+    }
+    return totals.get(key);
   };
   let childPending = 0;
   for (const node of nodes.values()) {
@@ -415,8 +478,6 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
     else addRow('children',node.route,evidence);
   }
   const evidence = mergeCostEvidence(mergeCostEvidence(main,auxiliary),children);
-  // Current selection alone is not proof that this session used a subscription.
-  evidence.subscription ||= subscription && !evidence.seen;
   evidence.unknown ||= pending.size > 0 || truncated;
   const total = evidence.reported + evidence.estimated;
   const amount = total > 0 && total < 0.000001 ? total.toExponential(3) : total > 0 && total < 1 ? total.toFixed(6) : total.toFixed(3);
@@ -426,7 +487,7 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
 
 /** Shared by live RPC and the offline desktop history reader. The whole
  * transcript counts toward spend, including branches absent from the page. */
-export function collectSessionStats(entries, subscription = false) {
+export function collectSessionStats(entries) {
   const counts = {userMessages:0, assistantMessages:0, toolCalls:0, toolResults:0, totalMessages:0};
   const usageTotals = createUsageTotals();
   const auxiliaryRequests = collectAuxiliaryModelUsage(entries);
@@ -453,7 +514,7 @@ export function collectSessionStats(entries, subscription = false) {
     if (usage) addUsageToTotals(usageTotals, usage);
   }
   for (const row of auxiliaryRequests.rows) if (row.accountingOnly) addUsageToTotals(usageTotals, row.usage);
-  const accounting = collectSessionCost(entries, subscription, auxiliaryRequests);
+  const accounting = collectSessionCost(entries, undefined, auxiliaryRequests);
   const spent = row => row.reported + row.estimated;
   const byRoute = new Map();
   for (const row of accounting.rows) byRoute.set(row.route, (byRoute.get(row.route) ?? 0) + spent(row));
@@ -474,7 +535,7 @@ export function collectSessionMetrics(entries, live) {
  const auxiliaryRequests=collectAuxiliaryModelUsage(entries);
  entries=Array.isArray(entries)?entries.filter(e=>e&&typeof e==='object'):[];
  const m={responses:0,toolCalls:0,toolResults:0,errors:0,modelErrors:0,blocked:0,compactions:0,agents:0,agentFailures:0,agentsActive:0,agentsCompleted:0,agentsStopped:0,agentsPaused:0,agentOutcomeUnknown:0,workflows:0,workflowFailures:0,workflowsActive:0,workflowOutcomeUnknown:0,swarms:0,fusions:0,legacySwarms:0,legacyFusions:0,recoveries:0,tools:Object.create(null),skillsRead:[],skillsPartial:[],skillsRouted:[],input:0,output:0,cacheRead:0,cacheWrite:0,reasoning:0,childTokens:0,childRows:0,childRowsWithUsage:0,hooks:Object.create(null),hookCalls:0,hookExcluded:0,hookChanged:0,hookErrors:0,confirmDialogs:0,confirmWaitMs:0,trimmedChars:0,addedChars:0,telemetry:false,rawReturnedChars:0,uncachedInput:0,cachedReuse:0,noCacheTurns:0,noCacheInput:0,invalidationTurns:0,invalidationExcessTokens:0,abortedTelemetry:0,assistantTurns:0,perModel:Object.create(null),jev:{hits:0,cached:0,tokens:0,costUsd:0,bySite:Object.create(null)},span:{hits:0,cached:0,tokens:0,costUsd:0,shadow:0,present:0}};
- const calls=new Set(), results=new Set(), agents=new Map(), workflows=new Map(), segments=new Map(), activities=new Map(), read=new Set(), partial=new Set(), routed=new Set(), callInputs=new Map(), aliases=new Map(), groups=[],nativeGroups=new Set(),legacyFusions=[];
+ const calls=new Set(), results=new Set(), agents=new Map(), workflows=new Map(), segments=new Map(), activities=new Map(), read=new Set(), partial=new Set(), routed=new Set(), callInputs=new Map(), aliases=createAliasIndex(), groups=[],nativeGroups=new Set(),legacyFusions=[];
  const number=v=>Number.isFinite(v)&&v>=0?v:0;
  const addJevUsage=(site,hits,tokens,costUsd)=>{
   m.jev.tokens+=tokens;
@@ -578,7 +639,7 @@ export function collectSessionMetrics(entries, live) {
    let old=agents.get(key)||{};
    for(const duplicate of keys)if(duplicate!==key&&agents.has(duplicate)){
     const other=agents.get(duplicate);old={...other,...old,status:terminal.has(old.status)?old.status:terminal.has(other.status)?other.status:old.status??other.status,tokens:Math.max(old.tokens||0,other.tokens||0)};agents.delete(duplicate);
-    for(const [alias,target] of aliases)if(target===duplicate)aliases.set(alias,key);
+    aliases.merge(duplicate,key);
    }
    for(const id of ids)aliases.set(id,key);
    const tokens=['input','output','cacheRead','cacheWrite'].reduce((s,k)=>s+number(r.usage?.[k]),0);

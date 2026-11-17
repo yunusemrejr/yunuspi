@@ -18,6 +18,7 @@ import type { ThinkingLevel } from "./model-info.ts";
 import type { GlobalMissionIndexRecord, MissionRecord, MissionStoreConfig } from "../missions/types.ts";
 import type { ExtensionBindings } from "../runs/shared/extension-bindings.ts";
 import type { WorkflowChildPermitContext } from "./workflow-child-permit.ts";
+import type { RegisteredBackgroundWorkOutcome } from "../api/background-work.ts";
 
 // ============================================================================
 // Basic Types
@@ -1435,6 +1436,8 @@ export interface Details {
 	 * identity never reaches tool_result details.
 	 */
 	completions?: WaitCompletion[];
+	/** Terminal outcome of the task named by an explicit provider wait. */
+	providerOutcome?: RegisteredBackgroundWorkOutcome;
 	wait?: {
 		reason: "window_elapsed";
 		timedOut: true;

@@ -3205,12 +3205,10 @@ export class AgentSession {
      * actually billed across the session.
      */
     getSessionStats() {
-        const model = this.model;
-        const subscription = model ? isFlatPlanProvider(model.provider) || this.modelRuntime.isUsingSubscription(model.provider) : false;
         return {
             sessionFile: this.sessionFile,
             sessionId: this.sessionId,
-            ...collectSessionStats(this.sessionManager.getEntries(), subscription),
+            ...collectSessionStats(this.sessionManager.getEntries()),
             contextUsage: this.getContextUsage(),
         };
     }

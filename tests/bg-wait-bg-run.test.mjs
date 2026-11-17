@@ -93,6 +93,30 @@ test('bg work owned by another session is never waited on', async t => {
   assert.equal(f.polls(), 0);
 });
 
+test('a blocking wait never schedules a fallback poll past its deadline', async t => {
+  const f = fixture(t, [{ id: 'short-window', sessionId: SESSION }]);
+  const sleep = f.deps.sleep;
+  let pollMs;
+  f.deps.sleep = async ms => { pollMs = ms; await sleep(); };
+  const out = await waitForSubagents({ id: 'short-window', timeoutMs: 30 }, undefined, f.deps);
+  assert.equal(out.details.wait.timedOut, true);
+  assert.equal(pollMs, 30);
+});
+
+test('an active wait cannot attribute a terminal outcome from a replacement registration', async t => {
+  const item = { id: 'owned-task', sessionId: SESSION };
+  const f = fixture(t, [], () => {
+    const unregister = registerBackgroundWorkProvider({ name: 'replaceable', listActiveWork: () => [],
+      lookupTerminalWork: () => ({ ...item, status: 'completed', exitCode: 0 }) });
+    t.after(unregister);
+  });
+  t.after(registerBackgroundWorkProvider({ name: 'replaceable', listActiveWork: () => [item], lookupTerminalWork: () => undefined }));
+  const out = await waitForSubagents({ id: item.id }, undefined, f.deps);
+  assert.equal(out.isError, true);
+  assert.match(text(out), /terminal outcome could not be confirmed/);
+  assert.equal(out.details.providerOutcome, undefined);
+});
+
 test('an ambiguous bg work prefix and a non-blocking request on bg work both fail without waiting', async t => {
   const f = fixture(t, [{ id: 'be22aa', sessionId: SESSION }, { id: 'be22bb', sessionId: SESSION }]);
   const ambiguous = await waitForSubagents({ id: 'be22' }, undefined, f.deps);
@@ -140,7 +164,7 @@ test('a running bg_run task is listed as bg work in a UI session and bg_wait by 
 
   const out = await waitForSubagents({ id: taskId, timeoutMs: 30_000 }, undefined, { state: { currentSessionId: sessionFile }, asyncDirRoot: dir, resultsDir: path.join(dir, 'results') });
   assert.notEqual(out.isError, true, text(out));
-  assert.match(text(out), /done/);
+  assert.match(text(out), /completed \(exit 0\)/);
   assert.deepEqual(snapshotBackgroundWork(sessionFile).items, []);
 });
 
@@ -219,10 +243,32 @@ test('headless bg_wait joins a named finite shell task without making auto-drain
   const waited = execute('bg_wait', { id: taskId, timeoutMs: 5_000 }, () => entered.resolve());
   assert.equal(await Promise.race([waited.then(() => 'returned'), entered.promise.then(() => 'waiting')]), 'waiting');
   fs.writeFileSync(path.join(dir, 'release'), '');
-  assert.match(text(await waited), /done/);
+  const completed = await waited;
+  assert.match(text(completed), /completed \(exit 0\)/);
+  assert.deepEqual(completed.details.providerOutcome, { provider: 'bg_run', id: taskId, status: 'completed', exitCode: 0 });
   assert.equal(fs.readFileSync(path.join(dir, 'marker'), 'utf8'), 'done');
   assert.equal((await execute('bg_status', { taskId })).details.tasks[0].status, 'completed');
   assert.equal((await execute('bg_status', { taskId: service.details.task.id })).details.tasks[0].status, 'running');
+  const failed = await execute('bg_run', { command: 'while [ ! -e release-failure ]; do sleep 0.02; done; exit 19',
+    name: 'failure fixture', isAgent: false, notifyOnCompletion: false }, undefined, 'start-failure');
+  const failureId = failed.details.task.id;
+  const elapsed = await execute('bg_wait', { id: failureId, timeoutMs: 25 });
+  assert.equal(elapsed.details.wait.timedOut, true);
+  assert.equal(elapsed.details.providerOutcome, undefined);
+
+  const waitingForFailure = Promise.withResolvers();
+  const failedWait = execute('bg_wait', { id: failureId, timeoutMs: 5_000 }, () => waitingForFailure.resolve());
+  assert.equal(await Promise.race([failedWait.then(() => 'returned'), waitingForFailure.promise.then(() => 'waiting')]), 'waiting');
+  fs.writeFileSync(path.join(dir, 'release-failure'), '');
+  const observedFailure = await failedWait;
+  assert.match(text(observedFailure), /failed \(exit 19\)/);
+  assert.deepEqual(observedFailure.details.providerOutcome, { provider: 'bg_run', id: failureId, status: 'failed', exitCode: 19 });
+  assert.deepEqual((await execute('bg_wait', { id: failureId })).details.providerOutcome, observedFailure.details.providerOutcome);
+  assert.match(text(await waitForSubagents({ id: failureId }, undefined, {
+    state: { currentSessionId: path.join(dir, 'foreign-session.jsonl') }, asyncDirRoot: dir,
+  })), /No active run matched/);
+  await assert.rejects(tools.get('bg_wait').execute('pre-aborted-recovery', { id: failureId }, AbortSignal.abort(), undefined, ctx), /Wait aborted/);
+
   await lifecycle('session_shutdown');
   shutdown = true;
   assert.match(text(await execute('bg_logs', { taskId })), /retained fixture output/);

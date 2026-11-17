@@ -1,3 +1,4 @@
+import type { BigIntStats } from "node:fs";
 import type { ResourceDiagnostic } from "./diagnostics.ts";
 import { type SourceInfo } from "./source-info.ts";
 export interface SkillFrontmatter {
@@ -44,6 +45,11 @@ export declare function loadSkillsFromDir(options: LoadSkillsFromDirOptions): Lo
 /** The <available_skills> block alone, with the same capped descriptions the prompt carries. */
 export declare function formatSkillCatalogBlock(skills: Skill[]): string;
 export declare function formatSkillsForPrompt(skills: Skill[], fileReadTool?: "read" | "bash"): string;
+/** Parsed metadata only. Skill contents and collision decisions are not cached. */
+export type SkillMetadataCache = Map<string, {
+    revision: BigIntStats;
+    frontmatter: Pick<SkillFrontmatter, "name" | "description" | "disable-model-invocation">;
+}>;
 export interface LoadSkillsOptions {
     /** Working directory for project-local skills. */
     cwd: string;
@@ -53,6 +59,8 @@ export interface LoadSkillsOptions {
     skillPaths: string[];
     /** Include default skills directories. */
     includeDefaults: boolean;
+    /** Internal snapshot for a subsequent extension resource pass. */
+    metadataCache?: SkillMetadataCache;
 }
 /**
  * Load skills from all configured locations.

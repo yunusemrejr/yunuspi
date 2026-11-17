@@ -1,3 +1,10 @@
+## 0.56.27 — Accurate footer labels, retained job outcomes, and faster startup
+
+- Derive the footer's subscription label from recorded requests in live, terminal, and reopened sessions.
+- Join exact child identities with a disjoint-set index and evaluate deep cost graphs iteratively. Known charges still count once, and cycles keep the total partial.
+- Named headless waits return the outcome and known exit code of an owned shell task, including when it finished before the wait.
+- Reuse unchanged skill metadata on the first Lens catalogue bind. Edits, symlink changes, ignore rules, and explicit reloads still take effect.
+
 ## 0.56.26 — Billing credentials, child settlement, and faster edits
 
 - Attribute requests and native summaries to the billing mode of the credential used at dispatch, even when active credentials change before a response returns.

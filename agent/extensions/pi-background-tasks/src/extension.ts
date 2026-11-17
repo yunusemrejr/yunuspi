@@ -291,6 +291,12 @@ export default function backgroundTasksExtension(pi: ExtensionAPI): void {
         .filter((task) => task.ownerSessionId === ownerSessionId && task.status === "running" && task.service !== true)
         .map((task) => ({ id: task.id, sessionId: sessionKey }));
     },
+    lookupTerminalWork({ id, sessionId }) {
+      if (sessionId !== sessionKey) return undefined;
+      const task = registry.getTask(id);
+      if (!task || task.ownerSessionId !== ownerSessionId || task.status === "running" || task.service === true) return undefined;
+      return { id, sessionId, status: task.status, ...(typeof task.exitCode === "number" ? { exitCode: task.exitCode } : {}) };
+    },
   });
 
   const registerContinuationNotice = (ctx: ExtensionContext): void => {

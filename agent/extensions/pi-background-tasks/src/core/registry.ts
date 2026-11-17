@@ -812,6 +812,10 @@ export class BackgroundTaskRegistry {
     return [...this.tasks.values()];
   }
 
+  getTask(id: string): BgTask | undefined {
+    return this.tasks.get(id);
+  }
+
   snapshot(task: BgTask): BgTaskSnapshot {
     return snapshot(task);
   }

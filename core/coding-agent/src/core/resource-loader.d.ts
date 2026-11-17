@@ -155,6 +155,7 @@ export declare class DefaultResourceLoader implements ResourceLoader {
     private appendSystemPrompt;
     private appendSystemPromptSourcePaths;
     private lastSkillPaths;
+    private pendingSkillMetadata;
     private extensionSkillSourceInfos;
     private extensionPromptSourceInfos;
     private extensionThemeSourceInfos;

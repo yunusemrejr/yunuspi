@@ -2787,12 +2787,12 @@
       {
         "name": "bg",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 623
+        "line": 629
       },
       {
         "name": "bg-clear",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 657
+        "line": 663
       },
       {
         "name": "budget",
@@ -2867,7 +2867,7 @@
       {
         "name": "kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 712
+        "line": 718
       },
       {
         "name": "lens-allow-edit",
@@ -2922,7 +2922,7 @@
       {
         "name": "logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 680
+        "line": 686
       },
       {
         "name": "memory-prime",
@@ -3052,7 +3052,7 @@
       {
         "name": "tasks",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 649
+        "line": 655
       },
       {
         "name": "team",
@@ -3149,25 +3149,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 880,
+        "line": 886,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 837,
+        "line": 843,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 748,
+        "line": 754,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 809,
+        "line": 815,
         "kind": "literal"
       },
       {
@@ -3587,25 +3587,25 @@
       {
         "name": "bg_kill",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 880,
+        "line": 886,
         "kind": "literal"
       },
       {
         "name": "bg_logs",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 837,
+        "line": 843,
         "kind": "literal"
       },
       {
         "name": "bg_run",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 748,
+        "line": 754,
         "kind": "literal"
       },
       {
         "name": "bg_status",
         "source": "agent/extensions/pi-background-tasks/src/extension.ts",
-        "line": 809,
+        "line": 815,
         "kind": "literal"
       },
       {
