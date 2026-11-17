@@ -302,6 +302,23 @@ export const stream = (model, context, options) => {
             let thinkingBlock = null;
             let hasFinishReason = false;
             let createdAt;
+            const recordChunkUsage = (rawUsage, serviceTier, responseId) => {
+                const usage = parseChunkUsage(rawUsage, model, serviceTier, createdAt ?? dispatchedAt);
+                const previous = output.usage.cost;
+                const hadReported = previous.source === "provider-reported";
+                const reportsCost = usage.cost.source === "provider-reported";
+                if ((hadReported || reportsCost) && responseId && responseId !== output.responseId) return;
+                if (hadReported && !reportsCost) {
+                    // A later token snapshot can update the catalog estimate
+                    // while the same response keeps its actual provider bill.
+                    usage.cost = {
+                        ...usage.cost, estimatedTotal: usage.cost.total,
+                        total: previous.total, source: previous.source, complete: previous.complete,
+                        byok: previous.byok, upstreamInferenceCost: previous.upstreamInferenceCost,
+                    };
+                }
+                output.usage = usage;
+            };
             const toolCallBlocksByIndex = new Map();
             const toolCallBlocksById = new Map();
             const blocks = output.content;
@@ -453,13 +470,14 @@ export const stream = (model, context, options) => {
                     continue;
                 // OpenAI documents ChatCompletionChunk.id as the unique chat completion identifier,
                 // and each chunk in a streamed completion carries the same id.
-                output.responseId ||= chunk.id;
+                const responseId = typeof chunk.id === "string" && chunk.id ? chunk.id : undefined;
+                output.responseId ||= responseId;
                 if (tracksPriceTime) createdAt ??= providerCreatedMs(chunk.created);
                 if (typeof chunk.model === "string" && chunk.model.length > 0 && chunk.model !== model.id) {
                     output.responseModel ||= chunk.model;
                 }
                 if (chunk.usage) {
-                    output.usage = parseChunkUsage(chunk.usage, model, chunk.service_tier ?? options?.samplingParams?.service_tier, createdAt ?? dispatchedAt);
+                    recordChunkUsage(chunk.usage, chunk.service_tier ?? options?.samplingParams?.service_tier, responseId);
                 }
                 if (directDeepSeek && chunk.error) throw new Error(chunk.error.message || "DeepSeek stream returned an error");
                 const choice = Array.isArray(chunk.choices) ? chunk.choices[0] : undefined;
@@ -468,7 +486,7 @@ export const stream = (model, context, options) => {
                 // Fallback: some providers (e.g., Moonshot) return usage
                 // in choice.usage instead of the standard chunk.usage
                 if (!chunk.usage && choice.usage) {
-                    output.usage = parseChunkUsage(choice.usage, model, chunk.service_tier ?? options?.samplingParams?.service_tier, createdAt ?? dispatchedAt);
+                    recordChunkUsage(choice.usage, chunk.service_tier ?? options?.samplingParams?.service_tier, responseId);
                 }
                 if (choice.finish_reason) {
                     output.rawStopReason = choice.finish_reason;

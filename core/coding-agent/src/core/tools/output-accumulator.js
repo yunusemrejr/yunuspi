@@ -2,6 +2,7 @@ import { randomBytes } from "node:crypto";
 import { createWriteStream, unlink } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createShellOutputDecoder } from "@yunuspi/agent-core";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncateTail } from "./truncate.js";
 function defaultTempFilePath(prefix) {
     const id = randomBytes(8).toString("hex");
@@ -29,7 +30,7 @@ export class OutputAccumulator {
     maxBytes;
     maxRollingBytes;
     tempFilePrefix;
-    decoder = new TextDecoder();
+    decoder = createShellOutputDecoder();
     rawChunks = [];
     tailText = "";
     tailBytes = 0;
@@ -61,17 +62,12 @@ export class OutputAccumulator {
             ? Math.max(0, Math.floor((this.maxBytes - MIDDLE_OMISSION.length - 2) / 2)) : 0;
         this.maxCaptureBytes = options.maxCaptureBytes ?? DEFAULT_MAX_CAPTURE_BYTES;
     }
-    append(data) {
+    append(data, source) {
         if (this.finished) {
             throw new Error("Cannot append to a finished output accumulator");
         }
-        if (typeof data === "string") {
-            this.appendDecodedText(this.decoder.decode() + data);
-            data = Buffer.from(data, "utf8");
-        }
-        else {
-            this.appendDecodedText(this.decoder.decode(data, { stream: true }));
-        }
+        this.appendDecodedText(this.decoder.append(data, source));
+        if (typeof data === "string") data = Buffer.from(data, "utf8");
         this.totalRawBytes += data.length;
         if (this.tempFileStream || this.shouldUseTempFile()) {
             this.ensureTempFile();
@@ -99,7 +95,7 @@ export class OutputAccumulator {
             return;
         }
         this.finished = true;
-        this.appendDecodedText(this.decoder.decode());
+        this.appendDecodedText(this.decoder.finish());
         if (this.shouldUseTempFile()) {
             this.ensureTempFile();
         }

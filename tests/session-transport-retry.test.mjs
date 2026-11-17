@@ -12,6 +12,7 @@ import { streamSimple as codex } from "../core/ai/src/api/openai-codex-responses
 import { readRetryAfterMs, retryProviderRequest } from "../core/ai/src/utils/provider-retry.js";
 import { isContextOverflow } from "../core/ai/src/utils/overflow.js";
 import { isRetryableAssistantError, retryAssistantCall, usesProviderCooldown } from "../core/ai/src/utils/retry.js";
+import { collectSessionCost } from "../core/coding-agent/src/core/session-accounting.js";
 
 const prompt = { messages: [{ role: "user", content: [{ type: "text", text: "Fixture prompt" }], timestamp: 1 }] };
 const session = { retryOwner: "session", maxRetries: 2, apiKey: "synthetic-token" };
@@ -24,6 +25,73 @@ const sse = (res, frames) => {
   res.end(frames.map(frame => `data: ${typeof frame === "string" ? frame : JSON.stringify(frame)}\n\n`).join(""));
 };
 const responsesDone = { type: "response.completed", response: { id: "synthetic-response", status: "completed" } };
+
+const footerLabel = message => collectSessionCost([{type:"message", message}]).formatted;
+const fixtureSse = (origin, endpoint, frames) => async input => {
+  const url = new URL(typeof input === "string" ? input : input.url ?? input.href);
+  assert.equal(url.origin, origin);
+  assert.equal(url.pathname, endpoint);
+  return new Response([...frames, "[DONE]"].map(frame => `data: ${typeof frame === "string" ? frame : JSON.stringify(frame)}\n\n`).join(""),
+    {headers:{"content-type":"text/event-stream"}});
+};
+
+test("Responses billing and terminal identity survive malformed optional output", async () => {
+  const origin = "https://openrouter.ai";
+  const selected = model("fixture", "openrouter", "openai-responses", `${origin}/api/v1`);
+  const responseId = "synthetic-terminal-response";
+  const terminal = {id:responseId, usage:{input_tokens:12, output_tokens:3, total_tokens:15, cost:.125}};
+  const fixtures = [
+    {type:"response.failed", response:{...terminal, output:[null], status:"failed", error:{code:"fixture", message:"Fixture provider failure"}}, stop:"error"},
+    {type:"response.incomplete", response:{...terminal, output:{}, status:"incomplete", incomplete_details:{reason:"max_output_tokens"}}, stop:"length"},
+  ];
+  for (const {type, response, stop} of fixtures) {
+    const result = await openAIResponses(selected, prompt, {...session, fetch:fixtureSse(origin, "/api/v1/responses", [{type, response}])}).result();
+    assert.equal(result.responseId, responseId);
+    assert.equal(result.stopReason, stop);
+    assert.equal(result.usage.input, 12);
+    assert.equal(footerLabel(result), "$0.125000");
+    if (stop === "error") assert.match(result.errorMessage, /Fixture provider failure/);
+  }
+  const failure = {type:"response.failed", response:{id:responseId, status:"failed", error:{code:"fixture", message:"Fixture provider failure"}}};
+  const unpriced = await openAIResponses(selected, prompt, {...session, fetch:fixtureSse(origin, "/api/v1/responses", [failure])}).result();
+  assert.equal(unpriced.responseId, responseId);
+  assert.equal(unpriced.stopReason, "error");
+  assert.match(unpriced.errorMessage, /Fixture provider failure/);
+  assert.equal(footerLabel(unpriced), "$?");
+});
+
+test("Chat Completions retains authoritative OpenRouter prices across same-response token updates", async () => {
+  const origin = "https://openrouter.ai";
+  const selected = model("fixture", "openrouter", "openai-completions", `${origin}/api/v1`);
+  const id = "synthetic-usage-response";
+  const tokens = {prompt_tokens:12, completion_tokens:3};
+  const updatedTokens = {...tokens, prompt_tokens:18};
+  const priced = (usage, responseId = id) => ({id:responseId, choices:[], usage});
+  const choiceUsage = {id, choices:[{index:0, delta:{}, usage:updatedTokens}]};
+  const finish = {id, choices:[{index:0, delta:{content:"Fixture answer"}, finish_reason:"stop"}]};
+  const fixtures = [
+    {frames:[priced({...tokens, cost:.125}), priced(updatedTokens)], label:"$0.125000", input:18},
+    {frames:[priced({...tokens, cost:0}), choiceUsage], label:"$0.000", input:18},
+    {frames:[priced({...tokens, cost:.125}), priced({...updatedTokens, cost:.0625})], label:"$0.062500", input:18},
+    {frames:[priced({...tokens, cost:.125}), priced({...updatedTokens, cost:0})], label:"$0.000", input:18},
+    {frames:[priced({...tokens, cost:.125}), priced({...updatedTokens, cost:.5}, "unrelated-response")], label:"$0.125000", input:12},
+    {frames:[priced(tokens), priced({...updatedTokens, cost:.5}, "unrelated-response")], label:"$~0.000015", input:12},
+    {frames:[priced({...tokens, cost:.1, is_byok:true, cost_details:{upstream_inference_cost:.025}}), choiceUsage], label:"$0.125000", input:18},
+    {frames:[priced({...tokens, cost:.1, is_byok:true}), choiceUsage], label:"$0.100000+?", input:18},
+  ];
+  for (const {frames, label, input} of fixtures) {
+    const result = await openAICompletions(selected, prompt, {...session,
+      fetch:fixtureSse(origin, "/api/v1/chat/completions", [finish, ...frames])}).result();
+    assert.equal(result.stopReason, "stop", result.errorMessage);
+    assert.equal(result.responseId, id);
+    assert.equal(result.usage.input, input);
+    assert.equal(footerLabel(result), label);
+  }
+  const gateway = "https://example.invalid";
+  const result = await openAICompletions({...selected, baseUrl:`${gateway}/v1`}, prompt, {...session,
+    fetch:fixtureSse(gateway, "/v1/chat/completions", [finish, priced({...tokens, cost:.125}), choiceUsage])}).result();
+  assert.equal(footerLabel(result), "$~0.000021");
+});
 
 async function relay(t, respond) {
   const hits = [];
@@ -188,6 +256,29 @@ test("Codex fake SSE structured transient failure returns ownership to the sessi
   assert.equal(result.stopReason, "stop", result.errorMessage);
   assert.equal(requests, 2);
   assert.equal(admissions, 2);
+});
+
+test("a Codex failed terminal frame retains identity and usage without waiting for EOF", { timeout: 4000 }, async () => {
+  const id = "synthetic-codex-terminal";
+  for (const usage of [undefined, {input_tokens:12, output_tokens:3, total_tokens:15}]) {
+    const failure = {type:"response.failed", response:{id, status:"failed", output:[null], usage,
+      error:{code:"rate_limit_exceeded", message:"Fixture Codex failure"}}};
+    let cancelled = false;
+    const wire = new TextEncoder().encode(codexWire([failure]));
+    const result = await fakeCodex(async () => new Response(new ReadableStream({
+      start(controller) { controller.enqueue(wire); },
+      cancel() { cancelled = true; },
+    })), {signal:AbortSignal.timeout(1500)}).result();
+    assert.equal(result.responseId, id);
+    assert.equal(result.stopReason, "error");
+    assert.equal(result.rawStopReason, "failed");
+    assert.equal(result.usage.input, usage?.input_tokens ?? 0);
+    assert.match(result.errorMessage, /Fixture Codex failure/);
+    assert.equal(isRetryableAssistantError(result), true);
+    assert.equal(usesProviderCooldown(result), true);
+    assert.equal(footerLabel(result), "sub");
+    assert.equal(cancelled, true);
+  }
 });
 
 test("Codex fake SSE in-band error codes preserve throttling, known terminal failures and default policy", async () => {

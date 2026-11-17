@@ -1,4 +1,5 @@
 import { AdaptivePublisher } from "./adaptive-publisher.js";
+import { createShellOutputDecoder } from "./shell-output-decoder.js";
 import { DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, truncateHead, truncateTail, utf8ByteLength } from "./truncate.js";
 export const OUTPUT_MIN_EMIT_INTERVAL_MS = 100;
 export const OUTPUT_TARGET_BYTES_PER_SECOND = 100 * 1024;
@@ -19,7 +20,7 @@ export class OutputCapture {
     #retain;
     #context;
     #onUpdate;
-    #decoder = new TextDecoder();
+    #decoder = createShellOutputDecoder();
     #buffer = "";
     #bufferBytes = 0;
     #totalBytes = 0;
@@ -54,20 +55,15 @@ export class OutputCapture {
     get truncated() {
         return this.#totalBytes > this.#maxBytes || this.#totalLines() > this.#maxLines;
     }
-    push(chunk) {
+    push(chunk, source) {
         if (this.#disposed)
             return;
-        if (typeof chunk === "string") {
-            this.#appendText(this.#decoder.decode());
-            this.#appendText(chunk);
-            return;
-        }
-        this.#appendText(this.#decoder.decode(chunk, { stream: true }));
+        this.#appendText(this.#decoder.append(chunk, source));
     }
     finish() {
         if (this.#disposed)
             return;
-        this.#appendText(this.#decoder.decode());
+        this.#appendText(this.#decoder.finish());
     }
     setSpillPath(path) {
         if (this.#disposed || this.#spillPath === path)

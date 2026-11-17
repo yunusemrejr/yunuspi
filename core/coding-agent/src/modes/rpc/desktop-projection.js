@@ -8,6 +8,9 @@ const PREVIEW_PARTS = 128;
 const ASSISTANT_TEXT_PREVIEW_CHARACTERS = 500_000;
 const THINKING_PREVIEW_CHARACTERS = 24_000;
 const STREAM_PREVIEW_CHARACTERS = 4 * 1024 * 1024;
+const PENDING_TOOL_PREVIEW_BYTES = 4 * 1024 * 1024;
+const PENDING_TOOL_PREVIEW_COUNT = 128;
+const toolContentBytes = Symbol('toolContentBytes');
 
 /** Harness-activity lines are drawn from their small, fixed-shape details (label, status, detail), never from model content. */
 const activityDetails = (customType, details) => {
@@ -132,6 +135,9 @@ export function desktopSessionHistory(manager, { limit = 80, before, anchor } = 
 }
 export function desktopEvent(event) {
     if (event.type === 'tool_execution_update') return undefined;
+    // Execution end already carries the provisional result. The final message
+    // end can change it through extensions, so that event still goes out.
+    if (event.type === 'message_start' && event.message?.role === 'toolResult') return undefined;
     if (event.type === 'agent_end') return { type: 'agent_end' };
     if (event.type === 'turn_end') return { type: 'turn_end' };
     if (event.type === 'message_start' || event.type === 'message_end') {
@@ -143,24 +149,72 @@ export function desktopEvent(event) {
         return { ...event, message: desktopMessage(message) };
     }
     if (event.type === 'tool_execution_start') return { ...event, args: desktopArguments(event.args) };
-    if (event.type === 'tool_execution_end') return { ...event, result: desktopMessage({ ...event.result, role: 'toolResult' }) };
+    if (event.type === 'tool_execution_end') {
+        const budget = { remaining: PENDING_TOOL_PREVIEW_BYTES };
+        const result = desktopMessage({ ...event.result, role: 'toolResult' }, budget);
+        const projected = { ...event, result };
+        // Reuse the byte count from projection. The observer receives this same
+        // object after publication, and serialization leaves the symbol out.
+        const bytes = typeof result.content === 'string' ? Buffer.byteLength(JSON.stringify(result.content))
+            : PENDING_TOOL_PREVIEW_BYTES - budget.remaining;
+        Object.defineProperty(projected, toolContentBytes, { value: bytes });
+        return projected;
+    }
     return event;
 }
 
-/** The active message preview as of the latest record queued for desktop stdout. */
+/** Desktop stdout previews that may not have reached the transcript yet. */
 export function createDesktopStreamingPreview() {
     let active = null;
     let startedUser = null;
     let remaining = STREAM_PREVIEW_CHARACTERS;
-    const reset = () => { active = null; startedUser = null; };
+    const pendingTools = new Map();
+    let pendingToolBytes = 0;
+    const forgetTool = id => {
+        const record = pendingTools.get(id);
+        if (!record) return;
+        pendingTools.delete(id);
+        pendingToolBytes -= record.bytes;
+    };
+    const reset = () => {
+        active = null;
+        startedUser = null;
+        pendingTools.clear();
+        pendingToolBytes = 0;
+    };
     return {
         get userMessage() { return startedUser; },
+        get toolMessages() { return Array.from(pendingTools.values(), record => record.message); },
         observe(event) {
             if (event.type === 'agent_start' || event.type === 'agent_end') {
                 reset();
                 return;
             }
             const role = event.message?.role;
+            if (event.type === 'tool_execution_end' && typeof event.toolCallId === 'string' && event[toolContentBytes] !== undefined) {
+                const toolCallId = clip(event.toolCallId, 4000);
+                const toolName = clip(typeof event.toolName === 'string' ? event.toolName : '', 4000);
+                // Include JSON escapes, array separators, and the truncation marker.
+                const overhead = 512 + 6 * (toolCallId.length + toolName.length);
+                let content = event.result.content;
+                let bytes = overhead + event[toolContentBytes];
+                if (bytes > PENDING_TOOL_PREVIEW_BYTES) {
+                    content = [{ type: 'text', text: '[Tool output exceeds the live history preview budget.]' }];
+                    bytes = overhead + 128;
+                }
+                forgetTool(toolCallId);
+                while (pendingTools.size >= PENDING_TOOL_PREVIEW_COUNT || pendingToolBytes + bytes > PENDING_TOOL_PREVIEW_BYTES) {
+                    forgetTool(pendingTools.keys().next().value);
+                }
+                const message = { role: 'toolResult', toolCallId, toolName, isError: Boolean(event.isError), timestamp: Date.now(), content };
+                pendingTools.set(toolCallId, { message, bytes });
+                pendingToolBytes += bytes;
+                return;
+            }
+            if (event.type === 'message_end' && role === 'toolResult') {
+                forgetTool(event.message.toolCallId);
+                return;
+            }
             if (role === 'user') {
                 // A user start can be published while message_end hooks still
                 // delay the transcript append. History must cover that frame.

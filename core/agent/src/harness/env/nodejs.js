@@ -495,10 +495,10 @@ export class NodeExecutionEnv {
                 else
                     signal.addEventListener("abort", onAbort, { once: true });
             }
-            const feed = (chunk) => {
+            const feed = (chunk, source) => {
                 try {
                     const wasTruncated = capture.truncated;
-                    capture.push(chunk);
+                    capture.push(chunk, source);
                     if (!options?.capture?.spill || chunk.length === 0)
                         return;
                     if (spillPath !== undefined || wasTruncated) {
@@ -518,8 +518,8 @@ export class NodeExecutionEnv {
                     failCallback(error);
                 }
             };
-            child.stdout?.on("data", feed);
-            child.stderr?.on("data", feed);
+            child.stdout?.on("data", chunk => feed(chunk, "stdout"));
+            child.stderr?.on("data", chunk => feed(chunk, "stderr"));
             void waitForChildProcess(child, () => spillError === undefined &&
                 spillStart !== undefined &&
                 (spillStream === undefined || spillBackpressured)).then(async ({ code, signal: exitSignal }) => {

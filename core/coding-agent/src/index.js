@@ -32,6 +32,7 @@ export { formatSkillCatalogBlock, formatSkillsForPrompt, loadSkills, loadSkillsF
 export { createSyntheticSourceInfo } from "./core/source-info.js";
 export { generateDiffString, generateUnifiedPatch } from "./core/tools/edit-diff.js";
 export { missingPathHint } from "./core/tools/path-hints.js";
+export { createShellOutputDecoder } from "@yunuspi/agent-core";
 // Tools
 export { createBashToolDefinition, createEditToolDefinition, createFindToolDefinition, createGrepToolDefinition, createLocalBashOperations, createLocalPowerShellOperations, createLsToolDefinition, createPowerShellToolDefinition, createReadToolDefinition, createWriteToolDefinition, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES, formatSize, truncateHead, truncateLine, truncateTail, withFileMutationQueue, } from "./core/tools/index.js";
 export { hasTrustRequiringProjectResources, ProjectTrustStore, } from "./core/trust-manager.js";

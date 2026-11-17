@@ -19,6 +19,7 @@ export { AGENT_TELEMETRY_SCHEMAS, AI_TELEMETRY_SCHEMA, HARNESS_TELEMETRY_SCHEMA,
 export * from "./harness/tools/index.ts";
 export { type AgentHarnessResources, type AgentHarnessStreamOptions, type AgentHarnessStreamOptionsPatch, type AgentHarnessTool, type AgentHarnessToolContextSource, type AgentHarnessToolInvocation, type AgentHarnessToolUpdateCallback, type AgentHarnessToolUpdateOptions, BranchSummaryError, type BranchSummaryErrorCode, CompactionError, type CompactionErrorCode, type ExecutionEnv, ExecutionError, type ExecutionErrorCode, err, FileError, type FileErrorCode, type FileInfo, type FileKind, type FileSystem, getOrThrow, getOrUndefined, ok, type PromptTemplate, type Shell, type ShellExecOptions, type ShellExecResult, type ShellOutputCaptureOptions, type ShellOutputLimits, type ShellOutputMetadata, type ShellOutputRetention, type ShellOutputTruncation, type ShellOutputUpdate, type ShellOutputView, type Skill, toError, } from "./harness/types.ts";
 export { applyShellOutputUpdate } from "./harness/utils/output-capture.ts";
+export { createShellOutputDecoder, type ShellOutputSource } from "./harness/utils/shell-output-decoder.ts";
 export * from "./harness/utils/shell-output.ts";
 export * from "./harness/utils/truncate.ts";
 export * from "./proxy.ts";

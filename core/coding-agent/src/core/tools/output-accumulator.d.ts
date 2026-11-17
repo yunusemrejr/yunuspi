@@ -1,3 +1,4 @@
+import type { ShellOutputSource } from "@yunuspi/agent-core";
 import { type TruncationResult } from "./truncate.ts";
 export interface OutputAccumulatorOptions {
     maxLines?: number;
@@ -45,7 +46,7 @@ export declare class OutputAccumulator {
     private maxCaptureBytes;
     constructor(options?: OutputAccumulatorOptions);
     /** Strings are already decoded. Producers should await any returned promise before delivering more data. */
-    append(data: Buffer | string): void | Promise<void>;
+    append(data: Buffer | string, source?: ShellOutputSource): void | Promise<void>;
     finish(): void;
     snapshot(options?: {
         persistIfTruncated?: boolean;

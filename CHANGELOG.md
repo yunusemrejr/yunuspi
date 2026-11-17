@@ -1,3 +1,10 @@
+## 0.56.16 — Provider billing and reliable shell output
+
+- Responses records provider usage and response IDs before reading optional terminal output. A later token-only OpenRouter Chat Completions frame preserves the reported price for that response, including zero.
+- Shell output decodes stdout and stderr independently so interleaved chunks preserve split UTF-8 characters. Spill artifacts retain the original bytes.
+- Desktop keeps unsent text and attachments recoverable while a worker starts, and releases replay buffers when the user switches away from an unfinished history read.
+- Desktop sends fewer copies of completed tool output. A live history snapshot includes tool results that have already arrived while extensions finish their work.
+
 ## 0.56.15 — Bounded Jev waits and exact desktop delivery
 
 - Jev returns at each caller's deadline. A waiting caller can keep the shared request open within its hard limit, and the submitting session records any late charge.

@@ -9,6 +9,7 @@ import { runInNewContext } from 'node:vm';
 import { AgentWorker, jsonLines } from '../desktop/agent-worker.mjs';
 import { AgentSession } from '../core/coding-agent/src/core/agent-session.js';
 import { validateDesktopImages } from '../desktop/recovered-input.mjs';
+import { createConversation, stagePendingInput, settlePendingInput } from '../desktop/renderer/conversation.mjs';
 
 const source = readFileSync(new URL('../desktop/main.mjs', import.meta.url), 'utf8');
 const sections = [
@@ -17,6 +18,82 @@ const sections = [
 ];
 // Run the desktop handlers without creating a window or importing login-shell credentials.
 const handlers = sections.map(([start, end]) => source.slice(source.indexOf(start), source.indexOf(end))).join('\n');
+
+function startupRenderer() {
+  const app = readFileSync(new URL('../desktop/renderer/app.js', import.meta.url), 'utf8');
+  const renderer = [['function clearHistoryReplay(', '// Under the transcript'], ['async function deliver(', '// The goal this session']]
+    .map(([start, end]) => app.slice(app.indexOf(start), app.indexOf(end))).join('\n');
+  const startup = Promise.withResolvers();
+  const historyResponses = [];
+  const input = { id: 'startup', draft: '' };
+  const saved = Array.from({ length: 8 }, (_, index) => ({ id: `history-${index}`, draft: '' }));
+  const conversations = new Map(), views = new Map(), attachments = new Map();
+  const workspace = { sessions: [input, ...saved], runtime: [] };
+  const noOp = () => {};
+  let starting = false;
+  const context = {
+    workspace, conversations, views, attachments, activeId: null, switchVersion: 0, opening: false, lensText: '', lensReading: null,
+    api: {
+      openSession: id => id === input.id && starting ? historyResponses.shift() ?? startup.promise : { passive: true, messages: [], state: {} },
+      prompt: () => { starting = true; return startup.promise; },
+    },
+    crypto: { randomUUID }, createConversation, stagePendingInput, settlePendingInput,
+    current: () => workspace.sessions.find(s => s.id === context.activeId),
+    conversationOf(id) {
+      if (!conversations.has(id)) conversations.set(id, createConversation());
+      return conversations.get(id);
+    },
+    viewOf(id) { if (!views.has(id)) views.set(id, { nodes: new Map() }); return views.get(id); },
+    $: () => ({ replaceChildren: noOp, focus: noOp }), setEditorDraft: (_id, draft) => { input.draft = draft; }, safeError: error => error.message,
+    saveView: noOp, closeCommandMenu: noOp, resizePrompt: noOp, scheduleLens: noOp, renderAttachments: noOp,
+    renderSidebar: noOp, renderMessages: noOp, renderChrome: noOp, hideSidebarOnNarrow: noOp, renderActivity: noOp,
+    renderContext: noOp, refreshRecoveredInput: async () => [], showNextExtension: noOp,
+  };
+  const api = runInNewContext(`${renderer}\n({ openSession, deliver });`, context);
+  return { ...api, input, saved, conversations, views, attachments, startup, historyResponses };
+}
+
+test('browsing saved history during startup preserves a rejected prompt and its attachments', async () => {
+  const { openSession, deliver, input, saved, conversations, attachments, startup } = startupRenderer();
+  const images = [{ type: 'image', name: 'fixture.png', mimeType: 'image/png', data: 'AA==' }];
+  await openSession(input.id);
+  const pending = deliver(input.id, 'A draft awaiting startup', images, undefined, true);
+  for (const history of saved) await openSession(history.id);
+  const returning = openSession(input.id);
+  startup.reject(Error('Fixture startup failed'));
+  await Promise.all([pending, returning]);
+  assert.equal(input.draft, 'A draft awaiting startup');
+  assert.deepEqual(attachments.get(input.id), images);
+  assert.equal(conversations.get(input.id).messages[0]?.failed, true);
+});
+
+test('switching sessions releases event replay for a superseded history read', async () => {
+  const { openSession, deliver, input, saved, views, startup, historyResponses } = startupRenderer();
+  const stale = Promise.withResolvers();
+  historyResponses.push(stale.promise);
+  const prompt = deliver(input.id, 'A draft awaiting startup', [], undefined, true);
+  const firstRead = openSession(input.id);
+  const abandoned = views.get(input.id).replay;
+  abandoned.push({ sequence: 1, event: { type: 'agent_start' } });
+  try {
+    await openSession(saved[0].id);
+    assert.equal(views.get(input.id).replay, undefined, 'background events must stop accumulating immediately');
+    assert.equal(abandoned.length, 0);
+    const reopened = openSession(input.id);
+    const replay = views.get(input.id).replay;
+    assert.ok(Array.isArray(replay));
+    stale.reject(Error('Stale read failed'));
+    await firstRead;
+    assert.equal(views.get(input.id).replay, replay, 'the old request cannot clear a new replay');
+    startup.reject(Error('Fixture startup failed'));
+    await reopened;
+    assert.equal(views.get(input.id).replay, undefined, 'the active read also releases replay after failure');
+  } finally {
+    stale.reject(Error('Fixture test finished'));
+    startup.reject(Error('Fixture test finished'));
+    await Promise.all([prompt, firstRead]);
+  }
+});
 
 function fixture({ holdPrompt = false } = {}) {
   const trust = Promise.withResolvers(), trustStarted = Promise.withResolvers(), queueRead = Promise.withResolvers();

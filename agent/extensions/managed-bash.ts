@@ -33,9 +33,10 @@ import { fileSizeLimitPrefix, getDiskLimits, watchDisk } from "./lib/disk-guard.
 import { randomBytes } from "node:crypto";
 import { constants } from "node:fs";
 import { access as fsAccess } from "node:fs/promises";
-import type { ExtensionAPI } from "@yunuspi/coding-agent";
+import type { ExtensionAPI, ShellOutputSource } from "@yunuspi/coding-agent";
 import {
 	createBashToolDefinition,
+	createShellOutputDecoder,
 	getShellConfig,
 	waitForChildProcess,
 } from "@yunuspi/coding-agent";
@@ -291,9 +292,9 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 			let cancelTimer: NodeJS.Timeout | undefined;
 			const pendingOutput = new Set<Promise<void>>();
 			let outputError: unknown;
-			const forward = (data: Buffer) => {
+			const forward = (data: Buffer, source?: ShellOutputSource) => {
 				try {
-					const pending = onData(data);
+					const pending = onData(data, source);
 					if (!pending || typeof pending.then !== "function") return;
 					child.stdout?.pause(); child.stderr?.pause();
 					const task = Promise.resolve(pending).catch(error => {
@@ -319,11 +320,11 @@ function createManagedBashOperations(graceMs = GRACE_MS, cancelGraceMs = 0) {
 
 			const feed = (data: Buffer) => {
 				job.out.append(data);
-				forward(data);
+				forward(data, "stdout");
 			};
 			const feedErr = (data: Buffer) => {
 				job.err.append(data);
-				forward(data);
+				forward(data, "stderr");
 			};
 			child.stdout?.on("data", feed);
 			child.stderr?.on("data", feedErr);
@@ -488,18 +489,20 @@ export async function runManagedCommand(
 	foregroundMs = GRACE_MS,
 	cancelGraceMs = 0,
 ) {
+	const decoder = createShellOutputDecoder();
 	let output = "";
+	let acceptingOutput = true;
 	const result = await createManagedBashOperations(
 		foregroundMs,
 		cancelGraceMs,
 	).exec(command, cwd, {
 		timeout,
 		signal,
-		onData(data) {
-			output = (output + data.toString()).slice(-16384);
+		onData(data, source) {
+			if (acceptingOutput) output = (output + decoder.append(data, source)).slice(-TAIL_CAP);
 		},
-	});
-	return { ...result, output };
+	}).finally(() => { acceptingOutput = false; });
+	return { ...result, output: (output + decoder.finish()).slice(-TAIL_CAP) };
 }
 
 const processSchema = Type.Object({

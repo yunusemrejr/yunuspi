@@ -602,13 +602,14 @@ export async function runRpcMode(runtimeHost) {
                     const page = desktopSessionHistory(session.sessionManager, { limit: command.limit, before: command.before, anchor: command.anchor });
                     const initial = command.before === undefined;
                     const userMessage = initial ? desktopStreamingPreview?.userMessage : null;
+                    const toolMessages = initial ? desktopStreamingPreview?.toolMessages ?? [] : [];
                     const live = session.agent.state.streamingMessage;
                     const streamingMessage = !initial ? null : desktopStreamingPreview
                         ? desktopStreamingPreview.snapshot()
                         : live?.role === 'assistant' ? desktopMessage(live) : null;
                     const data = page.reset ? { ...page, messages: [] } : {
                         ...page,
-                        messages: userMessage ? [...page.messages, userMessage] : page.messages,
+                        messages: userMessage || toolMessages.length ? [...page.messages, ...toolMessages, ...(userMessage ? [userMessage] : [])] : page.messages,
                         isStreaming: session.isStreaming,
                         streamingMessage,
                     };

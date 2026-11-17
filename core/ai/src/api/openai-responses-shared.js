@@ -425,14 +425,17 @@ export async function processResponsesStream(openaiStream, output, stream, model
     // persisted reasoning signature from the terminal response to keep store:false
     // multi-turn replay stateless. See https://github.com/earendil-works/pi/issues/6409.
     const backfillReasoningSignatures = (responseOutput) => {
+        if (!Array.isArray(responseOutput)) return;
         for (const item of responseOutput) {
-            if (item.type !== "reasoning" || !item.encrypted_content)
+            if (item?.type !== "reasoning" || typeof item.encrypted_content !== "string" || !item.encrypted_content)
                 continue;
             const block = reasoningBlocksById.get(item.id);
             if (!block?.thinkingSignature)
                 continue;
-            const storedItem = JSON.parse(block.thinkingSignature);
-            if (storedItem.encrypted_content)
+            let storedItem;
+            try { storedItem = JSON.parse(block.thinkingSignature); }
+            catch { continue; }
+            if (!storedItem || typeof storedItem !== "object" || Array.isArray(storedItem) || storedItem.encrypted_content)
                 continue;
             block.thinkingSignature = JSON.stringify({
                 ...storedItem,
@@ -441,12 +444,14 @@ export async function processResponsesStream(openaiStream, output, stream, model
         }
     };
     let createdAt;
-    const finalizeResponse = (response) => {
-        sawTerminalResponseEvent = true;
-        backfillReasoningSignatures(response.output ?? []);
-        if (response?.id) {
+    const rememberResponseId = (response) => {
+        if (typeof response?.id === "string" && response.id.length > 0) {
             output.responseId = response.id;
         }
+    };
+    const recordResponseBilling = (response) => {
+        // Optional output/replay metadata must not erase an observed bill or ID.
+        rememberResponseId(response);
         if (response?.usage) {
             const inputDetails = response.usage.input_tokens_details;
             const cachedTokens = inputDetails?.cached_tokens || 0;
@@ -489,6 +494,11 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
   if (!['provider-reported','provider-estimate'].includes(cost.source) &&
       [raw?.input_tokens_details?.audio_tokens, raw?.output_tokens_details?.audio_tokens].some(n => Number.isFinite(n) && n > 0)) cost.complete = false;
 }
+    };
+    const finalizeResponse = (response) => {
+        sawTerminalResponseEvent = true;
+        recordResponseBilling(response);
+        backfillReasoningSignatures(response?.output);
         // Map status to stop reason. For incomplete responses, retain the provider's
         // specific reason so max-output truncation and content filtering stay distinct.
         const status = response?.status;
@@ -507,8 +517,8 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
     };
     for await (const event of openaiStream) {
         if (event.type === "response.created") {
-            output.responseId = event.response.id;
-            createdAt ??= providerCreatedMs(event.response.created_at);
+            rememberResponseId(event.response);
+            createdAt ??= providerCreatedMs(event.response?.created_at);
         }
         else if (event.type === "response.output_item.added") {
             createSlot(event.output_index, event.item);
@@ -673,9 +683,11 @@ cacheReadReported: Number.isFinite(inputDetails?.cached_tokens) && inputDetails.
             throw new Error(`Error Code ${event.code}: ${event.message}` || "Unknown error");
         }
         else if (event.type === "response.failed") {
-            if (event.response?.usage) finalizeResponse(event.response);
             sawTerminalResponseEvent = true;
+            recordResponseBilling(event.response);
+            if (event.response?.usage) backfillReasoningSignatures(event.response.output);
             output.rawStopReason = event.response?.status;
+            if (event.error instanceof Error) throw event.error;
             const error = event.response?.error;
             const details = event.response?.incomplete_details;
             const msg = error

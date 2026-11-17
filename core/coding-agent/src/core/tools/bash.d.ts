@@ -1,4 +1,4 @@
-import type { AgentTool } from "@yunuspi/agent-core";
+import type { AgentTool, ShellOutputSource } from "@yunuspi/agent-core";
 import { type Static, Type } from "typebox";
 import { type ShellConfig } from "../../utils/shell.ts";
 import type { ToolDefinition } from "../extensions/types.ts";
@@ -35,7 +35,8 @@ export interface BashOperations {
      * @returns Promise resolving to exit code (null if killed)
      */
     exec: (command: string, cwd: string, options: {
-        onData: (data: Buffer) => void | Promise<void>;
+        /** Supply the pipe source when forwarding chunks from independent streams. */
+        onData: (data: Buffer, source?: ShellOutputSource) => void | Promise<void>;
         signal?: AbortSignal;
         timeout?: number;
         env?: NodeJS.ProcessEnv;

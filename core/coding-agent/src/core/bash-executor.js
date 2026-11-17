@@ -5,6 +5,7 @@
  * - AgentSession.executeBash() for interactive and RPC modes
  * - Direct calls from modes that need bash execution
  */
+import { createShellOutputDecoder } from "@yunuspi/agent-core";
 import { stripAnsi } from "../utils/ansi.js";
 import { sanitizeBinaryOutput } from "../utils/shell.js";
 import { OutputAccumulator } from "./tools/output-accumulator.js";
@@ -15,7 +16,7 @@ import { OutputAccumulator } from "./tools/output-accumulator.js";
  */
 export async function executeBashWithOperations(command, cwd, operations, options) {
     const output = new OutputAccumulator({ tempFilePrefix: "pi-bash" });
-    const decoder = new TextDecoder();
+    const decoder = createShellOutputDecoder();
     let acceptingOutput = true;
     const append = decoded => {
         const text = sanitizeBinaryOutput(stripAnsi(decoded)).replace(/\r/g, "");
@@ -27,7 +28,7 @@ export async function executeBashWithOperations(command, cwd, operations, option
     let exitCode;
     try {
         ({ exitCode } = await operations.exec(command, cwd, {
-            onData: data => acceptingOutput ? append(decoder.decode(data, { stream: true })) : undefined,
+            onData: (data, source) => acceptingOutput ? append(decoder.append(data, source)) : undefined,
             signal: options?.signal,
         }));
     }
@@ -43,7 +44,7 @@ export async function executeBashWithOperations(command, cwd, operations, option
     }
 
     try {
-        const remaining = decoder.decode();
+        const remaining = decoder.finish();
         if (remaining) await append(remaining);
         output.finish();
     }

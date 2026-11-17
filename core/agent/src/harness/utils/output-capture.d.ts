@@ -1,5 +1,6 @@
 import type { Context } from "../context.ts";
 import type { ShellOutputCaptureOptions, ShellOutputUpdate, ShellOutputView } from "../types.ts";
+import type { ShellOutputSource } from "./shell-output-decoder.ts";
 export declare const OUTPUT_MIN_EMIT_INTERVAL_MS = 100;
 export declare const OUTPUT_TARGET_BYTES_PER_SECOND: number;
 interface OutputCaptureHandlers {
@@ -18,7 +19,7 @@ export declare class OutputCapture {
     #private;
     constructor(options: ShellOutputCaptureOptions | undefined, context: Context, handlers: OutputCaptureHandlers);
     get truncated(): boolean;
-    push(chunk: string | Uint8Array): void;
+    push(chunk: string | Uint8Array, source?: ShellOutputSource): void;
     finish(): void;
     setSpillPath(path: string): void;
     snapshot(): ShellOutputView;

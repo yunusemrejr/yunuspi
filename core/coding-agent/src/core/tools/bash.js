@@ -79,9 +79,9 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
             });
             const pendingOutput = new Set();
             let outputError;
-            const forward = (data) => {
+            const forward = (data, source) => {
                 try {
-                    const pending = onData(data);
+                    const pending = onData(data, source);
                     if (!pending || typeof pending.then !== "function") return;
                     child.stdout?.pause(); child.stderr?.pause();
                     const task = Promise.resolve(pending).catch(error => {
@@ -111,8 +111,8 @@ export function createLocalShellOperations(shellName, resolveShellConfig) {
                     }, timeoutMs);
                 }
                 // Stream stdout and stderr.
-                child.stdout?.on("data", forward);
-                child.stderr?.on("data", forward);
+                child.stdout?.on("data", data => forward(data, "stdout"));
+                child.stderr?.on("data", data => forward(data, "stderr"));
                 // Handle abort signal by killing the entire process tree.
                 if (signal) {
                     if (signal.aborted)
@@ -245,10 +245,10 @@ export function createShellToolDefinition(cwd, config, options) {
             if (onUpdate) {
                 onUpdate({ content: [], details: undefined });
             }
-            const handleData = (data) => {
+            const handleData = (data, source) => {
                 if (!acceptingOutput)
                     return;
-                const pending = output.append(data);
+                const pending = output.append(data, source);
                 scheduleOutputUpdate();
                 return pending;
             };

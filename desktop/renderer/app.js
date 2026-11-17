@@ -52,13 +52,16 @@ function syncWorkspace(value) {
   const retained = new Set(workspace.sessions.filter(s => s.state === 'open').map(s => s.id));
   for (const id of commandLists.keys()) if (!retained.has(id)) commandLists.delete(id);
   for (const id of conversations.keys()) if (!retained.has(id)) {
-    conversations.delete(id); attachments.delete(id); views.get(id)?.nodes.clear();
+    const view = views.get(id);
+    clearHistoryReplay(view);
+    conversations.delete(id); attachments.delete(id); view?.nodes.clear();
     if (!workspace.sessions.some(s => s.id === id)) views.delete(id);
   }
   for (let index = extensionQueue.length - 1; index >= 0; index--) if (!retained.has(extensionQueue[index].sessionId)) extensionQueue.splice(index, 1);
   if (modalOwner && !retained.has(modalOwner.sessionId)) closeModal(false);
-  if (activeId && !workspace.sessions.some(s => s.id === activeId && s.state === 'open')) {
-    saveView(); activeId = null; opening = false; $('prompt').value = ''; $('messages').replaceChildren();
+  if (activeId && !retained.has(activeId)) {
+    saveView(); clearHistoryReplay(views.get(activeId));
+    activeId = null; opening = false; $('prompt').value = ''; $('messages').replaceChildren();
   }
   renderSidebar(); renderChrome(); renderContext();
 }
@@ -155,16 +158,22 @@ async function newSession(projectId) {
   const session = await api.createSession(projectId);
   await openSession(session.id);
 }
+function clearHistoryReplay(view) {
+  if (!view?.replay) return;
+  view.replay.length = 0;
+  view.replay = undefined;
+}
 async function openSession(id, reload = false) {
   const cachedConversation = conversationOf(id);
   if (!reload && current()?.id === id && !cachedConversation.error && cachedConversation.historyRevision?.startsWith('worker:')
     && workspace.runtime.some(r => r.id === id)) { hideSidebarOnNarrow(); $('prompt').focus(); return; }
-  saveView(); closeCommandMenu();
+  saveView(); closeCommandMenu(); clearHistoryReplay(views.get(activeId));
   const version = ++switchVersion;
   activeId = id; opening = true;
   const session = workspace.sessions.find(s => s.id === id);
   const pendingView = viewOf(id);
-  pendingView.replay = []; pendingView.pendingHistory = true;
+  const replay = [];
+  pendingView.replay = replay;
   $('prompt').value = session?.draft || ''; resizePrompt(); lensText = ''; lensReading = null; scheduleLens(); renderAttachments(); $('messages').replaceChildren();
   conversationOf(id).error = '';
   renderSidebar(); renderMessages(true); renderChrome(); hideSidebarOnNarrow();
@@ -186,16 +195,20 @@ async function openSession(id, reload = false) {
     state.historyRevision = result.revision;
     Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming,
       stats: result.stats ?? (result.passive && result.messages ? undefined : previous.stats) });
-    for (const item of pendingView.replay) if (item.event.type === 'notice' || (result.messages && item.sequence > result.sequence)) applyAgentEvent(state, item.event);
-    pendingView.pendingHistory = false; pendingView.replay = [];
+    if (result.messages) {
+      for (const item of replay) if (item.event.type === 'notice' || item.sequence > result.sequence) applyAgentEvent(state, item.event);
+    }
+    clearHistoryReplay(pendingView);
     conversations.set(id, state); viewOf(id).nodes.clear(); $('messages').replaceChildren();
-    // Keep eight loaded transcripts when possible. A live queue still owns
-    // its previews while a saved transcript is open in the foreground.
+    // Keep eight loaded transcripts when possible. Pending inputs still own
+    // their previews while waiting for a worker or sitting in a live queue.
+    const live = new Set(workspace.runtime.map(runtime => runtime.id));
     const other = [...conversations.keys()].filter(key => key !== id);
     let cacheSize = other.length + 1;
     for (const oldest of other) {
       if (cacheSize <= 8) break;
-      if (conversations.get(oldest).pendingInputs.size && workspace.runtime.some(runtime => runtime.id === oldest)) continue;
+      const { pendingInputs } = conversations.get(oldest);
+      if (pendingInputs.size && (live.has(oldest) || pendingInputs.values().some(input => input.workerRevision === undefined))) continue;
       conversations.delete(oldest); views.get(oldest)?.nodes.clear(); cacheSize--;
     }
     opening = false; renderMessages(true); renderChrome(); renderActivity(); renderContext(); $('prompt').focus();
@@ -205,9 +218,10 @@ async function openSession(id, reload = false) {
     showNextExtension();
   } catch (error) {
     if (version !== switchVersion || activeId !== id) return;
-    pendingView.pendingHistory = false; pendingView.replay = [];
     conversationOf(id).error = safeError(error);
     if (version === switchVersion && activeId === id) { opening = false; renderChrome(); }
+  } finally {
+    if (pendingView.replay === replay) clearHistoryReplay(pendingView);
   }
 }
 // Under the transcript while a turn runs: that it is working and for how long. The step itself is the
@@ -1045,8 +1059,8 @@ function extensionRequest(sessionId, event, sequence) {
   // Notices land in the conversation, where they stay readable, instead of a toast that fades in seconds.
   if (event.method === 'notify') {
     const notice = { type: 'notice', text: strip(event.message), tone: event.notifyType };
-    if (view.pendingHistory) view.replay.push({ event: notice, sequence });
-    else applyAgentEvent(conversationOf(sessionId), notice);
+    view.replay?.push({ event: notice, sequence });
+    applyAgentEvent(conversationOf(sessionId), notice);
     if (sessionId === activeId) scheduleRender();
     return;
   }
@@ -1100,7 +1114,7 @@ api.onEvent(value => {
       else if (value.event.type === 'extension_ui_request') extensionRequest(value.sessionId, value.event, value.sequence);
       else {
         const view = viewOf(value.sessionId);
-        if (view.pendingHistory) view.replay.push({ event: value.event, sequence: value.sequence });
+        view.replay?.push({ event: value.event, sequence: value.sequence });
         applyAgentEvent(conversationOf(value.sessionId), value.event);
       }
       // The end of a turn is the moment its steps fold. Draw it now rather than

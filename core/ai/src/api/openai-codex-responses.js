@@ -553,8 +553,11 @@ async function* mapCodexEvents(events, output) {
             const response = event.response;
             const code = response?.error?.code;
             const message = response?.error?.message;
-            output.rawStopReason = "failed";
-            throw new CodexApiError(message || "Codex response failed", { code, payload: event });
+            // The shared decoder records terminal billing before rethrowing
+            // the same classified error used by transport fallback and retry.
+            yield { ...event, response: { ...response, status: "failed" },
+                error: new CodexApiError(message || "Codex response failed", { code, payload: event }) };
+            return;
         }
         if (type === "response.done" || type === "response.completed" || type === "response.incomplete") {
             const response = event.response;

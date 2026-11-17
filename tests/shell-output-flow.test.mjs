@@ -11,6 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { OutputAccumulator } from '../core/coding-agent/dist/core/tools/output-accumulator.js';
 import { createBashToolDefinition, createLocalBashOperations } from '../core/coding-agent/dist/core/tools/bash.js';
 import { executeBashWithOperations } from '../core/coding-agent/dist/core/bash-executor.js';
+import { NodeExecutionEnv } from '../core/agent/src/harness/env/nodejs.js';
+import { applyShellOutputUpdate } from '../core/agent/src/harness/utils/output-capture.js';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const quote=s=>"'"+s.replaceAll("'","'\\''")+"'";
 const command=code=>`${quote(process.execPath)} -e ${quote(code)}`;
@@ -60,6 +62,88 @@ test('real shell tail keeps evidence from a very long newline-terminated final l
   assert.equal(result.details.truncation.lastLinePartial,true);
   assert.equal(fs.readFileSync(result.details.fullOutputPath,'utf8'),output);
  }finally{remove(result);}
+});
+
+// The child waits for the parent to observe each fragment on its actual pipe
+// before writing to the other pipe. No sleep assumes a particular I/O order.
+async function interleavedUtf8(run) {
+ const dir=fs.mkdtempSync(path.join(scratch,'pipe-utf8-'));
+ const glyph=Buffer.from('🧪'), gates=[path.join(dir,'stdout'),path.join(dir,'stderr')];
+ const fragments=[Buffer.concat([Buffer.from('x'.repeat(300)+'stdout:'),glyph.subarray(0,2)]),
+  Buffer.from('|stderr|'),Buffer.concat([glyph.subarray(2),Buffer.from('|tail'),Buffer.from([0xe2,0x82])])];
+ const script=`const fs=require('node:fs'); const waits=${JSON.stringify(gates)};
+  const chunks=${JSON.stringify(fragments.map(part=>part.toString('hex')))};
+  const observed=file=>new Promise(resolve=>{const timer=setInterval(()=>{
+    if(fs.existsSync(file)){clearInterval(timer);resolve();}
+  },5);});
+  (async()=>{process.stdout.write(Buffer.from(chunks[0],'hex'));await observed(waits[0]);
+    process.stderr.write(Buffer.from(chunks[1],'hex'));await observed(waits[1]);
+    process.stdout.write(Buffer.from(chunks[2],'hex'));})();`;
+ const original=childProcess.spawn;
+ childProcess.spawn=(binary,args,options)=>{
+  const child=original(binary,args,options);
+  if(args.some(arg=>typeof arg==='string'&&arg.includes(gates[0]))) {
+   for(const [index,pipe] of [child.stdout,child.stderr].entries()) {
+    let bytes=0;
+    pipe.on('data',data=>{
+     bytes+=data.length;
+     if(bytes>=fragments[index].length&&!fs.existsSync(gates[index]))fs.writeFileSync(gates[index],'');
+    });
+   }
+  }
+  return child;
+ };
+ syncBuiltinESMExports();
+ try{return {result:await run(command(script)),raw:Buffer.concat(fragments)};}
+ finally{childProcess.spawn=original;syncBuiltinESMExports();fs.rmSync(dir,{recursive:true,force:true});}
+}
+
+test('builtin and managed Bash keep UTF-8 per pipe while preserving raw capture', {timeout:30000}, async()=>{
+ const {default:register}=await import('../agent/extensions/managed-bash.ts');
+ const registered=new Map();register({registerTool:tool=>registered.set(tool.name,tool),on(){}});
+ for(const tool of [createBashToolDefinition(scratch),registered.get('bash')]) {
+  const {result,raw}=await interleavedUtf8(input=>tool.execute('mixed-pipes',{command:input,maxOutputBytes:256,timeout:10},undefined,undefined,context));
+  try{
+   const preview=result.content[0].text.split('\n\n[')[0];
+   assert.ok(preview.endsWith('stdout:|stderr|🧪|tail\uFFFD'),JSON.stringify(preview.slice(-75)));
+   assert.equal([...preview].filter(c=>c==='\uFFFD').length,1,'only the incomplete EOF suffix is replaced');
+   assert.equal(result.details.truncation.outputBytes<=256,true);
+   assert.deepEqual(fs.readFileSync(result.details.fullOutputPath),raw);
+  }finally{remove(result);}
+ }
+});
+
+test('managed helper uses the same decoded order and EOF policy', {timeout:15000}, async()=>{
+ const {runManagedCommand}=await import('../agent/extensions/managed-bash.ts');
+ const {result}=await interleavedUtf8(input=>runManagedCommand(input,scratch,10,undefined,Infinity));
+ assert.equal(result.exitCode,0);
+ assert.equal(result.output,'x'.repeat(300)+'stdout:|stderr|🧪|tail\uFFFD');
+});
+
+test('interactive Bash display and final result keep the same combined text', {timeout:15000}, async()=>{
+ const displayed=[];
+ const {result}=await interleavedUtf8(input=>executeBashWithOperations(input,scratch,createLocalBashOperations(),{
+  signal:AbortSignal.timeout(10000),onChunk:text=>displayed.push(text),
+ }));
+ assert.equal(result.exitCode,0);
+ assert.equal(result.output,'x'.repeat(300)+'stdout:|stderr|🧪|tail\uFFFD');
+ assert.equal(displayed.join(''),result.output);
+});
+
+test('Node execution environment keeps per-pipe UTF-8 and unchanged raw spill', {timeout:15000}, async()=>{
+ let output;
+ const env=new NodeExecutionEnv({cwd:scratch});
+ const {result,raw}=await interleavedUtf8(input=>env.exec(input,{
+  timeout:10,capture:{limits:{maxBytes:256,maxLines:2000,retain:'tail'},spill:true},
+  onUpdate(update){output=applyShellOutputUpdate(output,update);},
+ },{}));
+ assert.equal(result.ok,true);
+ try{
+  assert.equal(result.value.exitCode,0);
+  assert.ok(output.text.endsWith('stdout:|stderr|🧪|tail\uFFFD'));
+  assert.ok(output.truncation.outputBytes<=256);
+  assert.deepEqual(fs.readFileSync(result.value.spillPath),raw);
+ }finally{if(result.value.spillPath)fs.rmSync(result.value.spillPath,{force:true});}
 });
 
 test('slow capture pauses real stdout/stderr and does not drop buffered output after exit',async()=>{
