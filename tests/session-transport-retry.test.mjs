@@ -43,15 +43,17 @@ const reportTool = (item, output_index = 0) => ({type:"response.output_item.done
 const hostedTerminal = (output, usage = responsesTokens, type = "response.completed", id = "synthetic-hosted-response") => ({type,
   response:{id, status:type.slice("response.".length), output, usage, ...(type === "response.failed" ? {error:{message:"Fixture failed"}} : {})}});
 
-async function hostedResponse(frames, toolTypes = ["web_search"], origin = "https://api.openai.com", provider = "openai") {
+async function hostedResponse(frames, toolTypes = ["web_search"], origin = "https://api.openai.com", provider = "openai", responseUrl) {
   const basePath = provider === "openrouter" ? "/api/v1" : "/v1";
   const selected = model("fixture", provider, "openai-responses", `${origin}${basePath}`);
-  const tools = toolTypes.map(type => ({type}));
+  const tools = toolTypes.map(tool => typeof tool === "string" ? {type:tool} : tool);
   const respond = fixtureSse(origin, `${basePath}/responses`, frames);
   return await openAIResponses(selected, prompt, {...session, onPayload:params => ({...params, tools}),
     fetch:async (input, init) => {
       assert.deepEqual(JSON.parse(init.body).tools, tools);
-      return respond(input);
+      const response = await respond(input);
+      if (responseUrl) Object.defineProperty(response, "url", {value:responseUrl});
+      return response;
     }}).result();
 }
 
@@ -136,6 +138,71 @@ test("native Responses isolates response, route and price provenance", async () 
   const local = await hostedResponse([hostedTerminal([localShell, localTool])], []);
   assert.equal(local.usage.cost.serverToolUse, undefined);
   assert.equal(footerLabel(local), "$~0.000015");
+});
+
+const meteredImage = {input_tokens:200, input_tokens_details:{text_tokens:100, image_tokens:100}, output_tokens:1000,
+  output_tokens_details:{image_tokens:1000, text_tokens:0}, cached_tokens:70, cached_tokens_details:{cached_text_tokens:20, cached_image_tokens:50}, total_tokens:1200};
+const standardHostedImage = {type:"image_generation", model:"gpt-image-2.6-sunburst"};
+const hostedMeter = (tool_usage, output = [], type, usage = responsesTokens) => {
+  const event = hostedTerminal(output, usage, type);
+  return {...event, response:{...event.response, tool_usage}};
+};
+
+test("Responses billing uses reported search units ahead of visible action guesses", async () => {
+  const reported = await hostedResponse([hostedMeter({web_search:{num_requests:2}})]);
+  assert.equal(reported.usage.cost.serverToolUse.web_search_billable_requests, 2);
+  assert.equal(reported.usage.cost.serverToolCost, .02);
+  assert.equal(footerLabel(reported), "$~0.020015+?");
+  const discounted = await hostedResponse([reportTool(hostedSearch), hostedMeter({web_search:{num_requests:0}}, [hostedSearch])]);
+  assert.equal(discounted.usage.cost.serverToolUse.web_search_call, 1);
+  assert.equal(discounted.usage.cost.serverToolUse.web_search_billable_requests, 0);
+  assert.equal(discounted.usage.cost.serverToolCost, 0);
+  assert.equal(footerLabel(discounted), "$~0.000015+?");
+  const unused = await hostedResponse([hostedMeter({web_search:{num_requests:0}, image_gen:{input_tokens:0, output_tokens:0, total_tokens:0}})]);
+  assert.equal(footerLabel(unused), "$~0.000015");
+});
+
+test("Responses billing prices separate hosted image tokens and keeps valid evidence through sparse failures", async () => {
+  const tools = [standardHostedImage, "web_search"];
+  const imageOnly = await hostedResponse([hostedMeter({image_gen:meteredImage}, [hostedImage])], tools);
+  assert.equal(imageOnly.usage.cost.serverToolUse.image_generation_cached_tokens, 70);
+  assert.ok(Math.abs(imageOnly.usage.cost.serverToolCost - .030925) < 1e-12);
+  assert.equal(footerLabel(imageOnly), "$~0.030940+?");
+  const snapshot = hostedMeter({image_gen:meteredImage, web_search:{num_requests:2}}, [hostedImage, hostedSearch]);
+  const stale = hostedMeter({web_search:{num_requests:1}}, []);
+  const preIdentity = {...snapshot, type:"response.in_progress", response:{...snapshot.response, id:undefined}};
+  const partial = await hostedResponse([preIdentity, {...stale, type:"response.in_progress"},
+    hostedMeter({image_gen:{input_tokens:200, output_tokens:0, total_tokens:200}}, [hostedImage, hostedSearch], "response.failed")], tools);
+  assert.equal(partial.stopReason, "error");
+  assert.equal(partial.usage.cost.serverToolUse.web_search_billable_requests, 2);
+  assert.ok(Math.abs(partial.usage.cost.serverToolCost - .050925) < 1e-12);
+  const replay = JSON.parse(JSON.stringify({type:"message", message:partial}));
+  assert.equal(collectSessionCost([replay, replay]).formatted, "$~0.050940+?");
+  const noCache = await hostedResponse([hostedMeter({image_gen:{...meteredImage, cached_tokens:undefined, cached_tokens_details:undefined}})], tools);
+  assert.equal(noCache.usage.cost.serverToolCost, .03);
+  assert.equal(footerLabel(noCache), "$~0.030015+?");
+  const mismatched = hostedMeter({image_gen:meteredImage});
+  mismatched.response.tools = [{type:"image_generation", model:"chatgpt-image-latest"}];
+  assert.equal(footerLabel(await hostedResponse([mismatched], tools)), "$~0.000015+?");
+  const otherTier = hostedMeter({image_gen:meteredImage});
+  otherTier.response.service_tier = "flex";
+  assert.equal(footerLabel(await hostedResponse([otherTier], tools)), "$~0.000015+?");
+});
+
+test("Responses retains aggregate hosted meters on gateways without applying direct endpoint prices twice", async () => {
+  const meters = {web_search:{num_requests:2}, image_gen:meteredImage};
+  const tools = [standardHostedImage, "web_search"];
+  const gateway = await hostedResponse([hostedMeter(meters)], tools, "https://api.openai.com.example.invalid");
+  assert.equal(gateway.usage.cost.serverToolUse.web_search_billable_requests, 2);
+  assert.equal(gateway.usage.cost.serverToolUse.image_generation_output_tokens, 1000);
+  assert.equal(gateway.usage.cost.serverToolCost, undefined);
+  assert.equal(footerLabel(gateway), "$~0.000015+?");
+  const redirect = await hostedResponse([hostedMeter(meters)], tools, "https://api.openai.com", "openai", "https://other.example.invalid/v1/responses");
+  assert.equal(footerLabel(redirect), "$~0.000015+?");
+  const routed = await hostedResponse([hostedMeter(meters, [], "response.completed", {...responsesTokens, cost:0})], tools, "https://openrouter.ai", "openrouter");
+  assert.equal(routed.usage.cost.serverToolUse.web_search_billable_requests, 2);
+  assert.equal(routed.usage.cost.serverToolCost, undefined);
+  assert.equal(footerLabel(routed), "$0.000");
 });
 
 const anthropicId = "synthetic-anthropic-hosted-response";

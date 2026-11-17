@@ -4,7 +4,7 @@ export declare function mergeCostEvidence(left: any, right: any): any;
 export declare function hasRecordedTokenUsage(usage: any, noExecution?: boolean): boolean;
 export declare function collectAuxiliaryModelUsage(entries: any[]): any;
 export declare function collectSessionCost(entries: any[], subscription?: boolean): any;
-export declare function recoverRetainedChildCosts(entries: any[], options: { sessionFile: string | null | undefined; statusRoot?: string }): {
+export declare function recoverRetainedChildCosts(entries: any[], options: { sessionFile: string | null | undefined; statusRoot?: string; privateWorkflowRunId?: string }): {
     entries: { type: 'custom'; customType: 'subagent-cost-v1'; data: {
         runId: string; recoveredForSessionId: string; results: any[];
         childLedgerCoverage?: {

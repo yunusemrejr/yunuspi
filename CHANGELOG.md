@@ -1,3 +1,13 @@
+## 0.56.21 — Late child charges, hosted tool meters, and concurrent reminders
+
+- Verified private workflow charges reach the parent footer after the waiter returns, including when reopening the session. Accounting does not wake the parent or charge the same child twice.
+- Responses uses the provider’s billable search count, including zero, and estimates supported hosted image charges from the reported token breakdown. Unresolved charges keep the footer partial.
+- ElevenLabs audio and narration charges settle in the source session when the user forks during generation.
+- Large explicit read ranges reuse a bounded newline index for the currently verified file. Existing previews, continuations, and output captures retain their contents.
+- Batch reads stop opening files after reaching the output budget. Native truncation stays visible to the edit guard, and cancellation propagates through the batch.
+- Open copies of the same session share reminder updates and record each due occurrence once. Clearing a staged reminder leaves eligible siblings in the delivery. The transcript repairs an interrupted schedule update.
+- Skill browsing reads the live catalogue on extension-started turns as well as user prompts.
+
 ## 0.56.20 — Safer file reads and durable workflow costs
 
 - Native and sandboxed reads and CLI attachments reject named pipes and other special files without blocking filesystem workers. A truncated read still returns its preview and continuation when temporary storage is unavailable.

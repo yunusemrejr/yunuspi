@@ -214,9 +214,11 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
     const file = typeof node?.sessionFile === 'string' ? `file:${node.sessionFile}` : undefined;
     const previous = nodes.get(aliases.get(fallback) ?? fallback);
     // An exact wrapper row can gain a native identity later. A different
-    // explicit native ID on a reused row is another run, not an alias.
+    // explicit native ID also separates invocations that reuse a session file.
     const sameRow = !native || !previous?.native || previous.native === native;
-    const ids = [...new Set([id, ...(sameRow ? [fallback] : []), ...(file ? [file] : [])])];
+    const fileOwner = file ? nodes.get(aliases.get(file) ?? file) : undefined;
+    const sameFileOwner = !native || !fileOwner?.native || fileOwner.native === native;
+    const ids = [...new Set([id, ...(sameRow ? [fallback] : []), ...(file && sameFileOwner ? [file] : [])])];
     const keys = [...new Set(ids.map(value => aliases.get(value) ?? value))];
     const key = keys.find(value => nodes.has(value)) ?? id;
     for (const duplicate of keys) if (duplicate !== key && nodes.has(duplicate)) {
@@ -271,7 +273,8 @@ export function collectSessionCost(entries, subscription = false, auxiliaryReque
     if (entry.type === 'custom' && entry.customType === 'subagent-cost-v1') {
       if (entry.data?.recoveredForSessionId !== undefined) {
         if (typeof entry.data.recoveredForSessionId === 'string' && (sessionId === undefined || entry.data.recoveredForSessionId === sessionId)) {
-          retainedChildren.push(entry);
+          if (entry.data.privateWorkflow) record(entry.data,true);
+          else retainedChildren.push(entry);
         }
         continue;
       }

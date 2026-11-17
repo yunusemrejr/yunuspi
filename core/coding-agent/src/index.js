@@ -25,7 +25,7 @@ export { AgentSessionRuntime,
 createAgentSession, createAgentSessionFromServices, createAgentSessionRuntime, createAgentSessionServices, createBashTool,
 // Tool factories (for custom cwd)
 createCodingTools, createEditTool, createFindTool, createGrepTool, createLsTool, createPowerShellTool, createReadOnlyTools, createReadTool, createWriteTool, } from "./core/sdk.js";
-export { buildContextEntries, buildSessionContext, CURRENT_SESSION_VERSION, getLatestCompactionEntry, migrateSessionEntries, parseSessionEntries, SessionManager, sessionEntryToContextMessages, } from "./core/session-manager.js";
+export { buildContextEntries, buildSessionContext, CURRENT_SESSION_VERSION, getLatestCompactionEntry, loadEntriesFromFile, migrateSessionEntries, parseSessionEntries, SessionManager, sessionEntryToContextMessages, } from "./core/session-manager.js";
 export { SettingsManager, } from "./core/settings-manager.js";
 // Skills
 export { formatSkillCatalogBlock, formatSkillsForPrompt, loadSkills, loadSkillsFromDir, } from "./core/skills.js";

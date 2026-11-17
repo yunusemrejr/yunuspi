@@ -93,9 +93,12 @@ import { sessionObservability } from './lib/session-observability.ts';
  * reminder surfaces as an activity indicator. No inference, no timers.
  */
 import { randomUUID } from "node:crypto";
+import { lstatSync } from "node:fs";
+import { loadEntriesFromFile } from "@yunuspi/coding-agent";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
+	SessionEntry,
 	SessionStartEvent,
 } from "@yunuspi/coding-agent";
 import { registerHarnessActivity } from "./lib/harness-activity.ts";
@@ -117,7 +120,7 @@ import {
 	readRemindersState,
 	type ManualReminder,
 	type ReminderState,
-	writeRemindersState,
+	withRemindersState,
 } from "./lib/reminders-state.ts";
 import {
 	acquireWorkspaceWriterLease,
@@ -433,7 +436,6 @@ export function reminderText(
 // checkpoints.ts's canonical restore reader).
 
 const readState = readRemindersState;
-const writeState = writeRemindersState;
 
 // ---------------------------------------------------------------- helpers
 
@@ -539,6 +541,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		} catch { /* telemetry is optional */ }
 	};
 	type Occurrence = { id: string; dueAt: number };
+	type ReminderReceipt = { id?: string; sessionId: string; occurrences: Occurrence[] };
 	const applyOccurrences = (st: ReminderState, occurrences: Occurrence[], acceptedAt: number): number => {
 		const dueById = new Map(occurrences.map(row => [row.id, row.dueAt]));
 		let count = 0;
@@ -550,13 +553,14 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		}
 		return count;
 	};
-	const recoverOccurrences = (sid: string, st: ReminderState, ctx: ExtensionContext): boolean => {
+	const recoverOccurrences = (sid: string, st: ReminderState, entries: SessionEntry[], deliveryId?: string): boolean => {
 		if (!st.manual.some(reminder => reminder.active)) return false;
 		let changed = false;
-		for (const entry of ctx.sessionManager.getEntries?.() ?? ctx.sessionManager.getBranch?.() ?? []) {
+		for (const entry of entries) {
 			if (entry.type !== "custom_message" || entry.customType !== "reminders") continue;
-			const receipt = (entry.details as { reminderDelivery?: { sessionId?: string; occurrences?: Occurrence[] } })?.reminderDelivery;
+			const receipt = (entry.details as { reminderDelivery?: ReminderReceipt })?.reminderDelivery;
 			if (receipt?.sessionId !== sid || !Array.isArray(receipt.occurrences)) continue;
+			if (deliveryId && receipt.id !== deliveryId) continue;
 			const acceptedAt = Date.parse(entry.timestamp);
 			if (!Number.isFinite(acceptedAt)) continue;
 			const occurrences = receipt.occurrences.filter(row => typeof row?.id === "string" && Number.isSafeInteger(row.dueAt));
@@ -564,12 +568,51 @@ export default function remindersExtension(pi: ExtensionAPI) {
 		}
 		return changed;
 	};
+	const entriesInMemory = (ctx: ExtensionContext): SessionEntry[] => ctx.sessionManager.getEntries?.() ?? ctx.sessionManager.getBranch?.() ?? [];
+	const writeState = (sid: string, st: ReminderState) => {
+		try {
+			withRemindersState(sid, (current, save) => {
+				save({ ...st, manual: current.manual, pendingDelivery: current.pendingDelivery });
+				st.manual = current.manual;
+			});
+		} catch (error) { logReminderErr("state write", error); }
+	};
+	const updateManual = <T>(sid: string, st: ReminderState, ctx: ExtensionContext,
+		update: (current: ReminderState, save: () => void) => T): T => withRemindersState(sid, (current, write) => {
+		const save = () => write({ ...st, manual: current.manual, pendingDelivery: current.pendingDelivery });
+		if (current.pendingDelivery) {
+			// A live publisher owns the same lock. An intent visible here is from
+			// an interrupted commit. Only the matching transcript can settle it.
+			const file = ctx.sessionManager.getSessionFile?.();
+			const expected = file ? lstatSync(file, { bigint: true, throwIfNoEntry: false }) : undefined;
+			const entries = file && expected ? loadEntriesFromFile(file, {
+				readOnly: true, bounds: { expected, maxBytes: 128 * 1024 * 1024, maxRecords: 200_000 },
+			}) : undefined;
+			if (entries && (entries[0]?.type !== "session" || entries[0].id !== sid)) throw new Error("Reminder receipt transcript identity changed");
+			const messages = entries ? entries.filter((entry): entry is SessionEntry => entry.type !== "session") : entriesInMemory(ctx);
+			recoverOccurrences(sid, current, messages, current.pendingDelivery);
+			delete current.pendingDelivery;
+			save();
+		}
+		const result = update(current, save);
+		st.manual = current.manual;
+		return result;
+	});
 	const load = (sid: string, ctx?: ExtensionContext): ReminderState => {
 		let st = live.get(sid);
 		if (!st) {
 			st = readState(sid);
-			if (ctx && recoverOccurrences(sid, st, ctx)) writeState(sid, st);
 			live.set(sid, st);
+			if (ctx && (st.pendingDelivery || st.manual.some(reminder => reminder.active))) {
+				updateManual(sid, st, ctx, (current, save) => {
+					if (recoverOccurrences(sid, current, entriesInMemory(ctx))) save();
+				});
+			}
+		} else if (ctx) {
+			// Other open copies of the same session can add or clear schedules.
+			const current = readState(sid);
+			st.manual = current.manual;
+			if (current.pendingDelivery) updateManual(sid, st, ctx, () => {});
 		}
 		return st;
 	};
@@ -586,28 +629,64 @@ export default function remindersExtension(pi: ExtensionAPI) {
 	};
 
 	const stageDelivery = (sid: string, ctx: ExtensionContext, st: ReminderState, reminders: ManualReminder[],
-		onDelivery?: (acceptedAt: number) => void) => {
-		const occurrences = reminders.map(reminder => ({ id: reminder.id, dueAt: reminder.nextFireAt }));
+		render: (observed: ReminderState, active: ManualReminder[], trajectory?: string) => string, onDelivery?: (acceptedAt: number) => void) => {
+		const dueById = new Map(reminders.map(reminder => [reminder.id, reminder.nextFireAt]));
 		const sequence = (trajSeq.get(sid) ?? 0) + 1;
 		let accepted = false;
 		const currentSession = () => live.get(sid) === st && sidOf(ctx) === sid;
+		const eligible = (manual: ManualReminder[]) => {
+			const current = new Map(manual.map(row => [row.id, row]));
+			return reminders.flatMap(({ id }) => {
+				const row = current.get(id);
+				return row?.active && dueById.get(id) === row.nextFireAt ? [row] : [];
+			});
+		};
+		const project = (observed: ReminderState, active: ManualReminder[], id?: string) => ({
+			content: render(observed, active, active.length ? trajectoryLine(sequence) : undefined),
+			display: active.length > 0,
+			details: active.length ? { reminderDelivery: { id, sessionId: sid, occurrences: active.map(row => ({ id: row.id, dueAt: row.nextFireAt })) } } : undefined,
+		});
+		const complete = (at: number, count: number) => {
+			if (count > 0) {
+				trajSeq.set(sid, Math.max(sequence, trajSeq.get(sid) ?? 0));
+				armCompliance(sid, count);
+			}
+			onDelivery?.(at);
+		};
+		const preview = project(st, reminders);
 		return {
-			trajectory: occurrences.length ? trajectoryLine(sequence) : undefined,
-			details: occurrences.length ? { reminderDelivery: { sessionId: sid, occurrences } } : undefined,
-			canDeliver: () => !accepted && currentSession() && occurrences.every(row =>
-				st.manual.some(reminder => reminder.active && reminder.id === row.id && reminder.nextFireAt === row.dueAt)),
+			preview,
+			canDeliver: () => !accepted && currentSession() &&
+				(st.manual.some(row => row.active && dueById.get(row.id) === row.nextFireAt) || !!render(st, []).trim()),
 			wasAccepted: () => accepted,
+			commitDelivery: reminders.length ? (commit: (message: ReturnType<typeof project>) => void) => {
+				if (!currentSession()) return;
+				updateManual(sid, st, ctx, (current, save) => {
+					const message = project({ ...st, manual: current.manual }, eligible(current.manual), randomUUID());
+					if (!message.content.trim()) return;
+					const receipt = message.details?.reminderDelivery;
+					if (receipt) {
+						current.pendingDelivery = receipt.id;
+						save();
+					}
+					const at = Date.now();
+					commit(message);
+					accepted = true;
+					const count = applyOccurrences(current, receipt?.occurrences ?? [], at);
+					delete current.pendingDelivery;
+					try { complete(at, count); }
+					finally { save(); }
+				});
+			} : undefined,
 			onAccepted: () => {
 				if (accepted || !currentSession()) return;
 				accepted = true;
 				const at = Date.now();
-				const count = applyOccurrences(st, occurrences, at);
-				if (count > 0) {
-					trajSeq.set(sid, Math.max(sequence, trajSeq.get(sid) ?? 0));
-					armCompliance(sid, count);
-				}
-				try { onDelivery?.(at); }
-				finally { writeState(sid, st); }
+				updateManual(sid, st, ctx, (current, save) => {
+					const count = applyOccurrences(current, preview.details?.reminderDelivery.occurrences ?? [], at);
+					try { complete(at, count); }
+					finally { save(); }
+				});
 			},
 		};
 	};
@@ -799,7 +878,9 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			}
 			const warnings = st.workspaceWarnings.slice();
 			const lastMutation = st.lastMutAt;
-			const delivery = stageDelivery(sid, ctx, st, dueManual, at => {
+			const delivery = stageDelivery(sid, ctx, st, dueManual, (observed, active, trajectory) => reminderText(
+				observed, sid, now, fire, active, [], todoSnapshots.get(st), trajectory,
+			), at => {
 				if (fire.todo) {
 					st.todoReminders += 1;
 					st.lastTodoRemindAt = at;
@@ -816,30 +897,16 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				st.workspaceWarnings = st.workspaceWarnings.filter(warning => !warnings.includes(warning));
 				st.lastRemindAt = at;
 			});
-			const content = reminderText(
-				st,
-				sid,
-				now,
-				fire,
-				dueManual,
-				[],
-				todoSnapshots.get(st),
-				delivery.trajectory,
-			);
-			if (!content.trim()) {
+			if (!delivery.preview.content.trim()) {
 				writeState(sid, st);
 				return undefined;
 			}
 			return {
 				message: {
 					customType: "reminders",
-					content,
-					// Manual reminders are the user's own feature: they must be
-					// visible where the user looks (TUI + session export both
-					// filter on display). Ambient-only injections stay quiet.
-					display: dueManual.length > 0,
-					details: delivery.details,
+					...delivery.preview,
 					canDeliver: delivery.canDeliver,
+					commitDelivery: delivery.commitDelivery,
 					onAccepted: delivery.onAccepted,
 				},
 			};
@@ -1075,33 +1142,19 @@ export default function remindersExtension(pi: ExtensionAPI) {
 			try {
 				const signal = ctx.signal;
 				const currentLoop = loop;
-				const delivery = stageDelivery(sid, ctx, st, dueManual, at => {
+				const delivery = stageDelivery(sid, ctx, st, dueManual, (observed, active, trajectory) => reminderText(
+					observed, sid, now, { todo: false, drift: false }, active, nudge ? [nudge] : [], [], trajectory,
+				), at => {
 					if (!nudge || loop !== currentLoop) return;
 					loop.nudged = true;
 					if (reasoning && ctx.model) recoveryRoute = { provider: ctx.model.provider, model: ctx.model.id };
 					st.overthinkReminders += 1;
 					st.lastOverthinkAt = at;
 				});
-				await pi.sendMessage(
-					{
-						customType: "reminders",
-						content: reminderText(
-							st,
-							sid,
-							now,
-							{ todo: false, drift: false },
-							dueManual,
-							[
-								...(nudge ? [nudge] : []),
-							],
-							[],
-							delivery.trajectory,
-						),
-						display: dueManual.length > 0,
-						details: delivery.details,
-					},
-					{ deliverAs: "steer", canDeliver: () => !signal?.aborted && delivery.canDeliver(), onAccepted: delivery.onAccepted },
-				);
+				await pi.sendMessage({ customType: "reminders", ...delivery.preview }, {
+					deliverAs: "steer", canDeliver: () => !signal?.aborted && delivery.canDeliver(),
+					commitDelivery: delivery.commitDelivery, onAccepted: delivery.onAccepted,
+				});
 			} finally {
 				turnSteerInFlight = false;
 			}
@@ -1149,8 +1202,8 @@ export default function remindersExtension(pi: ExtensionAPI) {
 				const arg = args.trim();
 				const m = arg.match(/^(list|clear(?:\s+(\d+|all|\*))?)$/i);
 				if (m) {
-					const active = st.manual.filter((r) => r.active);
 					if (m[1].toLowerCase() === "list") {
+						const active = st.manual.filter((r) => r.active);
 						if (!active.length) return ctx.ui.notify("No active reminders.", "info");
 						const now = Date.now();
 						const lines = active.map((r, i) => {
@@ -1159,26 +1212,26 @@ export default function remindersExtension(pi: ExtensionAPI) {
 						});
 						return ctx.ui.notify(lines.join("\n"), "info");
 					}
-					if (!active.length) return ctx.ui.notify("Nothing to clear.", "info");
 					const all = !m[2] || /^(all|\*)$/i.test(m[2]);
-					const n = all ? active.length : Number(m[2]);
-					if (!all && (n < 1 || n > active.length))
-						return ctx.ui.notify(
-							`No active reminder #${n} (range 1-${active.length}).`,
-							"warning",
-						);
-					// Mark active=false (completed) rather than splice: stable ids
-					// survive, and clearing one cannot renumber/affect the others.
-					const removed = all ? [...active] : [active[n - 1]];
-					for (const r of removed) r.active = false;
-					if (!writeState(sid, st)) {
-						// Keep live state aligned with durable state when the atomic write fails.
-						for (const r of removed) r.active = true;
+					const n = Number(m[2]);
+					let cleared: { activeCount: number; removed: ManualReminder[] };
+					try {
+						cleared = updateManual(sid, st, ctx, (current, save) => {
+							const active = current.manual.filter((row) => row.active);
+							const removed = all ? active : n >= 1 && n <= active.length ? [active[n - 1]] : [];
+							for (const row of removed) row.active = false;
+							if (removed.length) save();
+							return { activeCount: active.length, removed };
+						});
+					} catch {
 						return ctx.ui.notify(
 							"reminder: failed to persist the clear operation; nothing was cleared",
 							"error",
 						);
 					}
+					const { activeCount, removed } = cleared;
+					if (!activeCount) return ctx.ui.notify("Nothing to clear.", "info");
+					if (!removed.length) return ctx.ui.notify(`No active reminder #${n} (range 1-${activeCount}).`, "warning");
 					const suffix = removed.length === 1 ? "" : "s";
 					return ctx.ui.notify(
 						all
@@ -1197,14 +1250,6 @@ export default function remindersExtension(pi: ExtensionAPI) {
 						`reminder: keep the text under ${CUSTOM_MAX} chars.`,
 						"warning",
 					);
-				// Duplicate text is the reminder the user already relies on —
-				// refuse a second queue entry instead of double-nagging.
-				const dup = st.manual.find((r) => r.active && r.text === arg);
-				if (dup)
-					return ctx.ui.notify(
-						`Reminder already set: "${oneLine(arg, 80)}" — it re-anchors every ~${Math.round(MANUAL_INTERVAL_MS / 60_000)} min while you work. /reminder clear <n> to stop.`,
-						"info",
-					);
 				const now = Date.now();
 				const reminder: ManualReminder = {
 					id: randomUUID(),
@@ -1215,27 +1260,30 @@ export default function remindersExtension(pi: ExtensionAPI) {
 					active: true,
 					delivered: 0,
 				};
-				st.manual.push(reminder);
-				if (!writeState(sid, st)) {
-					// The user was told it failed, so it must not remain live and fire.
-					st.manual = st.manual.filter((entry) => entry.id !== reminder.id);
+				let registered: boolean;
+				try {
+					registered = updateManual(sid, st, ctx, (current, save) => {
+						if (current.manual.some(row => row.active && row.text === arg)) return false;
+						current.manual.push(reminder);
+						save();
+						return true;
+					});
+				} catch {
 					return ctx.ui.notify(
 						"reminder: failed to persist the new reminder; it was not set",
 						"error",
 					);
 				}
+				if (!registered) return ctx.ui.notify(
+					`Reminder already set: "${oneLine(arg, 80)}" — it re-anchors every ~${Math.round(MANUAL_INTERVAL_MS / 60_000)} min while you work. /reminder clear <n> to stop.`,
+					"info",
+				);
 				// The explicit slash command authorizes one immediate steer, even
 				// while the agent is idle. Periodic repeats remain turn-bound in
 				// before_agent_start/turn_end and cannot wake completed work.
-				const delivery = stageDelivery(sid, ctx, st, [reminder]);
-				const immediateMessage = {
-					customType: "reminders",
-					content: reminderText(st, sid, now, { todo: false, drift: false }, [
-						reminder,
-					], undefined, [], delivery.trajectory),
-					display: true,
-					details: delivery.details,
-				};
+				const delivery = stageDelivery(sid, ctx, st, [reminder], (observed, active, trajectory) => active.length
+					? reminderText(observed, sid, now, { todo: false, drift: false }, active, undefined, [], trajectory) : "");
+				const immediateMessage = { customType: "reminders", ...delivery.preview };
 				try {
 					if (typeof pi.sendMessage !== "function")
 						throw new Error("message delivery unavailable");
@@ -1243,6 +1291,7 @@ export default function remindersExtension(pi: ExtensionAPI) {
 						deliverAs: "steer",
 						triggerTurn: true,
 						canDeliver: delivery.canDeliver,
+						commitDelivery: delivery.commitDelivery,
 						onAccepted: delivery.onAccepted,
 					});
 				} catch {

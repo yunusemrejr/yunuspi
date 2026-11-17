@@ -2797,7 +2797,7 @@
       {
         "name": "budget",
         "source": "agent/extensions/cost-governor.ts",
-        "line": 895
+        "line": 896
       },
       {
         "name": "catalog-status",
@@ -2972,7 +2972,7 @@
       {
         "name": "reminder",
         "source": "agent/extensions/reminders.ts",
-        "line": 1134
+        "line": 1187
       },
       {
         "name": "run",
@@ -3130,7 +3130,7 @@
       {
         "name": "audio_generate",
         "source": "agent/extensions/video-studio.ts",
-        "line": 86,
+        "line": 101,
         "kind": "factory"
       },
       {
@@ -3349,7 +3349,7 @@
       {
         "name": "narration_tts",
         "source": "agent/extensions/video-studio.ts",
-        "line": 82,
+        "line": 97,
         "kind": "factory"
       },
       {
@@ -3470,7 +3470,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 780,
+        "line": 787,
         "kind": "definition"
       },
       {
@@ -3518,7 +3518,7 @@
       {
         "name": "video_browser",
         "source": "agent/extensions/video-studio.ts",
-        "line": 94,
+        "line": 109,
         "kind": "factory"
       },
       {
@@ -3530,19 +3530,19 @@
       {
         "name": "video_project",
         "source": "agent/extensions/video-studio.ts",
-        "line": 62,
+        "line": 77,
         "kind": "factory"
       },
       {
         "name": "video_qa",
         "source": "agent/extensions/video-studio.ts",
-        "line": 78,
+        "line": 93,
         "kind": "factory"
       },
       {
         "name": "video_render",
         "source": "agent/extensions/video-studio.ts",
-        "line": 71,
+        "line": 86,
         "kind": "factory"
       },
       {
@@ -3933,7 +3933,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          831
+          838
         ],
         "knownNames": [
           "subagent"
@@ -4023,7 +4023,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          25
+          42
         ],
         "knownNames": [
           "audio_generate",

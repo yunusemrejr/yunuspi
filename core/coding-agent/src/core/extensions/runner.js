@@ -622,6 +622,10 @@ export class ExtensionRunner {
                 runner.assertActive();
                 return runner.getSystemPromptFn();
             },
+            getSystemPromptOptions: () => {
+                runner.assertActive();
+                return runner.getSystemPromptOptionsFn();
+            },
         };
     }
     createCommandContext() {
@@ -629,10 +633,6 @@ export class ExtensionRunner {
         // createContext() stay lazy. A spread would eagerly read them once and freeze the
         // old values into the returned object, bypassing stale-instance checks.
         const context = Object.defineProperties({}, Object.getOwnPropertyDescriptors(this.createContext()));
-        context.getSystemPromptOptions = () => {
-            this.assertActive();
-            return this.getSystemPromptOptionsFn();
-        };
         context.waitForIdle = () => {
             this.assertActive();
             return this.waitForIdleFn();

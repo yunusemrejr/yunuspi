@@ -1,4 +1,7 @@
 import { sessionObservability } from '../../../lib/session-observability.ts';
+import { recoverRetainedChildCosts } from "@yunuspi/coding-agent/session-accounting";
+import type { ExtensionAPI, ExtensionContext } from "@yunuspi/coding-agent";
+import type { AsyncStartedEvent } from "../shared/types.ts";
 import { sumResultsCost } from "../shared/utils.ts";
 import { readCostEvidence, hasRecordedTokenUsage } from "../../../lib/cost-evidence.ts";
 import { projectCostByModel, projectCostChildren } from "../shared/cost-accounting.ts";
@@ -58,6 +61,29 @@ export function restoreSubagentCosts(pi: any, state: any, entries: any[], lookup
     if (replay?.sessionId !== state.currentSessionId) continue;
     persistSubagentCost(pi,state,{...replay.completion,sessionId:replay.sessionId,completionOwnerId:state.completionOwnerId});
   }
+}
+
+/** Bind private workflow accounting to this session's transcript without waking it. */
+export function bindPrivateWorkflowCostRecovery(pi: Pick<ExtensionAPI, "bindAuxiliaryUsage">, sessionManager: ExtensionContext["sessionManager"], statusRoot: string) {
+  const sessionFile = sessionManager.getSessionFile();
+  const ownerSessionId = sessionManager.getSessionId();
+  if (!sessionFile || !pi.bindAuxiliaryUsage) return undefined;
+  const appendReference = pi.bindAuxiliaryUsage("subagent-lifecycle-v1");
+  const appendCost = pi.bindAuxiliaryUsage("subagent-cost-v1");
+  return {
+    track(info: AsyncStartedEvent): void {
+      if (info.resultDelivery !== "workflow" || info.sessionId !== sessionFile || info.mode !== "single" ||
+          !info.id || !info.parentWorkflowRunId || !info.workflowKey) return;
+      appendReference({runId:info.id, mode:"single", state:"queued", results:[{index:0, status:"queued"}],
+        privateWorkflow:{ownerSessionId, workflowRunId:info.parentWorkflowRunId, key:info.workflowKey}});
+    },
+    settle(runId: string): void {
+      if (sessionManager.getSessionFile() !== sessionFile || sessionManager.getSessionId() !== ownerSessionId) return;
+      const entries = [sessionManager.getHeader(), ...sessionManager.getEntries()];
+      const receipts = recoverRetainedChildCosts(entries, {sessionFile, statusRoot, privateWorkflowRunId:runId}).entries;
+      for (const receipt of receipts) appendCost(receipt.data);
+    },
+  };
 }
 
 /** Persist only lifecycle changes from the session-owned tracker. Queued workflow

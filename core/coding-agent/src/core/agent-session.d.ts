@@ -18,6 +18,7 @@ import { type BashResult } from "./bash-executor.ts";
 import { type CompactionResult } from "./compaction/index.ts";
 import { type ContextUsage, type ExtensionCommandContextActions, type ExtensionErrorListener, type ExtensionMode, ExtensionRunner, type ExtensionUIContext, type InputSource, type ReplacedSessionContext, type SessionStartEvent, type ShutdownHandler, type ToolDefinition, type ToolInfo } from "./extensions/index.ts";
 import type { CustomMessage } from "./messages.ts";
+import type { CommitCustomMessageDelivery } from "./extensions/types.ts";
 import type { ModelRuntime } from "./model-runtime.ts";
 import { type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceLoader } from "./resource-loader.ts";
@@ -426,13 +427,17 @@ export declare class AgentSession {
         onAccepted?: () => void;
         /** If false, discard the staged custom message before delivery. */
         canDeliver?: () => boolean;
+        commitDelivery?: CommitCustomMessageDelivery<T>;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): Promise<void>;
     private _appendCustomMessage;
     private _acknowledgeCustomMessage;
     private _customMessageAcceptances;
     private _customMessageDeliveryChecks;
+    private _customMessageDeliveries;
+    private _committedCustomMessages;
     private _canDeliverCustomMessage;
+    private _commitCustomMessageDelivery;
     private _persistCustomMessage;
     /**
      * Append custom messages queued while the agent was running.

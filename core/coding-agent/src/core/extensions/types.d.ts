@@ -250,14 +250,14 @@ export interface ExtensionContext {
     compact(options?: CompactOptions): void;
     /** Get the current effective system prompt. */
     getSystemPrompt(): string;
+    /** Get the current base system-prompt construction options. */
+    getSystemPromptOptions(): BuildSystemPromptOptions;
 }
 /**
  * Extended context for command handlers.
  * Includes session control methods only safe in user-initiated commands.
  */
 export interface ExtensionCommandContext extends ExtensionContext {
-    /** Get the current base system-prompt construction options. */
-    getSystemPromptOptions(): BuildSystemPromptOptions;
     /** Wait for the agent to finish streaming */
     waitForIdle(): Promise<void>;
     /** Start a new session, optionally with initialization. */
@@ -305,6 +305,7 @@ export interface ReplacedSessionContext extends ExtensionCommandContext {
         onAccepted?: () => void;
         /** If false, discard the staged custom message before delivery. */
         canDeliver?: () => boolean;
+        commitDelivery?: CommitCustomMessageDelivery<T>;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): Promise<void>;
     sendUserMessage(content: string | (TextContent | ImageContent)[], options?: {
@@ -899,6 +900,7 @@ export interface BeforeAgentStartEventResult {
         canDeliver?: () => boolean;
         /** Called once after the message is committed to session history. */
         onAccepted?: () => void;
+        commitDelivery?: CommitCustomMessageDelivery;
     };
     /** Replace the system prompt for this turn. If multiple extensions return this, they are chained. */
     systemPrompt?: string;
@@ -1039,6 +1041,7 @@ export interface ExtensionAPI {
         onAccepted?: () => void;
         /** If false, discard the staged custom message before delivery. */
         canDeliver?: () => boolean;
+        commitDelivery?: CommitCustomMessageDelivery<T>;
         deliverAs?: "steer" | "followUp" | "nextTurn";
     }): Promise<void>;
     /**
@@ -1263,12 +1266,17 @@ export interface ExtensionShortcut {
     extensionPath: string;
 }
 type HandlerFn = (...args: unknown[]) => Promise<unknown>;
+/** At admission, synchronously validate and commit the final content with the extension's own state lock held.
+ * Returning without calling commit drops the staged message. A successful commit makes the message durable
+ * before publishing message events, and onAccepted runs outside the transaction. */
+export type CommitCustomMessageDelivery<T = unknown> = (commit: (message: Pick<CustomMessage<T>, "content" | "display" | "details">) => void) => void;
 export type SendMessageHandler = <T = unknown>(message: Pick<CustomMessage<T>, "customType" | "content" | "display" | "details" | "excludeFromContext">, options?: {
     triggerTurn?: boolean;
         /** Called once after session-history acceptance, never merely queued: disk-backed sessions are fsynced; in-memory sessions are accepted only in memory. Does not report model completion. */
         onAccepted?: () => void;
     /** If false, discard the staged custom message before delivery. */
     canDeliver?: () => boolean;
+    commitDelivery?: CommitCustomMessageDelivery<T>;
     deliverAs?: "steer" | "followUp" | "nextTurn";
 }) => Promise<void>;
 export type SendUserMessageHandler = (content: string | (TextContent | ImageContent)[], options?: {

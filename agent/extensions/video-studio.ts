@@ -14,6 +14,23 @@ import { videoReviewRouting, installVideoReviewEvidence } from './lib/video-revi
 
 const localPath = Type.String({ minLength: 1, maxLength: 4096 });
 
+function bindAudioUsage(pi: any, ctx: any, owner: string, toolCallId: string): ElevenUsageSink | undefined {
+  if (typeof pi.bindAuxiliaryUsage === 'function') {
+    try {
+      const append = pi.bindAuxiliaryUsage();
+      // The captured writer can settle a paid call after the extension context expires.
+      return receipt => { append({ ...receipt, owner, toolCallId }); };
+    } catch { return undefined; }
+  }
+  const ownerManager = ctx?.sessionManager, ownerSession = ownerManager?.getSessionId?.();
+  if (!ownerSession) return undefined;
+  return receipt => {
+    if (ctx?.sessionManager === ownerManager && ownerManager.getSessionId?.() === ownerSession) {
+      pi.appendEntry?.('auxiliary-model-usage-v1', { ...receipt, owner, toolCallId });
+    }
+  };
+}
+
 export default function videoStudio(pi: any) {
   const reviews = installVideoReviewEvidence(pi);
   pi.on?.("tool_call", (event: any, ctx: any) => {
@@ -32,11 +49,9 @@ export default function videoStudio(pi: any) {
         if (name === 'narration_tts') params = selectedMediaParams(params, 'speech', ctx?.mediaModels);
         if (name === 'audio_generate') params = selectedMediaParams(params, params.kind, ctx?.mediaModels);
         if (name==='video_qa') await reviews.assertVisualReviews(params,ctx,bounded);
-        const onUsage: ElevenUsageSink = receipt => {
-          if (ownerSession && ctx?.sessionManager === ownerManager && ownerManager.getSessionId?.() === ownerSession) {
-            pi.appendEntry?.('auxiliary-model-usage-v1', { ...receipt, owner: name, toolCallId });
-          }
-        };
+        const onUsage = name === 'narration_tts' || name === 'audio_generate'
+          ? bindAudioUsage(pi, ctx, name, toolCallId)
+          : undefined;
         const result = await handler(params, ctx?.cwd || process.cwd(), bounded, progress, onUsage);
         const reviewRouting = videoReviewRouting(result, ctx?.model?.input?.includes('image') !== false);
         if (reviewRouting) result.reviewRouting = reviewRouting;

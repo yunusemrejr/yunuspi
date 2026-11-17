@@ -1,6 +1,6 @@
 import { readCompletionReplay } from "../runs/background/completion-replay.ts";
 import { recoverRetainedChildCosts } from "@yunuspi/coding-agent/session-accounting";
-import { persistSubagentCost, persistSubagentActivity, restoreSubagentCosts } from "./session-cost.ts";
+import { bindPrivateWorkflowCostRecovery, persistSubagentCost, persistSubagentActivity, restoreSubagentCosts } from "./session-cost.ts";
 /**
  * Subagent Tool
  *
@@ -85,6 +85,7 @@ import {
 	SLASH_TEXT_RESULT_TYPE,
 	SUBAGENT_ASYNC_COMPLETE_EVENT,
 	SUBAGENT_ASYNC_STARTED_EVENT,
+	type AsyncStartedEvent,
 	SUBAGENT_PROCESS_TERMINAL_EVENT,
 	SUBAGENT_CONTROL_EVENT,
 	SUBAGENT_STEERING_NOTICE_EVENT,
@@ -585,10 +586,16 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 			agents: merged.agents.map((agent) => agent.maxThinking === discovered.maxThinking ? agent : { ...agent, maxThinking: discovered.maxThinking }),
 		};
 	};
+	let privateWorkflowCosts: ReturnType<typeof bindPrivateWorkflowCostRecovery>;
 	const { ensurePoller, refreshWidget, handleStarted, handleComplete, resetJobs, restoreActiveJobs, dispose: disposeAsyncJobTracker } = createAsyncJobTracker(pi, state, DIRS.async, {
 		widgetEnabled: asyncWidgetEnabled,
 		onLifecycle: payload => persistSubagentActivity(pi, state, payload),
 		onJobTerminal: () => refreshResultDelivery(),
+		onPrivateWorkflowTerminal: (job) => {
+			if (job.sessionId === state.currentSessionId) {
+				try { privateWorkflowCosts?.settle(job.asyncId); } catch (error) { console.error("Private workflow cost reconciliation failed:", error); }
+			}
+		},
 	});
 	const resultWatcher = createResultWatcher(
 		pi,
@@ -880,6 +887,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		handleSubagentSteeringNotice({ pi, state, details: payload as SubagentSteeringMessageDetails });
 	};
 	const asyncStartedHandler = (payload: unknown) => {
+		try { privateWorkflowCosts?.track(payload as AsyncStartedEvent); }
+		catch (error) { console.error("Private workflow cost reference persistence failed:", error); }
 		handleStarted(payload);
 		supervisorChannel.activateTransport();
 		refreshResultDelivery();
@@ -968,6 +977,9 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		transitionResultDelivery();
 		try { restoreSubagentCosts(pi, state, ctx.sessionManager.getEntries(), id => readCompletionReplay(DIRS.results, id, {sessionId:state.currentSessionId ?? undefined})); } catch (error) { console.error("Subagent cost restoration failed:", error); }
 		state.parentSessionFile = ctx.sessionManager.getSessionFile();
+		privateWorkflowCosts = undefined;
+		try { privateWorkflowCosts = bindPrivateWorkflowCostRecovery(pi, ctx.sessionManager, DIRS.async); }
+		catch (error) { console.error("Private workflow cost binding failed:", error); }
 		if (recovering && state.parentSessionFile) {
 			try {
 				const entries = [ctx.sessionManager.getHeader(), ...ctx.sessionManager.getEntries()];

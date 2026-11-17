@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import {pathToFileURL} from "node:url";
+import { AssistantMessageEventStream } from "@yunuspi/ai";
+import { createAgentSession } from "../core/coding-agent/src/core/sdk.js";
+import { DefaultResourceLoader } from "../core/coding-agent/src/core/resource-loader.js";
+import { SettingsManager } from "../core/coding-agent/src/core/settings-manager.js";
+import { SessionManager } from "../core/coding-agent/src/core/session-manager.js";
 
 const root = path.resolve(import.meta.dirname, "..");
 const {registerSkillReview, rankCatalog, matchingGuides} = await import(pathToFileURL(path.join(root, "agent/extensions/lib/skill-review.ts")));
@@ -38,6 +45,43 @@ test("skill_review drops the previous catalogue when skills are disabled", async
   assert.equal(countSkills(await browse()), 0);
   f.refresh({systemPromptOptions: {skills: [{name: "private", description: "Disabled", filePath: "/fixture/skills/private/SKILL.md", disableModelInvocation: true}]}});
   assert.equal(countSkills(await browse()), 0);
+});
+
+test("an extension wake can browse the configured skill catalogue before any user preflight", async t => {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-skill-wake-"));
+  t.after(() => fs.rmSync(cwd, { recursive: true, force: true }));
+  const filePath = path.join(cwd, "SKILL.md");
+  fs.writeFileSync(filePath, "---\nname: fixture-guide\ndescription: Synthetic workflow guide.\n---\n# Fixture\n");
+  const settingsManager = SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } });
+  const resourceLoader = new DefaultResourceLoader({ cwd, agentDir: cwd, settingsManager, noExtensions: true,
+    noSkills: true, noThemes: true, noContextFiles: true, extensionFactories: [registerSkillReview],
+    skillsOverride: () => ({ skills: [{ name: "fixture-guide", description: "Synthetic workflow guide.", filePath,
+      baseDir: cwd, source: "fixture", disableModelInvocation: false }], diagnostics: [] }) });
+  await resourceLoader.reload();
+  const model = { id: "fixture", name: "Fixture", provider: "fixture", api: "openai-completions", baseUrl: "https://fixture.invalid",
+    input: ["text"], reasoning: false, contextWindow: 65536, maxTokens: 4096, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } };
+  let requests = 0;
+  const modelRuntime = { getModel: () => model, getAvailable: () => [model], hasConfiguredAuth: () => true, isUsingSubscription: () => false,
+    getAuth: async () => ({ auth: { apiKey: "synthetic" } }), streamSimple() {
+      const browse = ++requests === 1;
+      const message = { role: "assistant", api: model.api, provider: model.provider, model: model.id, timestamp: Date.now(),
+        stopReason: browse ? "toolUse" : "stop", content: browse
+          ? [{ type: "toolCall", id: "fixture-skill-browse", name: "skill_review", arguments: { action: "browse" } }]
+          : [{ type: "text", text: "Synthetic answer" }],
+        usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { total: 0 } } };
+      const events = new AssistantMessageEventStream();
+      events.push({ type: "done", reason: message.stopReason, message });
+      return events;
+    } };
+  const sessionManager = SessionManager.inMemory(cwd);
+  const { session } = await createAgentSession({ cwd, agentDir: cwd, model, modelRuntime, settingsManager, resourceLoader,
+    sessionManager, tools: ["skill_review"], thinkingLevel: "off" });
+  t.after(() => session.dispose());
+  await session.bindExtensions({ mode: "rpc" });
+  await session.sendCustomMessage({ customType: "background-completion-wake", content: "Synthetic extension wake.", display: false }, { triggerTurn: true });
+  const result = sessionManager.getEntries().find(entry => entry.message?.toolName === "skill_review")?.message;
+  assert.equal(result.isError, false);
+  assert.equal(JSON.parse(result.content[0].text).groups.reduce((total, group) => total + group.count, 0), 1);
 });
 
 test("capability grouping is total, deterministic and compact", () => {

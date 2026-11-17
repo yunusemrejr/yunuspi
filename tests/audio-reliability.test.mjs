@@ -206,6 +206,85 @@ test('registered hosted audio associates billing with its exact tool call even w
   assert.equal(settled.rows[0].billingUnits, 25.5);
 });
 
+test('a paid ElevenLabs response settles only its source receipt after the SDK forks', {timeout:15_000}, async t => {
+  const { AgentSessionRuntime, DefaultResourceLoader, SessionManager, SettingsManager, createAgentSession } =
+    await import('../core/coding-agent/src/index.js');
+  const { collectSessionCost } = await import('../core/coding-agent/src/core/session-accounting.js');
+  const { default: registerVideoStudio } = await import(pathToFileURL(path.join(agent, 'extensions/video-studio.ts')).href);
+  const cwd = await workspace(t), audio = await fixtureAudio(cwd);
+  const previousKey = process.env.ELEVENLABS_API_KEY, previousRate = process.env.ELEVENLABS_USD_PER_1000_BILLING_UNITS;
+  process.env.ELEVENLABS_API_KEY = env.ELEVENLABS_API_KEY;
+  process.env.ELEVENLABS_USD_PER_1000_BILLING_UNITS = '2';
+  t.after(() => {
+    if (previousKey === undefined) delete process.env.ELEVENLABS_API_KEY; else process.env.ELEVENLABS_API_KEY = previousKey;
+    if (previousRate === undefined) delete process.env.ELEVENLABS_USD_PER_1000_BILLING_UNITS; else process.env.ELEVENLABS_USD_PER_1000_BILLING_UNITS = previousRate;
+  });
+  const posted = Promise.withResolvers(), answer = Promise.withResolvers();
+  const fetch = t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(String(url), 'https://api.elevenlabs.io/v1/sound-generation?output_format=mp3_44100_128');
+    assert.equal(options.method, 'POST');
+    posted.resolve();
+    return answer.promise;
+  });
+  const model = {id:'fixture', name:'Fixture', api:'openai-completions', provider:'audit', baseUrl:'https://fixture.invalid',
+    input:['text'], reasoning:false, contextWindow:8192, maxTokens:2048, cost:{input:0, output:0, cacheRead:0, cacheWrite:0}};
+  const modelRuntime = {getModel:()=>model, getAvailable:()=>[model], hasConfiguredAuth:()=>true, isUsingSubscription:()=>false,
+    streamSimple(){ assert.fail('the fixture makes no model request'); }};
+  async function create(sessionManager) {
+    let context;
+    const settingsManager = SettingsManager.inMemory();
+    const resourceLoader = new DefaultResourceLoader({cwd, agentDir:cwd, settingsManager, noExtensions:true, noSkills:true,
+      noPromptTemplates:true, noThemes:true, noContextFiles:true, extensionFactories:[pi => {
+        registerVideoStudio(pi);
+        pi.on('session_start', (_event, ctx) => { context = ctx; });
+      }]});
+    await resourceLoader.reload();
+    const runtime = await createAgentSession({cwd, agentDir:cwd, model, modelRuntime, settingsManager, resourceLoader, sessionManager, tools:[]});
+    await runtime.session.bindExtensions({mode:'print'});
+    return {...runtime, context, services:{cwd, agentDir:cwd}};
+  }
+  const manager = SessionManager.create(cwd, cwd);
+  manager.appendMessage({role:'user', content:'Create a fixture sound', timestamp:1});
+  manager.flush();
+  const sourceFile = manager.getSessionFile(), original = await create(manager);
+  const sourceLeaf = manager.getLeafId();
+  const host = new AgentSessionRuntime(original.session, original.services, ({sessionManager}) => create(sessionManager));
+  t.after(() => host.dispose());
+  const tool = original.session.extensionRunner.getToolDefinition('audio_generate');
+  assert.ok(tool);
+  const invoke = assert.rejects(tool.execute('sound-fork', {kind:'sfx', prompt:'Synthetic sound', seconds:1},
+    undefined, undefined, original.context), /ctx is stale/);
+  const readSource = () => SessionManager.open(sourceFile, cwd).getEntries();
+  const forkEvents = [];
+  try {
+    await Promise.race([posted.promise, invoke.then(() => assert.fail('tool ended before dispatch'))]);
+    assert.equal(collectSessionCost(readSource()).pending, 1);
+    assert.equal((await host.fork(sourceLeaf, {position:'at'})).cancelled, false);
+    host.session.subscribe(event => forkEvents.push(event.type));
+    assert.equal(collectSessionCost(host.session.sessionManager.getEntries()).pending, 0);
+  } finally {
+    answer.resolve(new Response(audio, {headers:{'character-cost':'25.5', 'request-id':'fixture-paid-after-fork'}}));
+    await invoke;
+  }
+  assert.equal(fetch.mock.callCount(), 1);
+  const entries = readSource(), source = collectSessionCost(entries);
+  const receipts = entries.filter(entry => entry.customType === 'auxiliary-model-usage-v1');
+  assert.deepEqual(receipts.map(entry => [entry.parentId, entry.accountingOnly, entry.data.status]),
+    [[sourceLeaf, true, 'pending'], [sourceLeaf, true, 'completed']]);
+  assert.equal(receipts[1].data.id, receipts[0].data.id);
+  assert.equal(receipts[1].data.toolCallId, 'sound-fork');
+  assert.equal(receipts[1].data.characterCost, 25.5);
+  assert.equal(source.formatted, '$~0.051000');
+  assert.equal(source.estimated, .051);
+  assert.equal(source.pending, 0);
+  assert.equal(collectSessionCost([...entries, ...entries]).estimated, .051);
+  const fork = collectSessionCost(host.session.sessionManager.getEntries());
+  assert.equal(fork.total, 0);
+  assert.equal(fork.pending, 0);
+  assert.equal(fork.unknown, false);
+  assert.ok(!forkEvents.includes('entry_appended'));
+});
+
 test('corrupt completed speech receipts fail without initiating paid regeneration', async t => {
   const dir = await workspace(t), bytes = await fixtureAudio(dir), original = globalThis.fetch;
   t.after(() => { globalThis.fetch = original; });

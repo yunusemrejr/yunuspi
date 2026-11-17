@@ -36,6 +36,7 @@ interface AsyncJobTrackerOptions {
 	widgetEnabled?: boolean;
 	platform?: NodeJS.Platform;
 	onJobTerminal?: () => void;
+	onPrivateWorkflowTerminal?: (job: AsyncJobState) => void;
 	onLifecycle?: (data: {runId:string;sessionId?:string;mode?:string;state:string;results:any[];parallelGroups?:any[];events?:Record<string,number>}) => void;
 	watch?: typeof fs.watch;
 	kill?: (pid: number, signal?: NodeJS.Signals | 0) => boolean;
@@ -506,6 +507,7 @@ export function createAsyncJobTracker(pi: Pick<ExtensionAPI, "events">, state: S
 				job.wrapUpRequested = status.wrapUpRequested ?? job.wrapUpRequested;
 				job.sessionFile = status.sessionFile ?? job.sessionFile;
 				if (terminalStatus(job.status)) {
+					if (job.resultDelivery === "workflow") options.onPrivateWorkflowTerminal?.(job);
 					if (!terminalStatus(previousStatus)) options.onJobTerminal?.();
 					rememberFleetJob(state, job);
 					if (!nestedRefreshFailed && !hasLiveNestedDescendants(job.nestedChildren) && (previousStatus !== job.status || !state.cleanupTimers.has(job.asyncId))) {

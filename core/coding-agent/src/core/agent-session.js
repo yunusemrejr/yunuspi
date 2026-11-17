@@ -174,8 +174,8 @@ export class AgentSession {
             if (previousDeliveryCheck?.(message, signal) === false) return false;
             const check = this._customMessageDeliveryChecks.get(message);
             const pending = this._pendingNextTurnMessages.has(message);
-            if (signal?.aborted) return !pending && !check;
-            if (this._canDeliverCustomMessage(check)) return true;
+            if (signal?.aborted) return !pending && !check && !this._customMessageDeliveries?.has(message);
+            if (this._canDeliverCustomMessage(check) && this._commitCustomMessageDelivery(message)) return true;
             this._pendingNextTurnMessages.delete(message);
             return false;
         };
@@ -454,9 +454,34 @@ export class AgentSession {
     /** Exact message identity owns its durable-acceptance callback across queues. */
     _customMessageAcceptances = new WeakMap();
     _customMessageDeliveryChecks = new WeakMap();
+    _customMessageDeliveries;
+    _committedCustomMessages;
     _canDeliverCustomMessage(canDeliver) {
         try { return canDeliver?.() !== false; }
         catch { return false; }
+    }
+    _commitCustomMessageDelivery(message) {
+        const delivery = this._customMessageDeliveries?.get(message);
+        if (delivery === null) return false;
+        if (!delivery) return true;
+        this._customMessageDeliveries.set(message, null);
+        let active = true;
+        let committed = false;
+        try {
+            delivery(update => {
+                if (!active || committed) return;
+                message.content = update.content ?? [];
+                message.display = update.display;
+                message.details = update.details;
+                this._persistCustomMessage(message, { durable: true, acknowledge: false });
+                (this._committedCustomMessages ??= new WeakSet()).add(message);
+                this._customMessageDeliveries.delete(message);
+                committed = true;
+            });
+        }
+        catch (error) { console.warn("Custom message delivery transaction failed:", error); }
+        finally { active = false; }
+        return committed;
     }
     /** Internal handler for agent events - shared by subscribe and reconnect */
     _handleAgentEvent = async (event, signal) => {
@@ -661,7 +686,7 @@ export class AgentSession {
                 ...(model ? { requestedModel: Object.freeze({ provider: model.provider, id: model.id, baseUrl: model.baseUrl }) } : {}),
             };
             const replacement = await this._extensionRunner.emitMessageEnd(extensionEvent);
-            if (replacement) {
+            if (replacement && !this._committedCustomMessages?.has(event.message)) {
                 // Untyped extension handlers can return messages with null/missing content;
                 // normalize so it never enters agent state or session history.
                 const normalized = (replacement.role === "user" ||
@@ -1168,6 +1193,7 @@ export class AgentSession {
                     };
                     if (typeof msg.onAccepted === "function") this._customMessageAcceptances.set(appMessage, msg.onAccepted);
                     if (typeof msg.canDeliver === "function") this._customMessageDeliveryChecks.set(appMessage, msg.canDeliver);
+                    if (typeof msg.commitDelivery === "function") (this._customMessageDeliveries ??= new WeakMap()).set(appMessage, msg.commitDelivery);
                     messages.push(appMessage);
                 }
             }
@@ -1411,6 +1437,7 @@ export class AgentSession {
         };
         if (options?.onAccepted) this._customMessageAcceptances.set(appMessage, options.onAccepted);
         if (options?.canDeliver) this._customMessageDeliveryChecks.set(appMessage, options.canDeliver);
+        if (options?.commitDelivery) (this._customMessageDeliveries ??= new WeakMap()).set(appMessage, options.commitDelivery);
         if (options?.deliverAs === "nextTurn") {
             this._pendingNextTurnMessages.add(appMessage);
         }
@@ -1443,19 +1470,21 @@ export class AgentSession {
         }
     }
     _appendCustomMessage(appMessage) {
-        if (!this._canDeliverCustomMessage(this._customMessageDeliveryChecks.get(appMessage))) return;
+        if (!this._canDeliverCustomMessage(this._customMessageDeliveryChecks.get(appMessage)) || !this._commitCustomMessageDelivery(appMessage)) return;
         this.agent.state.messages.push(appMessage);
         this._persistCustomMessage(appMessage);
         this._emit({ type: "message_start", message: appMessage });
         this._emit({ type: "message_end", message: appMessage });
     }
-    _persistCustomMessage(appMessage) {
+    _persistCustomMessage(appMessage, { durable = false, acknowledge = true } = {}) {
         try {
             const nextTurn = this._pendingNextTurnMessages.has(appMessage);
-            this.sessionManager.appendCustomMessageEntry(appMessage.customType, appMessage.content, appMessage.display,
-                appMessage.details, appMessage.excludeFromContext, nextTurn || this._customMessageAcceptances.has(appMessage));
+            if (!this._committedCustomMessages?.has(appMessage)) {
+                this.sessionManager.appendCustomMessageEntry(appMessage.customType, appMessage.content, appMessage.display,
+                    appMessage.details, appMessage.excludeFromContext, durable || nextTurn || this._customMessageAcceptances.has(appMessage));
+            }
             this._pendingNextTurnMessages.delete(appMessage);
-            this._acknowledgeCustomMessage(appMessage);
+            if (acknowledge) this._acknowledgeCustomMessage(appMessage);
         }
         catch (error) {
             this.agent.state.messages = this.agent.state.messages.filter(message => message !== appMessage);

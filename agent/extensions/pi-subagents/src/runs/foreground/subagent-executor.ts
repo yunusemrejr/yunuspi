@@ -2140,6 +2140,7 @@ async function resumeAsyncRun(input: {
 		const usage = importedAsyncRootUsage(completed);
 		const childResult: SingleResult = {
 			index: 0,
+			runId: revivedId,
 			agent: completed.agent,
 			...(completed.sessionName ? { sessionName: completed.sessionName } : {}),
 			task: effectiveFollowUp,
@@ -3185,6 +3186,7 @@ async function waitForWorkflowAsyncSingleResult(
 	const usage = importedAsyncRootUsage(completed);
 	const childResult: SingleResult = omitUndefinedProperties({
 		index: 0,
+		runId: options.runId,
 		agent: completed.agent,
 		...(completed.sessionName ? { sessionName: completed.sessionName } : {}),
 		task: options.task,

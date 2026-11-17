@@ -116,7 +116,6 @@ export const stream = (model, context, options) => {
             if (nextParams !== undefined) {
                 params = nextParams;
             }
-            const hostedToolRates = responsesHostedToolRates(model, params?.tools);
             const requestOptions = {
                 ...(options?.signal ? { signal: options.signal } : {}),
                 ...(options?.timeoutMs !== undefined ? { timeout: options.timeoutMs } : {}),
@@ -132,6 +131,7 @@ export const stream = (model, context, options) => {
                 maxRetryDelayMs: options?.maxRetryDelayMs,
                 signal: options?.signal,
             });
+            const hostedToolRates = responsesHostedToolRates(model, params?.tools, response, params?.service_tier);
             await options?.onResponse?.({ status: response.status, headers: headersToRecord(response.headers) }, model);
             stream.push({ type: "start", partial: output });
             await processResponsesStream(openaiStream, output, stream, model, {

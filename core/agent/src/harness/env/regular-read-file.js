@@ -9,7 +9,7 @@ export async function withRegularReadFile(path, signal, read) {
     const file = await open(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
     try {
         signal?.throwIfAborted();
-        const stats = await file.stat();
+        const stats = await file.stat({ bigint: true });
         signal?.throwIfAborted();
         if (!stats.isFile()) {
             const directory = stats.isDirectory();
@@ -18,7 +18,7 @@ export async function withRegularReadFile(path, signal, read) {
                 path,
             });
         }
-        const result = await read(file);
+        const result = await read(file, stats);
         signal?.throwIfAborted();
         return result;
     }

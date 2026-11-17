@@ -73,6 +73,7 @@ export interface ReminderState {
 	mutationAudit: MutationAudit[]; // bounded actual target/path receipts
 	workspaceWarnings: string[]; // bounded Git drift/overlap warnings
 	manual: ManualReminder[];
+	pendingDelivery?: string; // recovery key for a transcript append in progress
 }
 
 export function remindersStateFile(sid: string): string {
@@ -130,6 +131,9 @@ function readValidatedRemindersState(sidOrEmpty: string): ReminderState {
 			if (typeof value === "number" && (!Number.isFinite(value) || value < 0)) continue;
 			rec[key] = value;
 		}
+		if (typeof src.pendingDelivery === "string" && /^[0-9a-f-]{36}$/.test(src.pendingDelivery)) {
+			st.pendingDelivery = src.pendingDelivery;
+		}
 	}
 	// Defensive: a hand-edited or legacy-corrupted state file must not break
 	// the next check-in. Atomic tmp+rename already prevents partial writes.
@@ -176,19 +180,33 @@ export function readRemindersState(sidOrEmpty: string): ReminderState {
 	}
 }
 
-export function writeRemindersState(
-	sidOrEmpty: string,
-	st: ReminderState,
-): boolean {
+function writeStateFile(file: string, st: ReminderState, commit: (rename: () => void) => void): void {
 	let tmp: string | undefined;
 	try {
-		fs.mkdirSync(REMINDERS_STATE_DIR, { recursive: true, mode: 0o700 });
-		const file = remindersStateFile(sidOrEmpty);
 		tmp = `${file}.${process.pid}.${randomUUID()}.tmp`;
-		fs.writeFileSync(tmp, JSON.stringify(st), { flag: "wx", mode: 0o600 });
+		fs.writeFileSync(tmp, JSON.stringify(st), { flag: "wx", mode: 0o600, flush: !!st.pendingDelivery });
 		const staged = tmp;
-		withSessionWriteLock(file, () => fs.renameSync(staged, file));
+		commit(() => {
+			fs.renameSync(staged, file);
+			if (st.pendingDelivery) {
+				const dir = fs.openSync(path.dirname(file), "r");
+				try { fs.fsyncSync(dir); }
+				finally { fs.closeSync(dir); }
+			}
+		});
 		tmp = undefined;
+	} finally {
+		if (tmp) {
+			try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
+		}
+	}
+}
+
+export function writeRemindersState(sid: string, st: ReminderState): boolean {
+	try {
+		fs.mkdirSync(REMINDERS_STATE_DIR, { recursive: true, mode: 0o700 });
+		const file = remindersStateFile(sid);
+		writeStateFile(file, st, rename => withSessionWriteLock(file, rename));
 		return true;
 	} catch (error) {
 		// Ambient hooks must never break a session, but persistence loss must be
@@ -198,11 +216,22 @@ export function writeRemindersState(
 			error instanceof Error ? error.message : String(error),
 		);
 		return false;
-	} finally {
-		if (tmp) {
-			try { fs.rmSync(tmp, { force: true }); } catch { /* best effort */ }
-		}
 	}
+}
+
+/** Read the newest sidecar under its writer lock and publish only the transaction's edits. */
+export function withRemindersState<T>(sid: string, update: (state: ReminderState, save: (state: ReminderState) => void) => T): T {
+	fs.mkdirSync(REMINDERS_STATE_DIR, { recursive: true, mode: 0o700 });
+	const file = remindersStateFile(sid);
+	return withSessionWriteLock(file, () => {
+		let state: ReminderState;
+		try { state = readValidatedRemindersState(sid); }
+		catch (error) {
+			if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+			state = defaultRemindersState();
+		}
+		return update(state, next => writeStateFile(file, next, rename => rename()));
+	});
 }
 
 /** Prune old, cleared state while excluding concurrent reminder publishers. */

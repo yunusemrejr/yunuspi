@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -413,6 +415,80 @@ test('read_many batches independent files, caps one file and reports per-file fa
 	}
 });
 
+async function readManyFixture(t) {
+	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-read-many-'));
+	const spill = path.join(cwd, 'spill');
+	fs.mkdirSync(spill);
+	const settings = { TMPDIR: spill, PI_CODING_AGENT_DIR: cwd, PI_CONTEXT_GOVERNOR: 'on' };
+	const previous = Object.fromEntries(Object.keys(settings).map(key => [key, process.env[key]]));
+	Object.assign(process.env, settings);
+	t.after(() => {
+		for (const [key, value] of Object.entries(previous)) {
+			if (value === undefined) delete process.env[key];
+			else process.env[key] = value;
+		}
+		fs.rmSync(cwd, { recursive: true, force: true });
+	});
+	const { default: register } = await import(extensionUrl);
+	const { pi, tools } = fakePi();
+	register(pi);
+	return { cwd, spill, tool: tools.get('read_many'), ctx: fakeCtx({ cwd }) };
+}
+
+function countReadManyFiles(t, cwd, afterRead) {
+	const open = fsp.open;
+	const opened = [];
+	let bytes = 0;
+	fsp.open = async (file, ...args) => {
+		const handle = await open(file, ...args);
+		if (typeof file === 'string' && path.dirname(file) === cwd) {
+			const name = path.basename(file);
+			opened.push(name);
+			const readFile = handle.readFile.bind(handle);
+			handle.readFile = async (...options) => {
+				const result = await readFile(...options);
+				bytes += result.length;
+				afterRead?.(name);
+				return result;
+			};
+		}
+		return handle;
+	};
+	syncBuiltinESMExports();
+	t.after(() => { fsp.open = open; syncBuiltinESMExports(); });
+	return { opened, get bytes() { return bytes; } };
+}
+
+test('read_many skips exhausted slots before opening or spilling them and preserves ordered receipts', async t => {
+	const { cwd, spill, tool, ctx } = await readManyFixture(t);
+	const bytesPerFile = 1024 * 1024;
+	const text = `${'x'.repeat(127)}\n`.repeat(bytesPerFile / 128);
+	const files = Array.from({ length: 6 }, (_, index) => ({ path: `fixture-${index}.txt` }));
+	for (const file of files) fs.writeFileSync(path.join(cwd, file.path), text);
+	const io = countReadManyFiles(t, cwd);
+	const result = await tool.execute('budget-exhausted', { files }, undefined, undefined, ctx);
+	assert.equal(result.isError, undefined);
+	assert.equal(result.details.totalChars, 64000);
+	assert.deepEqual(result.details.files.map(item => item.path), files.map(item => item.path));
+	assert.deepEqual(result.details.files.slice(3), files.slice(3).map(({ path }) => ({ path, chars: 0, skipped: true })));
+	assert.deepEqual(io.opened, files.slice(0, 3).map(item => item.path));
+	assert.equal(io.bytes, bytesPerFile * 3);
+	const spills = fs.readdirSync(spill).filter(name => name.startsWith('pi-read-'));
+	assert.equal(spills.reduce((sum, name) => sum + fs.statSync(path.join(spill, name)).size, 0), bytesPerFile * 3);
+});
+
+test('read_many propagates cancellation during its last file', async t => {
+	const { cwd, tool, ctx } = await readManyFixture(t);
+	const files = [{ path: 'first.txt' }, { path: 'last.txt' }];
+	for (const file of files) fs.writeFileSync(path.join(cwd, file.path), 'fixture');
+	const controller = new AbortController();
+	const io = countReadManyFiles(t, cwd, name => {
+		if (name === 'last.txt') controller.abort();
+	});
+	await assert.rejects(tool.execute('cancelled', { files }, controller.signal, undefined, ctx), /Operation aborted/);
+	assert.deepEqual(io.opened, files.map(item => item.path));
+});
+
 test('economy mode lowers routine tool-continuation thinking, restores on errors and yields to a manual level', async () => {
 	const saved = { ...process.env };
 	const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-cost-governor-'));
@@ -510,7 +586,7 @@ test('economy mode never flips thinking on a route where the change re-bills the
 	}
 });
 
-test('a file read_many delivered whole counts as read for the edit guard; a capped, skipped or failed one does not', () => {
+test('a file read_many delivered whole counts as read for the edit guard; a capped, skipped or failed one does not', async t => {
 	const bundle = fs.readFileSync(new URL('../agent/extensions/pi-lens/dist/index.js', import.meta.url), 'utf8');
 	const source = /var READ_TOOL_MAX_LINES = 2000;\nfunction recordReadManyCoverage\(event, ctx, runtime2\) \{[\s\S]*?\n\}\n(?=function getEffectiveReadLimit)/.exec(bundle)?.[0];
 	assert.ok(source, 'the lens carries the read_many coverage owner');
@@ -544,6 +620,23 @@ test('a file read_many delivered whole counts as read for the edit guard; a capp
 	recorded.length = 0;
 	assert.equal(record({ toolName: 'read_many', input: { files: [{ path: 'whole.js' }, { path: 'ranged.js' }] }, details: { files: [{ path: 'ranged.js', chars: 5 }] } }, { cwd: '/p' }, runtime), 0);
 	assert.equal(record({ toolName: 'read_many', input: {}, details: undefined }, { cwd: '/p' }, runtime), 0);
+
+	const { cwd, tool, ctx } = await readManyFixture(t);
+	process.env.TMPDIR = path.join(cwd, 'unavailable');
+	const actualFiles = [{ path: 'oversize.txt' }, { path: 'lossy.txt' }, { path: 'whole.txt' }];
+	const contents = ['x'.repeat(60 * 1024), 'x\n'.repeat(2200), 'everything\n'];
+	for (const [i, item] of actualFiles.entries()) {
+		const absolute = path.join(cwd, item.path);
+		fs.writeFileSync(absolute, contents[i]);
+		lines[absolute] = contents[i].split('\n').length;
+	}
+	const actual = await tool.execute('native-truncation', { files: actualFiles }, undefined, undefined, ctx);
+	assert.deepEqual(actual.details.files.map(item => item.truncated), [true, true, false]);
+	assert.ok(actual.details.files.every(item => item.fullOutputPath === undefined));
+	assert.match(actual.content[0].text, /Line 1 is .*exceeds/);
+	assert.match(actual.content[0].text, /Could not save full read output/);
+	assert.equal(record({ toolName: 'read_many', input: { files: actualFiles }, details: actual.details }, ctx, { ...runtime, projectRoot: cwd }), 1);
+	assert.deepEqual(recorded.map(item => item.filePath), [path.join(cwd, 'whole.txt')]);
 });
 
 test('a shell read counts for the edit guard when it names files by a glob or after a cd', () => {

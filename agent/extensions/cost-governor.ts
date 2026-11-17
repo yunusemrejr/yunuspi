@@ -289,23 +289,23 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 					details.push({ path: "", error: "path is required" });
 					continue;
 				}
+				const budget = Math.min(READ_MANY_FILE_CHARS, READ_MANY_TOTAL_CHARS - total);
+				if (budget < 1000) {
+					sections.push(`### ${requested}\n[read_many aggregate budget exhausted; continue with read path="${requested}"]`);
+					details.push({ path: requested, chars: 0, skipped: true });
+					continue;
+				}
 				try {
 					const result = await readTool.execute(`${toolCallId}:${index}`, {
 						path: requested,
 						...(Number.isSafeInteger(spec.offset) && spec.offset > 0 ? { offset: spec.offset } : {}),
 						...(Number.isSafeInteger(spec.limit) && spec.limit > 0 ? { limit: Math.min(2000, spec.limit) } : {}),
 					}, signal, undefined, ctx);
+					if (signal?.aborted) throw new Error("Operation aborted");
 					const text = (result?.content || []).filter((part: any) => part?.type === "text").map((part: any) => part.text).join("\n");
 					const resultImages = (result?.content || []).filter((part: any) => part?.type === "image");
 					let content = text;
-					let truncated = false;
-					const remaining = READ_MANY_TOTAL_CHARS - total;
-					const budget = Math.min(READ_MANY_FILE_CHARS, remaining);
-					if (budget < 1000) {
-						sections.push(`### ${requested}\n[read_many aggregate budget exhausted; continue with read path="${requested}"]`);
-						details.push({ path: requested, chars: 0, skipped: true });
-						continue;
-					}
+					let truncated = result?.details?.truncation?.truncated === true;
 					if (content.length > budget) {
 						const spill = writeSpill(content, ctx);
 						const marker = `\n\n[... read_many capped this file at ${budget} chars; full output: ${spill ?? "unavailable"}. Continue with read path="${requested}" offset=...]\n\n`;
@@ -317,6 +317,7 @@ export default function costGovernorExtension(pi: ExtensionAPI): void {
 					images.push(...resultImages);
 					details.push({ path: requested, chars: content.length, truncated, ...(result?.details?.fullOutputPath ? { fullOutputPath: result.details.fullOutputPath } : {}) });
 				} catch (error) {
+					if (signal?.aborted) throw new Error("Operation aborted");
 					failed += 1;
 					const message = error instanceof Error ? error.message : String(error);
 					sections.push(`### ${requested}\nERROR: ${message.slice(0, 300)}`);

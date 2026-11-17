@@ -24,21 +24,22 @@ test.after(() => {
   fs.rmSync(fixtureHome, { recursive: true, force: true });
 });
 
-async function fixture(t, { eventType, sendTool = false, pauseUntilReleased = false }) {
-  const cwd = fs.mkdtempSync(path.join(fixtureHome, "session-"));
-  const manager = SessionManager.create(cwd, cwd);
+async function fixture(t, { eventType, sendTool = false, pauseUntilReleased = false, twoDue = false, existing } = {}) {
+  const cwd = existing?.getCwd() ?? fs.mkdtempSync(path.join(fixtureHome, "session-"));
+  const manager = existing ? SessionManager.open(existing.getSessionFile(), existing.getSessionDir(), cwd) : SessionManager.create(cwd, cwd);
   const sid = manager.getSessionId();
   const nextFireAt = Date.now() + (sendTool ? 60_000 : -1);
   const state = reminderState.defaultRemindersState();
   state.manual.push({ id: "fixture-reminder", text: "Synthetic durable reminder", active: true,
     createdAt: nextFireAt - reminderState.MANUAL_INTERVAL_MS, nextFireAt, delivered: 0 });
-  assert.equal(reminderState.writeRemindersState(sid, state), true);
+  if (twoDue) state.manual.push({ ...state.manual[0], id: "independent", text: "An independent due reminder" });
+  if (!existing) assert.equal(reminderState.writeRemindersState(sid, state), true);
   const scheduled = () => reminderState.readRemindersState(sid).manual[0];
   const remindersInHistory = () => manager.getEntries().filter(entry => entry.type === "custom_message" && entry.customType === "reminders");
   const entered = Promise.withResolvers();
   const resumed = Promise.withResolvers();
   let waitOnce = true;
-  const laterExtension = pi => pi.on(eventType, async (_event, ctx) => {
+  const laterExtension = pi => eventType && pi.on(eventType, async (_event, ctx) => {
     if (!waitOnce) return;
     waitOnce = false;
     entered.resolve();
@@ -129,6 +130,83 @@ test("clearing a staged reminder during agent startup prevents its delivery", { 
   assert.equal(f.remindersInHistory().length, 0);
   assert.equal(f.scheduled().active, false);
   assert.equal(f.scheduled().delivered, 0);
+});
+
+test("clearing one staged reminder retains its already-due sibling in the same prompt", { timeout: 10_000 }, async t => {
+  const f = await fixture(t, { eventType: "agent_start", pauseUntilReleased: true, twoDue: true });
+  const turn = f.session.prompt("Synthetic prompt awaiting startup");
+  await f.entered;
+  try { await f.session.prompt("/reminder clear 1"); }
+  finally { f.resume(); }
+  await turn;
+  const [receipt] = f.remindersInHistory();
+  assert.equal(f.remindersInHistory().length, 1);
+  assert.match(receipt.content, /independent due reminder/);
+  assert.doesNotMatch(receipt.content, /Synthetic durable reminder/);
+  assert.deepEqual(receipt.details.reminderDelivery.occurrences, [{ id: "independent", dueAt: f.nextFireAt }]);
+});
+
+test("two loaded owners register independent reminders without overwriting the other", { timeout: 10_000 }, async t => {
+  const first = await fixture(t);
+  first.manager.flush();
+  const second = await fixture(t, { existing: first.manager });
+  await first.session.bindExtensions({ mode: "rpc" });
+  await second.session.bindExtensions({ mode: "rpc" });
+  const sid = first.manager.getSessionId();
+  assert.equal(second.manager.getSessionId(), sid);
+  await first.session.prompt("/reminder Synthetic first owner registration");
+  await first.session.waitForIdle();
+  await second.session.prompt("/reminder Synthetic second owner registration");
+  await second.session.waitForIdle();
+  const saved = reminderState.readRemindersState(sid).manual.filter(row => row.active);
+  assert.deepEqual(saved.slice(1).map(row => row.text), ["Synthetic first owner registration", "Synthetic second owner registration"]);
+});
+
+test("two owners reaching the same due occurrence append one receipt", { timeout: 10_000 }, async t => {
+  const options = { eventType: "agent_start", pauseUntilReleased: true };
+  const first = await fixture(t, options);
+  first.manager.flush();
+  const second = await fixture(t, { ...options, existing: first.manager });
+  const turns = [first.session.prompt("Synthetic first prompt"), second.session.prompt("Synthetic second prompt")];
+  await Promise.all([first.entered, second.entered]);
+  first.resume();
+  second.resume();
+  await Promise.all(turns);
+  const reopened = SessionManager.open(first.manager.getSessionFile(), first.manager.getSessionDir());
+  assert.equal(reopened.getEntries().filter(entry => entry.type === "custom_message" && entry.customType === "reminders").length, 1);
+  assert.equal(first.scheduled().delivered, 1);
+});
+
+test("another owner recovers a committed reminder after the sidecar advancement fails", { timeout: 10_000 }, async t => {
+  const first = await fixture(t);
+  first.manager.flush();
+  const second = await fixture(t, { existing: first.manager });
+  const sid = first.manager.getSessionId();
+  const stateFile = reminderState.remindersStateFile(sid);
+  const originalRename = fs.renameSync;
+  let failed = false;
+  fs.renameSync = (from, to) => {
+    if (to === stateFile && !failed && JSON.parse(fs.readFileSync(from, "utf8")).manual[0]?.delivered === 1) {
+      failed = true;
+      throw Object.assign(new Error("Synthetic sidecar replacement failure"), { code: "EIO" });
+    }
+    return originalRename(from, to);
+  };
+  syncBuiltinESMExports();
+  try { await first.session.prompt("Synthetic first prompt"); }
+  finally {
+    fs.renameSync = originalRename;
+    syncBuiltinESMExports();
+  }
+  assert.equal(failed, true);
+  const interrupted = reminderState.readRemindersState(sid);
+  assert.equal(interrupted.manual[0].delivered, 0);
+  assert.equal(interrupted.pendingDelivery, first.remindersInHistory()[0].details.reminderDelivery.id);
+  await second.session.prompt("Synthetic second prompt");
+  const restored = reminderState.readRemindersState(sid);
+  assert.equal(restored.pendingDelivery, undefined);
+  assert.equal(restored.manual[0].delivered, 1);
+  assert.equal(second.remindersInHistory().length, 0);
 });
 
 test("a conditional steer discarded at delivery cannot start a turn or hide the following steer", async () => {

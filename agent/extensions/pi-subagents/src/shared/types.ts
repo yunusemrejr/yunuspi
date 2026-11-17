@@ -1228,6 +1228,8 @@ export interface SingleResult {
 	 * result row's array position.
 	 */
 	index: number;
+	/** Physical async run that produced this child result, when known. */
+	runId?: string;
 	agent: string;
 	task: string;
 	/** Human-readable display name for the child's own session (agent + task

@@ -83,8 +83,8 @@ export function registerSkillReview(pi: any): void {
 	pi.on?.("before_agent_start", (event: any) => {
 		skills = catalogSkills(event);
 	});
-	const search = (query: string, group: string, limit: number, offset: number) => {
-		const unique = rankCatalog(skills, query, (skill) => !group || capabilityGroup(skill.name, skill.description) === group);
+	const search = (available: CatalogSkill[], query: string, group: string, limit: number, offset: number) => {
+		const unique = rankCatalog(available, query, (skill) => !group || capabilityGroup(skill.name, skill.description) === group);
 		const page = unique.slice(offset, offset + limit);
 		return {
 			results: page.map((skill) => ({ name: skill.name, path: skill.file, description: skill.description.slice(0, 240) })),
@@ -101,19 +101,22 @@ export function registerSkillReview(pi: any): void {
 			limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 8, default: 3, description: "Maximum results (default 3)." })),
 			offset: Type.Optional(Type.Integer({ minimum: 0, description: "Page offset." })),
 		}),
-		async execute(_id: string, input: any) {
+		async execute(_id: string, input: any, _signal: unknown, _onUpdate: unknown, ctx?: { getSystemPromptOptions?: () => { skills?: unknown } }) {
+			// Extension-started turns can reach this tool before any user preflight.
+			const options = ctx?.getSystemPromptOptions?.();
+			const available = Array.isArray(options?.skills) ? catalogSkills({ systemPromptOptions: options }) : skills;
 			let group = typeof input.group === "string" ? input.group.trim().slice(0, 64) : "";
 			let query = typeof input.query === "string" ? input.query.trim().slice(0, 256) : "";
 			// A topic sent as a group ("motion", "3d") is a search term, not a failed call.
 			const topic = group && !CAPABILITY_GROUPS.some((candidate) => candidate.id === group) ? group : "";
 			if (topic) { group = ""; query = `${query} ${topic}`.trim(); }
 			if (input.action === "browse" && !group && !query) {
-				const result = { groups: groupOverview(skills), note: "Supply group or query for a short page of skills." };
+				const result = { groups: groupOverview(available), note: "Supply group or query for a short page of skills." };
 				return { content: [{ type: "text", text: JSON.stringify(result) }], details: result };
 			}
 			const limit = Number.isInteger(input.limit) ? Math.min(8, Math.max(1, input.limit)) : 3;
 			const offset = Number.isSafeInteger(input.offset) ? Math.max(0, input.offset) : 0;
-			const page = search(query, group, limit, offset);
+			const page = search(available, query, group, limit, offset);
 			const result = {
 				query, ...(group ? { group } : {}), ...(topic ? { unknownGroup: topic, groups: CAPABILITY_GROUPS.map((candidate) => candidate.id) } : {}),
 				...page, nextOffset: page.remaining ? offset + page.results.length : null,
