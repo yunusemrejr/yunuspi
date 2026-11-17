@@ -86,6 +86,8 @@ export interface AuthContext {
 /** Result of resolving auth for a model. */
 export interface AuthResult {
     auth: ModelAuth;
+    /** Authentication kind resolved for this request, independent of the status label. */
+    credentialType?: AuthType;
     /** Provider-scoped environment/config values resolved from credentials and ambient context. */
     env?: ProviderEnv;
     /** Human-readable label for status UI: "ANTHROPIC_API_KEY", "OAuth", "~/.aws/credentials". */

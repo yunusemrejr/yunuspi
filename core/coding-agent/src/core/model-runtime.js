@@ -1,5 +1,5 @@
 import { dirname, join } from "node:path";
-import { createModels, lazyStream, ModelsError, piWithStreamIdle, } from "@yunuspi/ai";
+import { createModels, isFlatPlanProvider, lazyStream, ModelsError, piWithStreamIdle, } from "@yunuspi/ai";
 import * as builtinProviderCatalog from "@yunuspi/ai/providers/all";
 import { getAgentDir } from "../config.js";
 import { operationSignal, raceWithAbortSignal } from "../utils/abort.js";
@@ -11,6 +11,8 @@ import { withRemoteCatalog } from "./remote-catalog-provider.js";
 import { withOpenAICodexCatalog } from "./codex-catalog-provider.js";
 import { vendorModelAlias } from "./model-aliases.js";
 import { RuntimeCredentials } from "./runtime-credentials.js";
+/** Internal provenance for a summary carrying its already-resolved OAuth bearer. */
+export const summaryAuthBilling = Symbol("summary-auth-billing");
 /** Credentials changed successfully, but the local model/auth snapshot could not be synchronized. */
 export class CredentialSynchronizationError extends Error {
     providerId;
@@ -37,6 +39,18 @@ function mergeHeaders(base, override) {
         merged[name] = value;
     }
     return merged;
+}
+function stampRequestBilling(message, billing) {
+    const usage = message.usage;
+    const cost = usage?.cost;
+    if (!billing || !cost || cost.billing === billing) return message;
+    try {
+        cost.billing = billing;
+        return message;
+    }
+    catch {
+        return { ...message, usage: { ...usage, cost: { ...cost, billing } } };
+    }
 }
 /** Configured pi-ai Models collection used by coding-agent and SDK consumers. */
 export class ModelRuntime {
@@ -456,7 +470,7 @@ export class ModelRuntime {
         });
         if (!resolution)
             throw new ModelsError("auth", `Provider is not configured: ${model.provider}`);
-        const { transformHeaders, onPayload, ...rawProviderOptions } = options ?? {};
+        const { transformHeaders, onPayload, [summaryAuthBilling]: original, ...rawProviderOptions } = options ?? {};
         const providerOptions = rawProviderOptions;
         let headers = mergeHeaders(resolution.auth.headers, providerOptions.headers);
         if (transformHeaders)
@@ -464,9 +478,13 @@ export class ModelRuntime {
         const env = resolution.env || providerOptions.env
             ? { ...(resolution.env ?? {}), ...(providerOptions.env ?? {}) }
             : undefined;
+        const requestModel = resolution.auth.baseUrl ? { ...model, baseUrl: resolution.auth.baseUrl } : model;
+        const fromSummaryAuth = providerOptions.apiKey && original?.provider === requestModel.provider && original.baseUrl === requestModel.baseUrl;
         return {
             provider,
-            model: resolution.auth.baseUrl ? { ...model, baseUrl: resolution.auth.baseUrl } : model,
+            billing: fromSummaryAuth || isFlatPlanProvider(model.provider) || resolution.credentialType === "oauth" && provider.auth.oauth?.isSubscription === true
+                ? "subscription" : "metered",
+            model: requestModel,
             options: {
                 ...providerOptions,
                 ...(onPayload ? { onPayload: (payload, requestModel) => onPayload(payload, requestModel, providerOptions.signal) } : {}),
@@ -482,20 +500,23 @@ export class ModelRuntime {
         // turn silently (measured: 14 minutes, 218 chars of thinking, no error,
         // user abort required). The idle budget surfaces it as a stream error
         // so retry/recovery runs instead.
-        return piWithStreamIdle(model, options, (idleOptions) => lazyStream(model, async () => {
-            const prepared = await this.prepareRequest(model, idleOptions);
-            return prepared.provider.stream(prepared.model, context, prepared.options);
-        }));
+        return this.streamRequest(model, context, options, "stream");
     }
     complete(model, context, options) {
         return this.stream(model, context, options).result();
     }
     streamSimple(model, context, options) { /* PI_STREAM_IDLE_CALL */
-        // Same idle protection as stream(): the main inference path.
-        return piWithStreamIdle(model, options, (idleOptions) => lazyStream(model, async () => {
-            const prepared = await this.prepareRequest(model, idleOptions);
-            return prepared.provider.streamSimple(prepared.model, context, prepared.options);
-        }));
+        return this.streamRequest(model, context, options, "streamSimple");
+    }
+    streamRequest(model, context, options, method) {
+        return piWithStreamIdle(model, options, (idleOptions) => {
+            let billing;
+            return lazyStream(model, async () => {
+                const prepared = await this.prepareRequest(model, idleOptions);
+                billing = prepared.billing;
+                return prepared.provider[method](prepared.model, context, prepared.options);
+            }, message => stampRequestBilling(message, billing));
+        });
     }
     completeSimple(model, context, options) {
         return this.streamSimple(model, context, options).result();

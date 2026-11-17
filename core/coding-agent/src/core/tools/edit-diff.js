@@ -2,8 +2,7 @@
  * Shared diff computation utilities for the edit and similar tools.
  */
 import * as Diff from "diff";
-import { constants } from "fs";
-import { access, readFile } from "fs/promises";
+import { withRegularReadFile } from "@yunuspi/agent-core/node";
 import { splitBom } from "../../utils/text.js";
 import { resolveToCwd } from "./path-utils.js";
 const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
@@ -498,19 +497,72 @@ export function applyEditsWithOriginalLineEndings(content, normalizedContent, ed
     });
     return { baseContent, newContent, writeContent: applyReplacements(content, sourceReplacements, 0, true) };
 }
+// Limit the edit distance explored by Myers. Wholesale replacements can
+// outgrow this budget; a single exact hunk still covers every changed byte.
+const MAX_EXACT_LINE_DISTANCE = 256;
+function linesWithEndings(text) {
+    return text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+}
+function changedLineRange(oldContent, newContent) {
+    const before = linesWithEndings(oldContent);
+    const after = linesWithEndings(newContent);
+    let start = 0, oldEnd = before.length, newEnd = after.length;
+    while (start < oldEnd && start < newEnd && before[start] === after[start]) start++;
+    while (oldEnd > start && newEnd > start && before[oldEnd - 1] === after[newEnd - 1]) {
+        oldEnd--;
+        newEnd--;
+    }
+    return { before, after, start, oldEnd, newEnd };
+}
+function replacementDiffParts(oldContent, newContent) {
+    const { before, after, start, oldEnd, newEnd } = changedLineRange(oldContent, newContent);
+    const parts = [];
+    if (start) parts.push({ value: before.slice(0, start).join("") });
+    if (start < oldEnd) parts.push({ value: before.slice(start, oldEnd).join(""), removed: true });
+    if (start < newEnd) parts.push({ value: after.slice(start, newEnd).join(""), added: true });
+    if (oldEnd < before.length) parts.push({ value: before.slice(oldEnd).join("") });
+    return parts;
+}
 /** Generate a standard unified patch. */
 export function generateUnifiedPatch(path, oldContent, newContent, contextLines = 4) {
-    return Diff.createTwoFilesPatch(path, path, oldContent, newContent, undefined, undefined, {
+    const headers = Diff.FILE_HEADERS_ONLY;
+    const exact = Diff.createTwoFilesPatch(path, path, oldContent, newContent, undefined, undefined, {
         context: contextLines,
-        headerOptions: Diff.FILE_HEADERS_ONLY,
+        headerOptions: headers,
+        maxEditLength: MAX_EXACT_LINE_DISTANCE,
     });
+    if (exact !== undefined) return exact;
+
+    const { before, after, start, oldEnd, newEnd } = changedLineRange(oldContent, newContent);
+    const leading = Math.min(start, contextLines);
+    const trailing = Math.min(before.length - oldEnd, contextLines);
+    const lines = [];
+    const append = (source, first, end, prefix) => {
+        for (let index = first; index < end; index++) {
+            const line = source[index];
+            if (line.endsWith("\n")) lines.push(prefix + line.slice(0, -1));
+            else lines.push(prefix + line, "\\ No newline at end of file");
+        }
+    };
+    append(before, start - leading, start, " ");
+    append(before, start, oldEnd, "-");
+    append(after, start, newEnd, "+");
+    append(before, oldEnd, oldEnd + trailing, " ");
+    const rangeStart = start - leading + 1;
+    return Diff.formatPatch({ oldFileName: path, newFileName: path, hunks: [{
+        oldStart: rangeStart, newStart: rangeStart,
+        oldLines: leading + oldEnd - start + trailing,
+        newLines: leading + newEnd - start + trailing,
+        lines,
+    }] }, headers);
 }
 /**
  * Generate a display-oriented diff string with line numbers and context.
  * Returns both the diff string and the first changed line number (in the new file).
  */
 export function generateDiffString(oldContent, newContent, contextLines = 4) {
-    const parts = Diff.diffLines(oldContent, newContent);
+    const parts = Diff.diffLines(oldContent, newContent, { maxEditLength: MAX_EXACT_LINE_DISTANCE })
+        ?? replacementDiffParts(oldContent, newContent);
     const output = [];
     const oldLines = oldContent.split("\n");
     const newLines = newContent.split("\n");
@@ -625,19 +677,20 @@ export function generateDiffString(oldContent, newContent, contextLines = 4) {
  * Compute the diff for one or more edit operations without applying them.
  * Used for preview rendering in the TUI before the tool executes.
  */
-export async function computeEditsDiff(path, edits, cwd) {
+export async function computeEditsDiff(path, edits, cwd, signal) {
     const absolutePath = resolveToCwd(path, cwd);
     try {
-        // Check if file exists and is readable
+        let bytes;
         try {
-            await access(absolutePath, constants.R_OK);
+            bytes = await withRegularReadFile(absolutePath, signal, file => file.readFile({ signal }));
         }
         catch (error) {
-            const errorMessage = error instanceof Error && "code" in error ? `Error code: ${error.code}` : String(error);
-            return { error: `Could not edit file: ${path}. ${errorMessage}.` };
+            if (["ENOENT", "ENOTDIR", "EACCES"].includes(error?.code)) {
+                return { error: `Could not edit file: ${path}. Error code: ${error.code}.` };
+            }
+            throw error;
         }
-        // Read the file
-        const rawContent = decodeEditText(await readFile(absolutePath));
+        const rawContent = decodeEditText(bytes);
         // Strip BOM before matching (LLM won't include invisible BOM in oldText)
         const { text: content } = splitBom(rawContent);
         const normalizedContent = normalizeToLF(content);

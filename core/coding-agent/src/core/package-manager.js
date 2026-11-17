@@ -28,6 +28,7 @@ import { CONFIG_DIR_NAME } from "../config.js";
 import { spawnProcess, spawnProcessSync } from "../utils/child-process.js";
 import { parseGitUrl } from "../utils/git.js";
 import { canonicalizePath, isLocalPath, markPathIgnoredByCloudSync, resolvePath } from "../utils/paths.js";
+import { addResourceIgnoreRules } from "../utils/resource-files.js";
 import { stripBom } from "../utils/text.js";
 import { isStdoutTakenOver } from "./output-guard.js";
 import { readPiManifest } from "./pi-manifest.js";
@@ -71,7 +72,6 @@ const FILE_PATTERNS = {
     prompts: /\.md$/,
     themes: /\.json$/,
 };
-const IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"];
 function toPosixPath(p) {
     return p.split(sep).join("/");
 }
@@ -83,47 +83,6 @@ export function getExtensionTempFolder(agentDir) {
     mkdirSync(tempFolder, { recursive: true, mode: 0o700 });
     chmodSync(tempFolder, 0o700);
     return tempFolder;
-}
-function prefixIgnorePattern(line, prefix) {
-    const trimmed = line.trim();
-    if (!trimmed)
-        return null;
-    if (trimmed.startsWith("#") && !trimmed.startsWith("\\#"))
-        return null;
-    let pattern = line;
-    let negated = false;
-    if (pattern.startsWith("!")) {
-        negated = true;
-        pattern = pattern.slice(1);
-    }
-    else if (pattern.startsWith("\\!")) {
-        pattern = pattern.slice(1);
-    }
-    if (pattern.startsWith("/")) {
-        pattern = pattern.slice(1);
-    }
-    const prefixed = prefix ? `${prefix}${pattern}` : pattern;
-    return negated ? `!${prefixed}` : prefixed;
-}
-function addIgnoreRules(ig, dir, rootDir) {
-    const relativeDir = relative(rootDir, dir);
-    const prefix = relativeDir ? `${toPosixPath(relativeDir)}/` : "";
-    for (const filename of IGNORE_FILE_NAMES) {
-        const ignorePath = join(dir, filename);
-        if (!existsSync(ignorePath))
-            continue;
-        try {
-            const content = readFileSync(ignorePath, "utf-8");
-            const patterns = content
-                .split(/\r?\n/)
-                .map((line) => prefixIgnorePattern(line, prefix))
-                .filter((line) => Boolean(line));
-            if (patterns.length > 0) {
-                ig.add(patterns);
-            }
-        }
-        catch { }
-    }
 }
 function isPattern(s) {
     return s.startsWith("!") || s.startsWith("+") || s.startsWith("-") || s.includes("*") || s.includes("?");
@@ -162,7 +121,7 @@ function collectFiles(dir, filePattern, skipNodeModules = true, ignoreMatcher, r
         return files;
     const root = rootDir ?? dir;
     const ig = ignoreMatcher ?? ignore();
-    addIgnoreRules(ig, dir, root);
+    addResourceIgnoreRules(ig, dir, root);
     try {
         const entries = readdirSync(dir, { withFileTypes: true });
         for (const entry of entries) {
@@ -210,7 +169,7 @@ function collectSkillEntries(dir, mode, ignoreMatcher, rootDir, visited = new Se
     visited.add(realDir);
     const root = rootDir ?? dir;
     const ig = ignoreMatcher ?? ignore();
-    addIgnoreRules(ig, dir, root);
+    addResourceIgnoreRules(ig, dir, root);
     try {
         const dirEntries = readdirSync(dir, { withFileTypes: true });
         for (const entry of dirEntries) {
@@ -311,7 +270,7 @@ function collectAutoPromptEntries(dir) {
     if (!existsSync(dir))
         return entries;
     const ig = ignore();
-    addIgnoreRules(ig, dir, dir);
+    addResourceIgnoreRules(ig, dir, dir);
     try {
         const dirEntries = readdirSync(dir, { withFileTypes: true });
         for (const entry of dirEntries) {
@@ -347,7 +306,7 @@ function collectAutoThemeEntries(dir) {
     if (!existsSync(dir))
         return entries;
     const ig = ignore();
-    addIgnoreRules(ig, dir, dir);
+    addResourceIgnoreRules(ig, dir, dir);
     try {
         const dirEntries = readdirSync(dir, { withFileTypes: true });
         for (const entry of dirEntries) {
@@ -416,7 +375,7 @@ function collectAutoExtensionEntries(dir) {
     }
     // Otherwise, discover extensions from directory contents
     const ig = ignore();
-    addIgnoreRules(ig, dir, dir);
+    addResourceIgnoreRules(ig, dir, dir);
     try {
         const dirEntries = readdirSync(dir, { withFileTypes: true });
         for (const entry of dirEntries) {

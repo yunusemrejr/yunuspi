@@ -785,7 +785,7 @@ async function runSingleAttempt(
 		let childExited = false;
 		let forcedTerminationSignal = false;
 		let cleanTerminalAssistantStopReceived = false;
-		let agentSettledReceived = false;
+		let terminalSettlementReceived = false;
 		let compactionStartedReceived = false;
 		let finalDrainTimer: NodeJS.Timeout | undefined;
 		let finalHardKillTimer: NodeJS.Timeout | undefined;
@@ -813,7 +813,7 @@ async function runSingleAttempt(
 			}
 		};
 		const startFinalDrain = () => {
-			if (childWatchdogIsActive(childWatchdogState)) {
+			if (childLifecycleState.printExitCode === undefined && childWatchdogIsActive(childWatchdogState)) {
 				armWatchdogTail();
 				return;
 			}
@@ -823,7 +823,7 @@ async function runSingleAttempt(
 				const termSent = trySignalChild(proc, "SIGTERM");
 				if (!termSent) return;
 				forcedTerminationSignal = true;
-				if (!cleanTerminalAssistantStopReceived && !agentSettledReceived && !assistantError) {
+				if (!cleanTerminalAssistantStopReceived && !terminalSettlementReceived && !assistantError) {
 					result.error = result.error ?? `Subagent process did not exit within ${FINAL_STOP_GRACE_MS}ms after its terminal event. Forcing termination.`;
 				}
 				finalHardKillTimer = setTimeout(() => {
@@ -835,7 +835,7 @@ async function runSingleAttempt(
 			finalDrainTimer.unref?.();
 		};
 		function armWatchdogTail(): void {
-			if ((!cleanTerminalAssistantStopReceived && !agentSettledReceived) || watchdogTailTimer || lifecycleFinished || processClosed) return;
+			if ((!cleanTerminalAssistantStopReceived && !terminalSettlementReceived) || watchdogTailTimer || lifecycleFinished || processClosed) return;
 			watchdogTailTimer = setTimeout(() => {
 				watchdogTailTimer = undefined;
 				updateChildWatchdogState({
@@ -855,7 +855,7 @@ async function runSingleAttempt(
 			if (action === "cancel-drain") {
 				// A new turn/compaction is live work, not the previous terminal tail.
 				cleanTerminalAssistantStopReceived = false;
-				agentSettledReceived = false;
+				terminalSettlementReceived = false;
 				clearFinalDrainTimers();
 				clearWatchdogTailTimer();
 				return;
@@ -1125,10 +1125,10 @@ async function runSingleAttempt(
 				afterCompactionSettlement = false;
 			}
 			const lifecycleAction = projectChildLifecycle(evt, false, childLifecycleState);
-			if (evt.type === "agent_settled" && lifecycleAction === "start-drain") {
-				agentSettledReceived = true;
+			if (evt.type === "agent_settled" && !childLifecycleState.compactionActive && !childLifecycleState.compactionRetryActive) {
 				afterCompactionSettlement = compactionStartedReceived;
 			}
+			if ((evt.type === "agent_settled" || evt.type === "print_settled") && lifecycleAction === "start-drain") terminalSettlementReceived = true;
 			applyChildLifecycle(lifecycleAction);
 
 			if (isChildWatchdogStatusEvent(evt)) {
@@ -1147,7 +1147,7 @@ async function runSingleAttempt(
 					armWatchdogTail();
 				} else {
 					clearWatchdogTailTimer();
-					if (cleanTerminalAssistantStopReceived || agentSettledReceived) startFinalDrain();
+					if (cleanTerminalAssistantStopReceived || terminalSettlementReceived) startFinalDrain();
 				}
 				fireUpdate();
 				return;
@@ -1238,7 +1238,7 @@ async function runSingleAttempt(
 					// Final assistant message: start the exit drain window.
 					if (terminalAssistantStop) {
 						if (!evt.message.errorMessage && assistantText.trim()) assistantError = undefined;
-						cleanTerminalAssistantStopReceived ||= !evt.message.errorMessage;
+						cleanTerminalAssistantStopReceived ||= !evt.message.errorMessage && !childLifecycleState.awaitPrintSettlement;
 						clearAllToolTimeouts();
 						activeToolCalls.clear();
 						activeToolKeysByName.clear();
@@ -1467,7 +1467,8 @@ async function runSingleAttempt(
 			const stderr = stderrTail.text();
 			const rawStdout = rawStdoutTail.text();
 			let closeError = result.error ?? toolDiagnosticError ?? assistantError;
-			const forcedDrainAfterFinalSuccess = Boolean(forcedTerminationSignal || signal) && (cleanTerminalAssistantStopReceived || agentSettledReceived) && !closeError && !result[ASSISTANT_RESPONSE_PENDING];
+			const printFailed = childLifecycleState.printExitCode === 1;
+			const forcedDrainAfterFinalSuccess = Boolean(forcedTerminationSignal || signal) && (cleanTerminalAssistantStopReceived || terminalSettlementReceived) && !closeError && !result[ASSISTANT_RESPONSE_PENDING] && !printFailed;
 			const forcedDrainAfterEmptyTerminal = forcedDrainAfterFinalSuccess && hasEmptyTerminalAssistantResponse(result.messages ?? []);
 			// An owned post-final drain is cleanup, not a process failure. Keeping
 			// its signal on a successful result misclassifies later acceptance
@@ -1498,7 +1499,7 @@ async function runSingleAttempt(
 			if (!closeError && result[ASSISTANT_RESPONSE_PENDING] && !result.stopped && !result.interrupted && !result.timedOut) {
 				closeError = INCOMPLETE_CHILD_ASSISTANT_RESPONSE;
 			}
-			const finalCode = forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal ? 0 : forcedTerminationSignal || signal ? (code ?? 1) : (code ?? 0);
+			const finalCode = printFailed ? 1 : forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal ? 0 : forcedTerminationSignal || signal ? (code ?? 1) : (code ?? 0);
 			if (!result.error && closeError) result.error = closeError;
 			finish(finalCode);
 		});
@@ -1524,7 +1525,7 @@ async function runSingleAttempt(
 				if (processClosed || lifecycleFinished) return;
 				// After a clean terminal answer this SIGTERM is owned drain cleanup;
 				// the completed work must not be recorded as a process-signal failure.
-				if (cleanTerminalAssistantStopReceived || agentSettledReceived) forcedTerminationSignal = true;
+				if (cleanTerminalAssistantStopReceived || terminalSettlementReceived) forcedTerminationSignal = true;
 				else abortedBySignal = true;
 				trySignalChild(proc, "SIGTERM");
 				// ChildProcess.killed records successful signal delivery, not exit.

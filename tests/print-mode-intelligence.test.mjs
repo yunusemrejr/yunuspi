@@ -137,6 +137,8 @@ test("JSON print mode forwards persisted billing receipts from session shutdown"
   const events = result.stdout.trim().split("\n").map(line => JSON.parse(line));
   assert.deepEqual(events.filter(event => event.type === "entry_appended").map(event => event.entry), receipts);
   assert.ok(events.findIndex(event => event.type === "entry_appended") > events.findIndex(event => event.type === "agent_end"));
+  assert.equal(events.find(event => event.type === "agent_start").settlementEvent, "print_settled");
+  assert.deepEqual(events.at(-1), { type: "print_settled", exitCode: 0 });
 });
 
 test("JSON print mode exposes durable attempt receipts and a linked compaction checkpoint", async t => {

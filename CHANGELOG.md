@@ -1,3 +1,10 @@
+## 0.56.26 — Billing credentials, child settlement, and faster edits
+
+- Attribute requests and native summaries to the billing mode of the credential used at dispatch, even when active credentials change before a response returns.
+- Wait for owned JSON workers to finish shutdown hooks and flush receipts before treating their output as settled. Stop and attempt deadlines still apply.
+- Skill discovery reads only the metadata prefix of ordinary guides and skips special files that could block startup.
+- Terminal edit previews reject special files and defer to the applied edit result. Large replacements bound line and word diff work and still return a standard unified patch.
+
 ## 0.56.25 — Durable vision charges, safer retries, and richer shell evidence
 
 - Image understanding settles late provider usage on the originating session after a fork. Missing usage remains unknown, and the fork starts without the original pending charge.

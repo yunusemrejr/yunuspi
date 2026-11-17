@@ -20,6 +20,7 @@ export async function runPrintMode(runtimeHost, options) {
     let unsubscribe;
     let unsubscribeBackpressure;
     let disposal;
+    let shutdownSignaled = false;
     const signalCleanupHandlers = [];
     const disposeRuntime = () => disposal ??= (async () => {
         try {
@@ -39,6 +40,7 @@ export async function runPrintMode(runtimeHost, options) {
         }
         for (const signal of signals) {
             const handler = () => {
+                shutdownSignaled = true;
                 killTrackedDetachedChildren();
                 void disposeRuntime().finally(() => {
                     process.exit(signal === "SIGHUP" ? 129 : 143);
@@ -93,7 +95,8 @@ export async function runPrintMode(runtimeHost, options) {
                 finalAssistantMessage = event.message;
             }
             if (mode === "json") {
-                writeRawStdout(`${JSON.stringify(toJsonEvent(event))}\n`);
+                const frame = toJsonEvent(event);
+                writeRawStdout(`${JSON.stringify(event.type === "agent_start" ? { ...frame, settlementEvent: "print_settled" } : frame)}\n`);
             }
         });
         unsubscribeBackpressure =
@@ -141,11 +144,18 @@ export async function runPrintMode(runtimeHost, options) {
     }
     catch (error) {
         console.error(error instanceof Error ? error.message : String(error));
-        return 1;
+        exitCode = 1;
+        return exitCode;
     }
     finally {
         try {
             await disposeRuntime();
+            if (mode === "json" && !shutdownSignaled) {
+                // An assistant response and agent_settled precede shutdown hooks.
+                // The parent may start its process drain only after their output.
+                writeRawStdout(`${JSON.stringify({ type: "print_settled", exitCode })}\n`);
+                await flushRawStdout();
+            }
         }
         finally {
             for (const cleanup of signalCleanupHandlers) {

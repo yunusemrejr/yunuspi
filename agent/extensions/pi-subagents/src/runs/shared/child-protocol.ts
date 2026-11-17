@@ -398,9 +398,11 @@ export type ChildLifecycleAction = "start-drain" | "cancel-drain" | "none";
 export interface ChildLifecycleState {
 	compactionRetryActive: boolean;
 	compactionActive?: boolean;
+	awaitPrintSettlement?: boolean;
+	printExitCode?: 0 | 1;
 }
 
-export function projectChildLifecycle(event: { type?: string; willRetry?: unknown }, terminalAssistantStop = false, state?: ChildLifecycleState): ChildLifecycleAction {
+export function projectChildLifecycle(event: { type?: string; willRetry?: unknown; settlementEvent?: unknown; exitCode?: unknown }, terminalAssistantStop = false, state?: ChildLifecycleState): ChildLifecycleAction {
 	if (event.type === "compaction_start") {
 		if (state) state.compactionActive = true;
 		return "cancel-drain";
@@ -414,6 +416,7 @@ export function projectChildLifecycle(event: { type?: string; willRetry?: unknow
 	}
 	if (event.type === "agent_start" || event.type === "auto_retry_start") {
 		if (state) {
+			if (event.type === "agent_start" && event.settlementEvent === "print_settled") state.awaitPrintSettlement = true;
 			state.compactionActive = false;
 			state.compactionRetryActive = false;
 		}
@@ -424,6 +427,12 @@ export function projectChildLifecycle(event: { type?: string; willRetry?: unknow
 		return "cancel-drain";
 	}
 	if (event.type === "agent_end" && state) state.compactionRetryActive = false;
+	if (event.type === "print_settled") {
+		if (!state?.awaitPrintSettlement || (event.exitCode !== 0 && event.exitCode !== 1)) return "none";
+		state.printExitCode = event.exitCode;
+		return "start-drain";
+	}
+	if (state?.awaitPrintSettlement) return "none";
 	if (event.type === "agent_settled") return state?.compactionActive || state?.compactionRetryActive ? "none" : "start-drain";
 	if (terminalAssistantStop) return state?.compactionActive ? "none" : "start-drain";
 	return "none";

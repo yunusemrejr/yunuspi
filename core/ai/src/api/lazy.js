@@ -22,21 +22,28 @@ function createSetupErrorMessage(model, error) {
 function hasResult(source) {
     return typeof source.result === "function";
 }
-async function forwardStream(target, source) {
-    for await (const event of source) {
+async function forwardStream(target, source, mapMessage) {
+    for await (let event of source) {
+        if (mapMessage) {
+            const field = event.type === "done" ? "message" : event.type === "error" ? "error" : "partial";
+            const message = event[field];
+            const mapped = message && mapMessage(message);
+            if (mapped !== message) event = { ...event, [field]: mapped };
+        }
         target.push(event);
     }
-    target.end(hasResult(source) ? await source.result() : undefined);
+    const result = hasResult(source) ? await source.result() : undefined;
+    target.end(result && mapMessage ? mapMessage(result) : result);
 }
 /**
  * Returns a stream synchronously while running async setup (auth resolution,
  * lazy module loading) behind it. Setup failures terminate the stream with an
  * error event.
  */
-export function lazyStream(model, setup) {
+export function lazyStream(model, setup, mapMessage) {
     const outer = new AssistantMessageEventStream();
     setup()
-        .then((inner) => forwardStream(outer, inner))
+        .then((inner) => forwardStream(outer, inner, mapMessage))
         .catch((error) => {
         const message = createSetupErrorMessage(model, error);
         outer.push({ type: "error", reason: "error", error: message });

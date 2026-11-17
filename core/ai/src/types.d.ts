@@ -298,6 +298,8 @@ export interface Usage {
         cacheRead: number;
         cacheWrite: number;
         total: number;
+        /** Billing classification captured at request authentication. */
+        billing?: "metered" | "subscription";
         priceBasis?: string;
         tokenPriceMultiplier?: number;
         tokenPriceMultiplierBasis?: string;

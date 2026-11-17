@@ -30,6 +30,7 @@ import { createToolHtmlRenderer } from "./export-html/tool-renderer.js";
 import { ExtensionRunner, wrapRegisteredTools, } from "./extensions/index.js";
 import { emitSessionShutdownEvent } from "./extensions/runner.js";
 import { ModelRegistry } from "./model-registry.js";
+import { summaryAuthBilling } from "./model-runtime.js";
 import { expandPromptTemplate } from "./prompt-templates.js";
 import { exportSessionToJsonl } from "./session-export.js";
 import { getLatestCompactionEntry } from "./session-manager.js";
@@ -235,13 +236,7 @@ export class AgentSession {
             throw error;
         }
         if (result && (result.auth.apiKey || result.auth.headers)) {
-            const requestModel = result.auth.baseUrl ? { ...model, baseUrl: result.auth.baseUrl } : model;
-            return {
-                model: requestModel,
-                apiKey: result.auth.apiKey,
-                headers: withoutDeletedHeaders(result.auth.headers),
-                env: result.env,
-            };
+            return this._resolvedSummaryRequest(model, result);
         }
         const isOAuth = this._modelRuntime.isUsingOAuth(model.provider);
         if (isOAuth) {
@@ -259,17 +254,21 @@ export class AgentSession {
             const result = await this._modelRuntime.getAuth(model);
             if (!result)
                 return { model };
-            const requestModel = result.auth.baseUrl ? { ...model, baseUrl: result.auth.baseUrl } : model;
-            return {
-                model: requestModel,
-                apiKey: result.auth.apiKey,
-                headers: withoutDeletedHeaders(result.auth.headers),
-                env: result.env,
-            };
+            return this._resolvedSummaryRequest(model, result);
         }
         catch {
             return { model };
         }
+    }
+    _resolvedSummaryRequest(model, result) {
+        return {
+            model: result.auth.baseUrl ? { ...model, baseUrl: result.auth.baseUrl } : model,
+            apiKey: result.auth.apiKey,
+            headers: withoutDeletedHeaders(result.auth.headers),
+            env: result.env,
+            subscription: result.credentialType === "oauth" &&
+                this._modelRuntime.getProvider?.(model.provider)?.auth?.oauth?.isSubscription === true,
+        };
     }
     /**
      * Install tool hooks once on the Agent instance.
@@ -522,7 +521,7 @@ export class AgentSession {
         // Emit to extensions first
         await this._emitExtensionEvent((/* PI_RESPONSE_BILLING_V1 */
   event.type === 'message_end' && event.message?.role === 'assistant' && event.message.usage?.cost &&
-    (event.message.usage.cost.billing = this.modelRuntime.isUsingSubscription(event.message.provider) || isFlatPlanProvider(event.message.provider) ? 'subscription' : 'metered'), event));
+    (event.message.usage.cost.billing ??= this.modelRuntime.isUsingSubscription(event.message.provider) || isFlatPlanProvider(event.message.provider) ? 'subscription' : 'metered'), event));
         // Notify all listeners
         if (isDesktopInputId(desktopInputId)) this._emit({ ...event, desktopInputId });
         else if (event.type === "agent_end") {
@@ -1881,10 +1880,12 @@ export class AgentSession {
     // Compaction
     // =========================================================================
     /** Generate Pi's built-in compaction summary for manual and automatic compaction. */
-    async _runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, signal, env, reason) {
-        return compact(preparation, requestModel, apiKey, headers, customInstructions, signal, this.thinkingLevel, this._completeSessionSummary.bind(this, "compaction"), env, this.settingsManager.getRetrySettings(), this._summarizationRetryCallbacks({ source: "compaction", reason }), undefined);
+    async _runDefaultCompaction(preparation, request, customInstructions, signal, reason) {
+        return compact(preparation, request.model, request.apiKey, request.headers, customInstructions, signal, this.thinkingLevel,
+            this._completeSessionSummary.bind(this, "compaction", request), request.env, this.settingsManager.getRetrySettings(),
+            this._summarizationRetryCallbacks({ source: "compaction", reason }), undefined);
     }
-    async _completeSessionSummary(purpose, model, context, options) {
+    async _completeSessionSummary(purpose, request, model, context, options) {
         const sessionId = this.sessionManager.getSessionId();
         const base = { id: randomUUID(), owner: purpose, provider: model.provider, model: model.id };
         const record = (status, usage) => {
@@ -1902,17 +1903,27 @@ export class AgentSession {
         };
         return this._extensionRunner.completeAuxiliaryProviderRequest(purpose, model, options, async (requestOptions) => {
             requestOptions?.signal?.throwIfAborted();
+            const carriesOriginalBearer = request.subscription && request.apiKey && request.apiKey === requestOptions?.apiKey &&
+                request.model === model;
+            const dispatchOptions = carriesOriginalBearer ? {
+                ...requestOptions,
+                [summaryAuthBilling]: { provider: model.provider, baseUrl: model.baseUrl },
+            } : requestOptions;
             record("pending");
             let response;
             try {
-                response = await (await this.agent.streamFunction(model, context, requestOptions)).result();
+                response = await (await this.agent.streamFunction(model, context, dispatchOptions)).result();
             }
             catch (error) {
                 record(requestOptions?.signal?.aborted ? "cancelled" : "failed");
                 throw error;
             }
             const status = response.stopReason === "aborted" ? "cancelled" : response.stopReason === "stop" ? "completed" : "failed";
-            const raw = response.usage;
+            let raw = response.usage;
+            if (carriesOriginalBearer && this.agent.streamFunction === streamSimple && raw?.cost) {
+                // The bare compatibility stream does not resolve auth in ModelRuntime.
+                raw = { ...raw, cost: { ...raw.cost, billing: "subscription" } };
+            }
             const usage = raw && { costDetails: readCostEvidence(raw, response.provider ?? model.provider) };
             for (const field of ["input", "output", "cacheRead", "cacheWrite", "reasoning"]) {
                 if (usage && Number.isFinite(raw[field]) && raw[field] >= 0) usage[field] = raw[field];
@@ -1950,7 +1961,7 @@ export class AgentSession {
             if (!this.model) {
                 throw new Error(formatNoModelSelectedMessage());
             }
-            const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
+            const request = await this._getSummarizationRequestAuth(this.model);
             const pathEntries = this.sessionManager.getBranch();
             const settings = this.settingsManager.getCompactionSettings();
             const preparation = prepareCompaction(pathEntries,settings,this.model?.contextWindow)/* PI_COMPACT_WINDOW_CALL */;
@@ -1996,7 +2007,7 @@ export class AgentSession {
             }
             else {
                 // Shared default summary generator, also used by automatic compaction.
-                const result = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, customInstructions, this._compactionAbortController.signal, env, "manual");
+                const result = await this._runDefaultCompaction(preparation, request, customInstructions, this._compactionAbortController.signal, "manual");
                 summary = result.summary;
                 firstKeptEntryId = result.firstKeptEntryId;
                 tokensBefore = result.tokensBefore;
@@ -2210,7 +2221,7 @@ export class AgentSession {
             if (!this.model) {
                 return false;
             }
-            const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(this.model);
+            const request = await this._getSummarizationRequestAuth(this.model);
             const pathEntries = this.sessionManager.getBranch();
             const preparation = (prepareCompaction(pathEntries,settings,this.model?.contextWindow)/* PI_COMPACT_WINDOW_CALL */ || prepareCompaction(pathEntries,{...settings,keepRecentTokens:0},this.model?.contextWindow))/* PI_COMPACT_AUTO_TAIL */;
             if (!preparation) {
@@ -2266,7 +2277,7 @@ export class AgentSession {
             }
             else {
                 // Shared default summary generator, also used by manual compaction.
-                const compactResult = await this._runDefaultCompaction(preparation, requestModel, apiKey, headers, undefined, this._autoCompactionAbortController.signal, env, reason);
+                const compactResult = await this._runDefaultCompaction(preparation, request, undefined, this._autoCompactionAbortController.signal, reason);
                 summary = compactResult.summary;
                 firstKeptEntryId = compactResult.firstKeptEntryId;
                 tokensBefore = compactResult.tokensBefore;
@@ -3062,18 +3073,18 @@ export class AgentSession {
             let summaryUsage;
             if (options.summarize && entriesToSummarize.length > 0 && !extensionSummary) {
                 const model = this.model;
-                const { model: requestModel, apiKey, headers, env } = await this._getSummarizationRequestAuth(model);
+                const request = await this._getSummarizationRequestAuth(model);
                 const branchSummarySettings = this.settingsManager.getBranchSummarySettings();
                 const result = await generateBranchSummary(entriesToSummarize, {
-                    model: requestModel,
-                    apiKey,
-                    headers,
-                    env,
+                    model: request.model,
+                    apiKey: request.apiKey,
+                    headers: request.headers,
+                    env: request.env,
                     signal: this._branchSummaryAbortController.signal,
                     customInstructions,
                     replaceInstructions,
                     reserveTokens: branchSummarySettings.reserveTokens,
-                    streamFn: this._completeSessionSummary.bind(this, "branch-summary"),
+                    streamFn: this._completeSessionSummary.bind(this, "branch-summary", request),
                     retry: this.settingsManager.getRetrySettings(),
                     callbacks: this._summarizationRetryCallbacks({ source: "branchSummary" }),
                 });

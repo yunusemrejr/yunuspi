@@ -1,4 +1,6 @@
 import { type Api, type AssistantMessage, type AssistantMessageEventStream, type AuthCheck, type AuthInteraction, type AuthOperationOptions, type AuthResult, type AuthType, type Context, type Credential, type CredentialInfo, type CredentialStore, type DeferredHandle, type Model, type Models, type ModelsApiStreamOptions, type ModelsDeferredCancelOptions, type ModelsDeferredFetchOptions, type ModelsRefreshOptions, type ModelsRefreshResult, type ModelsSimpleStreamOptions, type ModelsStore, type Provider } from "@yunuspi/ai";
+/** @internal Provenance for summaries that carry an already-resolved OAuth bearer. */
+export declare const summaryAuthBilling: unique symbol;
 import { type AuthStatus, type CompatibilityRequestConfig, type ProviderConfigInput } from "./provider-composer.ts";
 export interface CreateModelRuntimeOptions {
     /** Credential storage. Defaults to the file at authPath. */
@@ -84,6 +86,7 @@ export declare class ModelRuntime implements Models {
     listCredentials(options?: AuthOperationOptions): Promise<readonly CredentialInfo[]>;
     getProviderAuthStatus(providerId: string): AuthStatus;
     private prepareRequest;
+    private streamRequest;
     stream<TApi extends Api>(model: Model<TApi>, context: Context, options?: ModelsApiStreamOptions<TApi>): AssistantMessageEventStream;
     complete<TApi extends Api>(model: Model<TApi>, context: Context, options?: ModelsApiStreamOptions<TApi>): Promise<AssistantMessage>;
     streamSimple(model: Model<Api>, context: Context, options?: ModelsSimpleStreamOptions): AssistantMessageEventStream;

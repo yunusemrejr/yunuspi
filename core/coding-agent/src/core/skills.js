@@ -1,58 +1,74 @@
-import { existsSync, readdirSync, readFileSync, statSync } from "fs";
+import { existsSync, fstatSync, readdirSync, readFileSync, readSync, statSync } from "node:fs";
 import ignore from "ignore";
 import { basename, dirname, join, relative, resolve, sep } from "path";
 import { CONFIG_DIR_NAME, getAgentDir } from "../config.js";
 import { parseFrontmatter } from "../utils/frontmatter.js";
 import { canonicalizePath, resolvePath } from "../utils/paths.js";
+import { addResourceIgnoreRules, withRegularResourceFile } from "../utils/resource-files.js";
 import { createSyntheticSourceInfo } from "./source-info.js";
 /** Max name length per spec */
 const MAX_NAME_LENGTH = 64;
 /** Max description length per spec */
 const MAX_DESCRIPTION_LENGTH = 1024;
-const IGNORE_FILE_NAMES = [".gitignore", ".ignore", ".fdignore"];
+const SKILL_METADATA_CHUNK_BYTES = 4096;
+const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
+const FRONTMATTER_OPEN = Buffer.from("---");
+
+function readAt(fd, buffer, offset, length, position) {
+    let total = 0;
+    while (total < length) {
+        const count = readSync(fd, buffer, offset + total, length - total, position + total);
+        if (count === 0) break;
+        total += count;
+    }
+    return total;
+}
+
+/** Locate the same first closing marker as parseFrontmatter before decoding
+ * the metadata. Catalog discovery never uses the Markdown body. */
+function readSkillFrontmatter(filePath) {
+    return withRegularResourceFile(filePath, (fd, initial) => {
+        const size = Number(initial.size);
+        const buffer = Buffer.allocUnsafe(Math.min(SKILL_METADATA_CHUNK_BYTES, size) + 3);
+        let overlap = 0;
+        let markerStart = 3;
+        for (let position = 0; position < size;) {
+            const count = readAt(fd, buffer, overlap, Math.min(SKILL_METADATA_CHUNK_BYTES, size - position), position);
+            if (count === 0) break;
+            const block = buffer.subarray(0, overlap + count);
+            if (position === 0) {
+                const bom = block.subarray(0, UTF8_BOM.length).equals(UTF8_BOM) ? UTF8_BOM.length : 0;
+                if (!block.subarray(bom, bom + FRONTMATTER_OPEN.length).equals(FRONTMATTER_OPEN)) return "";
+                markerStart = bom + 3;
+            }
+            const from = Math.max(0, markerStart - position + overlap);
+            const lf = block.indexOf("\n---", from);
+            const cr = block.indexOf("\r---", from);
+            const marker = lf === -1 ? cr : cr === -1 ? lf : Math.min(lf, cr);
+            if (marker !== -1) {
+                const end = marker + 4;
+                if (position === 0) return block.toString("utf8", 0, end);
+                // A long valid header keeps its exact bytes without keeping
+                // every scanned block of a potentially unclosed header.
+                const header = Buffer.allocUnsafe(position - overlap + end);
+                const copied = readAt(fd, header, 0, header.length, 0);
+                const after = fstatSync(fd, { bigint: true });
+                if (copied !== header.length || after.size !== initial.size ||
+                    after.mtimeNs !== initial.mtimeNs || after.ctimeNs !== initial.ctimeNs) {
+                    throw new Error("Skill metadata changed while reading");
+                }
+                return header.toString("utf8");
+            }
+            overlap = Math.min(block.length, 3);
+            buffer.copyWithin(0, block.length - overlap, block.length);
+            position += count;
+        }
+        return "";
+    });
+}
+
 function toPosixPath(p) {
     return p.split(sep).join("/");
-}
-function prefixIgnorePattern(line, prefix) {
-    const trimmed = line.trim();
-    if (!trimmed)
-        return null;
-    if (trimmed.startsWith("#") && !trimmed.startsWith("\\#"))
-        return null;
-    let pattern = line;
-    let negated = false;
-    if (pattern.startsWith("!")) {
-        negated = true;
-        pattern = pattern.slice(1);
-    }
-    else if (pattern.startsWith("\\!")) {
-        pattern = pattern.slice(1);
-    }
-    if (pattern.startsWith("/")) {
-        pattern = pattern.slice(1);
-    }
-    const prefixed = prefix ? `${prefix}${pattern}` : pattern;
-    return negated ? `!${prefixed}` : prefixed;
-}
-function addIgnoreRules(ig, dir, rootDir) {
-    const relativeDir = relative(rootDir, dir);
-    const prefix = relativeDir ? `${toPosixPath(relativeDir)}/` : "";
-    for (const filename of IGNORE_FILE_NAMES) {
-        const ignorePath = join(dir, filename);
-        if (!existsSync(ignorePath))
-            continue;
-        try {
-            const content = readFileSync(ignorePath, "utf-8");
-            const patterns = content
-                .split(/\r?\n/)
-                .map((line) => prefixIgnorePattern(line, prefix))
-                .filter((line) => Boolean(line));
-            if (patterns.length > 0) {
-                ig.add(patterns);
-            }
-        }
-        catch { }
-    }
 }
 /**
  * Validate skill name per Agent Skills spec.
@@ -134,7 +150,7 @@ function loadSkillsFromDirInternal(dir, source, includeRootFiles, ignoreMatcher,
     visited.add(realDir);
     const root = rootDir ?? dir;
     const ig = ignoreMatcher ?? ignore();
-    addIgnoreRules(ig, dir, root);
+    addResourceIgnoreRules(ig, dir, root);
     let entries;
     try {
         entries = readdirSync(dir, { withFileTypes: true });
@@ -227,7 +243,7 @@ function loadSkillFromFile(filePath, source) {
     const isDeclaredSkill = basename(filePath) === "SKILL.md";
     let rawContent;
     try {
-        rawContent = readFileSync(filePath, "utf-8");
+        rawContent = readSkillFrontmatter(filePath);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : "failed to read skill file";
@@ -361,7 +377,7 @@ function sameSkillContent(fileA, fileB) {
                             return null;
                     }
                     else {
-                        entries.push([relative(root, full), readFileSync(full)]);
+                        entries.push([relative(root, full), withRegularResourceFile(full, fd => readFileSync(fd))]);
                     }
                 }
                 return entries;

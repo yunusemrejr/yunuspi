@@ -820,10 +820,10 @@ function runPiStreaming(
 			}
 			addAuxiliaryUsage(usage, event);
 			const lifecycleAction = projectChildLifecycle(event, false, childLifecycleState);
-			if (event.type === "agent_settled" && lifecycleAction === "start-drain") {
-				agentSettledReceived = true;
+			if (event.type === "agent_settled" && !childLifecycleState.compactionActive && !childLifecycleState.compactionRetryActive) {
 				afterCompactionSettlement = compactionStartedReceived;
 			}
+			if ((event.type === "agent_settled" || event.type === "print_settled") && lifecycleAction === "start-drain") terminalSettlementReceived = true;
 			applyChildLifecycle(lifecycleAction);
 
 			if (isChildWatchdogStatusEvent(event)) {
@@ -852,7 +852,7 @@ function runPiStreaming(
 					armWatchdogTail();
 				} else {
 					clearWatchdogTailTimer();
-					if (cleanTerminalAssistantStopReceived || agentSettledReceived) startFinalDrain();
+					if (cleanTerminalAssistantStopReceived || terminalSettlementReceived) startFinalDrain();
 				}
 				return;
 			}
@@ -914,7 +914,7 @@ function runPiStreaming(
 				}
 				if (isTerminalAssistantStop(event.message)) {
 					if (!event.message.errorMessage && extractTextFromContent(event.message.content).trim()) assistantError = undefined;
-					cleanTerminalAssistantStopReceived ||= !event.message.errorMessage;
+					cleanTerminalAssistantStopReceived ||= !event.message.errorMessage && !childLifecycleState.awaitPrintSettlement;
 					clearAllToolTimeouts();
 					activeToolCalls.clear();
 					activeToolKeysByName.clear();
@@ -931,7 +931,7 @@ function runPiStreaming(
 		let childExited = false;
 		let forcedTerminationSignal = false;
 		let cleanTerminalAssistantStopReceived = false;
-		let agentSettledReceived = false;
+		let terminalSettlementReceived = false;
 		let compactionStartedReceived = false;
 		let afterCompactionSettlement = false;
 		let finalDrainTimer: NodeJS.Timeout | undefined;
@@ -944,7 +944,7 @@ function runPiStreaming(
 			if (action === "cancel-drain") {
 				// A new turn/compaction is live work, not the previous terminal tail.
 				cleanTerminalAssistantStopReceived = false;
-				agentSettledReceived = false;
+				terminalSettlementReceived = false;
 				if (finalDrainTimer) {
 					clearTimeout(finalDrainTimer);
 					finalDrainTimer = undefined;
@@ -1077,7 +1077,7 @@ function runPiStreaming(
 			}
 		};
 		function startFinalDrain(): void {
-			if (childWatchdogIsActive(childWatchdogState)) {
+			if (childLifecycleState.printExitCode === undefined && childWatchdogIsActive(childWatchdogState)) {
 				armWatchdogTail();
 				return;
 			}
@@ -1087,7 +1087,7 @@ function runPiStreaming(
 				const termSent = trySignalChild(child, "SIGTERM");
 				if (!termSent) return;
 				forcedTerminationSignal = true;
-				if (!cleanTerminalAssistantStopReceived && !agentSettledReceived && !error && !assistantError) {
+				if (!cleanTerminalAssistantStopReceived && !terminalSettlementReceived && !error && !assistantError) {
 					error = `Subagent process did not exit within ${FINAL_STOP_GRACE_MS}ms after its terminal event. Forcing termination.`;
 				}
 				finalHardKillTimer = setTimeout(() => {
@@ -1105,7 +1105,7 @@ function runPiStreaming(
 			}
 		}
 		function armWatchdogTail(): void {
-			if ((!cleanTerminalAssistantStopReceived && !agentSettledReceived) || watchdogTailTimer || settled) return;
+			if ((!cleanTerminalAssistantStopReceived && !terminalSettlementReceived) || watchdogTailTimer || settled) return;
 			watchdogTailTimer = setTimeout(() => {
 				watchdogTailTimer = undefined;
 				updateChildWatchdogState({
@@ -1149,7 +1149,8 @@ function runPiStreaming(
 			const stderr = stderrTail.text();
 			const finalOutput = getFinalOutput(messages) || rawStdoutTail.text().trim();
 			const finalError = error ?? assistantError;
-			const forcedDrainAfterFinalSuccess = Boolean(forcedTerminationSignal || signal) && (cleanTerminalAssistantStopReceived || agentSettledReceived) && !finalError && !assistantResponsePending;
+			const printFailed = childLifecycleState.printExitCode === 1;
+			const forcedDrainAfterFinalSuccess = Boolean(forcedTerminationSignal || signal) && (cleanTerminalAssistantStopReceived || terminalSettlementReceived) && !finalError && !assistantResponsePending && !printFailed;
 			const forcedDrainAfterEmptyTerminal = forcedDrainAfterFinalSuccess && hasEmptyTerminalAssistantResponse(messages);
 			const forcedDrainError = forcedDrainAfterEmptyTerminal && stderr.trim()
 				? stderr.trim()
@@ -1164,7 +1165,7 @@ function runPiStreaming(
 			const responseError = assistantResponsePending && (exitCode === 0 || !stderr.trim()) ? INCOMPLETE_CHILD_ASSISTANT_RESPONSE : undefined;
 			resolve(omitUndefinedProperties({
 				stderr,
-				exitCode: timedOut || stopped ? 1 : interrupted || (forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal) ? 0 : forcedTerminationSignal || signal ? (exitCode ?? 1) : exitCode,
+				exitCode: timedOut || stopped || printFailed ? 1 : interrupted || (forcedDrainAfterFinalSuccess && !forcedDrainAfterEmptyTerminal) ? 0 : forcedTerminationSignal || signal ? (exitCode ?? 1) : exitCode,
 				messages,
 				stopReason,
 				usage,

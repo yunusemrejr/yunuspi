@@ -13,8 +13,8 @@ function createEditCallRenderComponent() {
     return Object.assign(new Box(1, 1, (text) => text), {
         preview: undefined,
         previewArgsKey: undefined,
-        previewPending: false,
-        settledError: false,
+        previewRequest: undefined,
+        settlement: undefined,
     });
 }
 function getEditCallRenderComponent(state, lastComponent) {
@@ -72,20 +72,20 @@ function formatEditResult(args, preview, result, theme, isError) {
     }
     return undefined;
 }
-function getEditHeaderBg(preview, settledError, theme) {
+function getEditHeaderBg(preview, settlement, theme) {
+    if (settlement) {
+        return (text) => theme.bg(settlement === "error" ? "toolErrorBg" : "toolSuccessBg", text);
+    }
     if (preview) {
         if ("error" in preview) {
             return (text) => theme.bg("toolErrorBg", text);
         }
         return (text) => theme.bg("toolSuccessBg", text);
     }
-    if (settledError) {
-        return (text) => theme.bg("toolErrorBg", text);
-    }
     return (text) => theme.bg("toolPendingBg", text);
 }
 function buildEditCallComponent(component, args, theme, cwd) {
-    component.setBgFn(getEditHeaderBg(component.preview, component.settledError, theme));
+    component.setBgFn(getEditHeaderBg(component.preview, component.settlement, theme));
     component.clear();
     component.addChild(new Text(formatEditCall(args, theme, cwd), 0, 0));
     if (!component.preview) {
@@ -107,8 +107,11 @@ function setEditPreview(component, preview, argsKey) {
             (current.diff !== preview.diff || current.firstChangedLine !== preview.firstChangedLine));
     component.preview = preview;
     component.previewArgsKey = argsKey;
-    component.previewPending = false;
     return changed;
+}
+function cancelEditPreview(component) {
+    component.previewRequest?.abort();
+    component.previewRequest = undefined;
 }
 export const editRenderers = {
     renderCall(args, theme, context) {
@@ -116,24 +119,25 @@ export const editRenderers = {
         const previewInput = getRenderablePreviewInput(args);
         const argsKey = previewInput ? JSON.stringify({ path: previewInput.path, edits: previewInput.edits }) : undefined;
         if (component.previewArgsKey !== argsKey) {
+            cancelEditPreview(component);
             component.preview = undefined;
             component.previewArgsKey = argsKey;
-            component.previewPending = false;
-            component.settledError = false;
+            component.settlement = undefined;
         }
-        if (context.argsComplete && previewInput && !component.preview && !component.previewPending) {
-            component.previewPending = true;
-            const requestKey = argsKey;
-            void computeEditsDiff(previewInput.path, previewInput.edits, context.cwd).then((preview) => {
-                if (component.previewArgsKey === requestKey) {
-                    setEditPreview(component, preview, requestKey);
+        if (context.isPartial && context.argsComplete && previewInput && !component.preview && !component.previewRequest) {
+            const request = new AbortController();
+            component.previewRequest = request;
+            void computeEditsDiff(previewInput.path, previewInput.edits, context.cwd, request.signal).then((preview) => {
+                if (component.previewRequest === request) {
+                    component.previewRequest = undefined;
+                    setEditPreview(component, preview, argsKey);
                     context.invalidate();
                 }
             });
         }
         return buildEditCallComponent(component, args, theme, context.cwd);
     },
-    renderResult(result, _options, theme, context) {
+    renderResult(result, options, theme, context) {
         const callComponent = context.state.callComponent;
         const previewInput = getRenderablePreviewInput(context.args);
         const argsKey = previewInput ? JSON.stringify({ path: previewInput.path, edits: previewInput.edits }) : undefined;
@@ -142,12 +146,21 @@ export const editRenderers = {
         let changed = false;
         if (callComponent) {
             if (typeof resultDiff === "string") {
-                changed =
-                    setEditPreview(callComponent, { diff: resultDiff, firstChangedLine: typedResult.details?.firstChangedLine }, argsKey) || changed;
+                cancelEditPreview(callComponent);
+                changed = setEditPreview(callComponent, { diff: resultDiff, firstChangedLine: typedResult.details?.firstChangedLine }, argsKey);
             }
-            if (callComponent.settledError !== context.isError) {
-                callComponent.settledError = context.isError;
-                changed = true;
+            if (!options.isPartial) {
+                cancelEditPreview(callComponent);
+                const settlement = context.isError ? "error" : "success";
+                if (callComponent.settlement !== settlement) {
+                    callComponent.settlement = settlement;
+                    changed = true;
+                }
+                const preview = callComponent.preview;
+                if (preview && ("error" in preview) !== context.isError) {
+                    callComponent.preview = undefined;
+                    changed = true;
+                }
             }
             if (changed) {
                 buildEditCallComponent(callComponent, context.args, theme, context.cwd);

@@ -92,7 +92,7 @@ export interface EditDiffError {
  * Compute the diff for one or more edit operations without applying them.
  * Used for preview rendering in the TUI before the tool executes.
  */
-export declare function computeEditsDiff(path: string, edits: Edit[], cwd: string): Promise<EditDiffResult | EditDiffError>;
+export declare function computeEditsDiff(path: string, edits: Edit[], cwd: string, signal?: AbortSignal): Promise<EditDiffResult | EditDiffError>;
 /**
  * Compute the diff for a single edit operation without applying it.
  * Kept as a convenience wrapper for single-edit callers.

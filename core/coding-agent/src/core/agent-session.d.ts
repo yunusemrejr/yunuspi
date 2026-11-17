@@ -268,6 +268,7 @@ export declare class AgentSession {
     get modelRuntime(): ModelRuntime;
     private _getRequiredRequestAuth;
     private _getSummarizationRequestAuth;
+    private _resolvedSummaryRequest;
     /**
      * Install tool hooks once on the Agent instance.
      *

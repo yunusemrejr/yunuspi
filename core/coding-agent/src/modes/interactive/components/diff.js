@@ -1,5 +1,6 @@
 import * as Diff from "diff";
 import { theme } from "../theme/theme.js";
+const MAX_EXACT_WORD_DISTANCE = 256;
 /**
  * Parse diff line to extract prefix, line number, and content.
  * Format: "+123 content" or "-123 content" or " 123 content" or "     ..."
@@ -22,7 +23,8 @@ function replaceTabs(text) {
  * Strips leading whitespace from inverse to avoid highlighting indentation.
  */
 function renderIntraLineDiff(oldContent, newContent) {
-    const wordDiff = Diff.diffWords(oldContent, newContent);
+    const wordDiff = Diff.diffWords(oldContent, newContent, { maxEditLength: MAX_EXACT_WORD_DISTANCE });
+    if (wordDiff === undefined) return { removedLine: oldContent, addedLine: newContent };
     let removedLine = "";
     let addedLine = "";
     let isFirstRemoved = true;

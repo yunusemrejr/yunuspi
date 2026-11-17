@@ -107,7 +107,7 @@ async function resolveStoredOAuth(credentials, providerId, oauth, stored, signal
         }
     }
     try {
-        return { auth: await oauth.toAuth(credential), source: "OAuth" };
+        return { auth: await oauth.toAuth(credential), source: "OAuth", credentialType: "oauth" };
     }
     catch (error) {
         throw new ModelsError("oauth", `OAuth auth derivation failed for ${providerId}`, { cause: error });
@@ -115,7 +115,8 @@ async function resolveStoredOAuth(credentials, providerId, oauth, stored, signal
 }
 async function resolveApiKey(authContext, apiKey, providerId, credential, signal) {
     try {
-        return await apiKey.resolve({ ctx: authContext, credential, signal });
+        const result = await apiKey.resolve({ ctx: authContext, credential, signal });
+        return result ? { ...result, credentialType: "api_key" } : undefined;
     }
     catch (error) {
         throw new ModelsError("auth", `API key auth failed for provider ${providerId}`, { cause: error });
