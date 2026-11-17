@@ -12,3 +12,4 @@ export declare function desktopArguments(args: any): Record<string, any>;
 export declare function desktopHistory(messages: any[], options?: HistoryPageOptions): HistoryPage;
 export declare function desktopSessionHistory(manager: LiveHistoryManager, options?: HistoryPageOptions & { anchor?: string }): (HistoryPage & { anchor?: string; goal?: DesktopGoal | null }) | { reset: true };
 export declare function desktopEvent(event: any): any | undefined;
+export declare function createDesktopStreamingPreview(): { observe(event: any): void; snapshot(): any | null; reset(): void };

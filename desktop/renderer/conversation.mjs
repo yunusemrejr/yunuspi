@@ -1,5 +1,5 @@
-export const messageText = message => typeof message?.content === 'string' ? message.content : (message?.content ?? []).filter(c => c.type === 'text').map(c => c.text).join('\n');
-export const imageParts = message => Array.isArray(message?.content) ? message.content.filter(c => c.type === 'image' && typeof c.data === 'string' && /^image\/(png|jpeg|webp|gif)$/.test(c.mimeType)) : [];
+export const messageText = message => typeof message?.content === 'string' ? message.content : (message?.content ?? []).filter(c => c?.type === 'text').map(c => c.text).join('\n');
+export const imageParts = message => Array.isArray(message?.content) ? message.content.filter(c => c?.type === 'image' && typeof c.data === 'string' && /^image\/(png|jpeg|webp|gif)$/.test(c.mimeType)) : [];
 const key = () => globalThis.crypto.randomUUID();
 
 // What a tool call is for, read from its name. The first match wins, so `web_search` is a web step.
@@ -172,9 +172,10 @@ function appendActivity(state, message) {
   state.messages.push(entry);
   return entry;
 }
-export function createConversation(messages = []) {
-  const state = { messages: [], streaming: null, busy: false, error: '', stats: null };
+export function createConversation(messages = [], streamingMessage) {
+  const state = { messages: [], toolByCall: new Map(), streaming: null, busy: false, error: '', stats: null };
   for (const message of messages) appendMessage(state, message);
+  if (streamingMessage?.role === 'assistant') state.streaming = appendMessage(state, streamingMessage);
   return state;
 }
 export function prependConversation(state, messages) {
@@ -182,8 +183,8 @@ export function prependConversation(state, messages) {
   for (let index = 0; index < earlier.messages.length; index++) {
     const tool = earlier.messages[index];
     if (tool.kind !== 'tool') continue;
-    const existing = state.messages.find(m => m.kind === 'tool' && m.callId === tool.callId);
-    if (!existing) continue;
+    const existing = state.toolByCall.get(tool.callId);
+    if (!existing) { state.toolByCall.set(tool.callId, tool); continue; }
     existing.name = tool.name || existing.name;
     existing.args = Object.keys(tool.args || {}).length ? tool.args : existing.args;
     if (existing.status === 'running' && tool.status !== 'running') { existing.status = tool.status; existing.output = tool.output; existing.images = tool.images; }
@@ -192,9 +193,21 @@ export function prependConversation(state, messages) {
   state.messages = [...earlier.messages, ...state.messages.filter(m => m.kind !== 'tool' || !merged.has(m.callId))];
   return state;
 }
+export function recentTools(state, limit = 80) {
+  const count = Math.min(limit, state.toolByCall.size), tools = [];
+  for (let index = state.messages.length - 1; index >= 0 && tools.length < count; index--) {
+    const message = state.messages[index];
+    if (message.kind === 'tool') tools.push(message);
+  }
+  return tools;
+}
 function ensureTool(state, id, name = 'tool', args = {}) {
-  let tool = state.messages.find(m => m.kind === 'tool' && m.callId === id);
-  if (!tool) { tool = { key: key(), kind: 'tool', callId: id, name, args, status: 'running', output: '', images: [], revision: 0 }; state.messages.push(tool); }
+  let tool = state.toolByCall.get(id);
+  if (!tool) {
+    tool = { key: key(), kind: 'tool', callId: id, name, args, status: 'running', output: '', images: [], revision: 0 };
+    state.toolByCall.set(id, tool);
+    state.messages.push(tool);
+  }
   return tool;
 }
 function appendMessage(state, message) {
@@ -215,7 +228,7 @@ function appendMessage(state, message) {
       if (goal) entry.goal = goal;
     }
     state.messages.push(entry);
-    if (Array.isArray(message.content)) for (const part of message.content) if (part.type === 'toolCall') ensureTool(state, part.id, part.name, part.arguments);
+    if (Array.isArray(message.content)) for (const part of message.content) if (part?.type === 'toolCall') ensureTool(state, part.id, part.name, part.arguments);
     return entry;
   }
   if (message.role === 'custom' && message.customType === 'harness-activity') return appendActivity(state, message);
@@ -231,19 +244,19 @@ export function applyAgentEvent(state, event) {
         if (pending) { pending.optimistic = false; pending.revision++; break; }
       }
       const message = appendMessage(state, event.message);
-      if (event.message?.role === 'assistant' && message) state.streaming = message.key;
+      if (event.message?.role === 'assistant' && message) state.streaming = message;
       break;
     }
     case 'message_update': {
       const delta = event.assistantMessageEvent;
       if (!delta) break;
-      let message = state.messages.find(m => m.key === state.streaming);
-      if (!message) { message = appendMessage(state, { role: 'assistant', content: [], timestamp: Date.now() }); state.streaming = message.key; }
+      const message = state.streaming ??= appendMessage(state, { role: 'assistant', content: [], timestamp: Date.now() });
       if (delta.type === 'text_delta' || delta.type === 'thinking_delta') {
         const type = delta.type === 'text_delta' ? 'text' : 'thinking';
         if (!Array.isArray(message.content)) message.content = [];
         const index = Number.isInteger(delta.contentIndex) && delta.contentIndex >= 0 && delta.contentIndex < 256 ? delta.contentIndex : 0;
-        const part = message.content[index] ?? { type, [type]: '' };
+        const existing = message.content[index];
+        const part = existing?.type === type ? existing : { type, [type]: '' };
         part[type] = ((part[type] ?? '') + (delta.delta ?? '')).slice(0, 500_000);
         message.content[index] = part; message.revision++;
       }
@@ -251,7 +264,7 @@ export function applyAgentEvent(state, event) {
     }
     case 'message_end': {
       if (event.message?.role === 'assistant') {
-        const message = state.messages.find(m => m.key === state.streaming);
+        const message = state.streaming;
         if (message) { message.content = structuredClone(event.message.content); message.error = event.message.errorMessage || ''; message.revision++; }
         else appendMessage(state, event.message);
         if (event.message.errorMessage) state.error = event.message.errorMessage;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { AgentWorker, jsonLines } from '../desktop/agent-worker.mjs';
-import { applyAgentEvent, createConversation, messageText } from '../desktop/renderer/conversation.mjs';
+import { applyAgentEvent, createConversation, messageText, prependConversation, recentTools } from '../desktop/renderer/conversation.mjs';
 
 function fixture(options = {}) {
   const child = new EventEmitter();
@@ -251,4 +251,23 @@ test('conversation reducers isolate simultaneous sessions and reconcile streamed
   assert.equal(first.activities, undefined);
   assert.equal(first.streaming, null);
   assert.equal(first.busy, false);
+});
+
+test('older pages retain the active assistant and hydrate tool records once in transcript order', () => {
+  const answer = text => ({ role: 'assistant', content: [{ type: 'text', text }] });
+  const toolResult = (id, text) => ({ role: 'toolResult', toolCallId: id, toolName: 'read', content: [{ type: 'text', text }] });
+  const state = createConversation([toolResult('shared', 'Final output')], answer('Current answer'));
+  const shared = state.messages[0], streaming = state.messages[1];
+  prependConversation(state, [toolResult('earlier', 'Earlier output'), {
+    role: 'assistant', content: [{ type: 'toolCall', id: 'shared', name: 'read', arguments: { path: 'fixture.txt' } }],
+  }]);
+  applyAgentEvent(state, { type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: ' continues' } });
+  assert.equal(state.messages.at(-1), streaming);
+  assert.equal(messageText(streaming), 'Current answer continues');
+  assert.deepEqual(recentTools(state, 1), [shared]);
+  assert.deepEqual(recentTools(state).map(tool => tool.callId), ['shared', 'earlier']);
+  assert.equal(shared.output, 'Final output');
+  assert.equal(shared.args.path, 'fixture.txt');
+  applyAgentEvent(state, { type: 'tool_execution_end', toolCallId: 'earlier', result: { content: [{ type: 'text', text: 'Updated output' }] } });
+  assert.deepEqual(recentTools(state).map(tool => tool.output), ['Final output', 'Updated output']);
 });

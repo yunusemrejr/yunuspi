@@ -1,3 +1,10 @@
+## 0.56.14 — Ordered streaming and durable completion receipts
+
+- Desktop history snapshots follow the same event order as the live stream. Reattaching during an assistant update keeps earlier answers intact and renders each new answer once.
+- Desktop updates use the active answer directly and index tool rows by call ID. Loading an older page keeps related tool calls and results together.
+- A completed reviewer’s charge settles in the session that started it, including when tree navigation cancels or a different session opens.
+- Background tasks retry failed completion receipt writes. The continuation waits for a durable receipt and follows the current turn’s wake policy.
+
 ## 0.56.13 — Durable desktop queue recovery
 
 - Desktop close and quit save queued text and images before draining the agent queue. Review each recovered message separately after reopening, with the current composer draft preserved.

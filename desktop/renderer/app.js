@@ -1,4 +1,4 @@
-import { createConversation, prependConversation, applyAgentEvent, messageText, imageParts, toolIcon, toolLine, toolTrouble, duration, workSummary, workBlocks, filesChanged } from './conversation.mjs';
+import { createConversation, prependConversation, recentTools, applyAgentEvent, messageText, imageParts, toolIcon, toolLine, toolTrouble, duration, workSummary, workBlocks, filesChanged } from './conversation.mjs';
 import { element, icon, markdown } from './markdown.mjs';
 import { readCommand, goalFromStatus } from './command-lens.mjs';
 import { PICKER_LIMIT, TEAM_ROLES, modelRow, rankModels, readTeam, teamOptions } from './team-settings.mjs';
@@ -174,7 +174,7 @@ async function openSession(id, reload = false) {
     // The worker emits during initialization. get_messages is authoritative at
     // its response boundary, and deltas arriving afterwards continue the reducer.
     const previous = conversationOf(id);
-    const state = result.messages ? createConversation([...result.messages, ...(result.streamingMessage ? [result.streamingMessage] : [])]) : previous;
+    const state = result.messages ? createConversation(result.messages, result.streamingMessage) : previous;
     if (result.messages) {
       state.historyBefore = result.before; state.historyAnchor = result.anchor; state.hasMore = result.hasMore;
       pendingView.savedGoal = result.goal ?? null;
@@ -182,10 +182,6 @@ async function openSession(id, reload = false) {
     state.historyRevision = result.revision;
     Object.assign(state, { model: result.state.model, thinkingLevel: result.state.thinkingLevel, busy: result.state.isStreaming,
       stats: result.stats ?? (result.passive && result.messages ? undefined : previous.stats) });
-    if (state.busy) {
-      const last = [...state.messages].reverse().find(m => m.kind === 'assistant');
-      if (last) state.streaming = last.key;
-    }
     for (const item of pendingView.replay) if (item.event.type === 'notice' || (result.messages && item.sequence > result.sequence)) applyAgentEvent(state, item.event);
     pendingView.pendingHistory = false; pendingView.replay = [];
     conversations.set(id, state); viewOf(id).nodes.clear(); $('messages').replaceChildren();
@@ -324,7 +320,7 @@ function renderMessage(message, existing) {
     }
   } else if (message.kind === 'assistant') {
     const label = element('div', 'assistant-label'); const rat = element('img'); rat.src = 'assets/rat.svg'; rat.alt = ''; label.append(rat, element('span', '', 'YunusPi')); node.append(label);
-    const thinking = Array.isArray(message.content) ? message.content.filter(p => p?.type === 'thinking').map(p => p.thinking).join('\n') : '';
+    const thinking = Array.isArray(message.content) ? message.content.filter(p => p?.type === 'thinking' && p.thinking).map(p => p.thinking).join('\n') : '';
     if (thinking) {
       const details = element('details', 'thinking'); details.open = oldDetails || false; details.append(element('summary', '', 'Thought process'), element('div', 'thinking-body', thinking.slice(0, 24000))); node.append(details);
     }
@@ -421,7 +417,7 @@ function updateJumpPosition() {
 }
 function renderActivity() {
   // Read from the transcript, newest first, so a reopened session lists what it did as a running one does.
-  const list = $('activity-list'), tools = activeId ? conversationOf(activeId).messages.filter(message => message.kind === 'tool').slice(-80).reverse() : [];
+  const list = $('activity-list'), tools = activeId ? recentTools(conversationOf(activeId)) : [];
   const signature = tools.map(tool => `${tool.key}:${tool.revision}`).join(' ');
   if (list.dataset.signature === signature && list.childElementCount) return;
   list.dataset.signature = signature;

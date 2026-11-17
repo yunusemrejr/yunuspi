@@ -12,7 +12,7 @@
  *
  * Modes use this class and add their own I/O layer on top.
  */
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { basename, dirname } from "node:path";
 import { assistantCooldownRetryDelay, assistantRetryDelay, COOLDOWN_RETRY_WINDOW_MS, contentText, isFlatPlanProvider, usesProviderCooldown } from "@yunuspi/ai";
@@ -2448,7 +2448,7 @@ export class AgentSession {
                 return delivery;
             },
             appendEntry: (customType, data) => this._appendCustomEntry(customType, data),
-            bindAuxiliaryUsage: () => this._bindAuxiliaryUsage(),
+            bindAuxiliaryUsage: (customType) => this._bindAuxiliaryUsage(customType),
             setSessionName: (name) => {
                 this.setSessionName(name);
             },
@@ -3104,21 +3104,13 @@ export class AgentSession {
         const entry = this.sessionManager.getEntry(this.sessionManager.appendCustomEntry(customType, data));
         if (entry) this._emit({ type: "entry_appended", entry });
     }
-    _bindAuxiliaryUsage() {
+    _bindAuxiliaryUsage(customType = "auxiliary-model-usage-v1") {
         const manager = this.sessionManager;
-        const id = manager.getSessionId();
-        const file = manager.getSessionFile();
-        const parentId = manager.getLeafId();
-        let identity;
+        const append = manager.bindAccountingReceipt(customType);
         return data => {
-            if (manager.getSessionId() !== id || manager.getSessionFile() !== file) return false;
-            if (file && identity) {
-                const current = statSync(file, { bigint: true, throwIfNoEntry: false });
-                if (!current || current.dev !== identity.dev || current.ino !== identity.ino) return false;
-            }
-            const entry = manager.appendSummaryUsageReceipt(data, parentId);
-            if (file && !identity) identity = statSync(file, { bigint: true, throwIfNoEntry: false });
-            try { this._emit({ type: "entry_appended", entry }); }
+            const entry = append(data);
+            if (!entry) return false;
+            try { if (this.sessionManager === manager) this._emit({ type: "entry_appended", entry }); }
             catch { /* The durable write already owns the receipt. */ }
             return true;
         };

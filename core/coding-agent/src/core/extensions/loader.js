@@ -561,9 +561,9 @@ function createExtensionAPI(extension, runtime, cwd, eventBus) {
             assertActive();
             runtime.appendEntry(customType, data);
         },
-        bindAuxiliaryUsage() {
+        bindAuxiliaryUsage(customType) {
             assertActive();
-            return runtime.bindAuxiliaryUsage();
+            return runtime.bindAuxiliaryUsage(customType);
         },
         setSessionName(name) {
             assertActive();

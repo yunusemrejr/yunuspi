@@ -6,10 +6,10 @@ import { failureOf, projectRunEvidence } from "../runs/shared/run-history.ts";
 
 /** Persist compact accounting evidence, never prompts or tool output. Footer
  * owns summation/deduplication; this bridges detached completion into history. */
-export function persistSubagentCost(pi: any, state: any, payload: any): void {
-  if (!payload || payload.sessionId !== state.currentSessionId || payload.completionOwnerId !== state.completionOwnerId) return;
+export function persistSubagentCost(pi: any, state: any, payload: any, append?: (data: unknown) => boolean): boolean {
+  if (!payload || payload.sessionId !== state.currentSessionId || payload.completionOwnerId !== state.completionOwnerId) return false;
   const runId = payload.runId ?? payload.id;
-  if (typeof runId !== 'string' || !Array.isArray(payload.results)) return;
+  if (typeof runId !== 'string' || !Array.isArray(payload.results)) return false;
   const hasUsage = (row: any) => row?.usage && (hasRecordedTokenUsage(row.usage) || readCostEvidence(row.usage).seen || readCostEvidence(row.usage).subscription || row.usage.costDetails);
   const results = payload.results.map((input: any, index: number) => {
     const r = input?.childProcessStarted === false && input?.stage === 'launch' && !hasRecordedTokenUsage(input?.usage)
@@ -35,8 +35,11 @@ export function persistSubagentCost(pi: any, state: any, payload: any): void {
     usage: hasUsage(r) ? {input:r.usage.input,output:r.usage.output,cacheRead:r.usage.cacheRead,cacheWrite:r.usage.cacheWrite,cost:r.usage.cost,turns:r.usage.turns,...(r.usage.costDetails?{costDetails:readCostEvidence(r.usage)}:{}),...(r.usage.costByModel?{costByModel:projectCostByModel(r.usage.costByModel)}:{})} : undefined,
     totalCost: hasUsage(r) ? sumResultsCost([r]) : r?.totalCost ? {costUsd:r.totalCost.costUsd,...(r.totalCost.costDetails?{costDetails:readCostEvidence({costDetails:r.totalCost.costDetails})}:{})} : undefined,
   });});
-  pi.appendEntry('subagent-cost-v1',{runId,...(typeof payload.mode==='string'?{mode:payload.mode}:{}),...(typeof payload.state==='string'?{state:payload.state}:{}),...(typeof payload.success==='boolean'?{success:payload.success}:{}),...(payload.activityMetrics?{events:Object.fromEntries(['fanouts','recoveries'].filter(k=>Number.isSafeInteger(payload.activityMetrics[k])&&payload.activityMetrics[k]>=0).map(k=>[k,payload.activityMetrics[k]]))}:{}),results});
+  const data = {runId,...(typeof payload.mode==='string'?{mode:payload.mode}:{}),...(typeof payload.state==='string'?{state:payload.state}:{}),...(typeof payload.success==='boolean'?{success:payload.success}:{}),...(payload.activityMetrics?{events:Object.fromEntries(['fanouts','recoveries'].filter(k=>Number.isSafeInteger(payload.activityMetrics[k])&&payload.activityMetrics[k]>=0).map(k=>[k,payload.activityMetrics[k]]))}:{}),results};
+  if (append) { if (!append(data)) return false; }
+  else pi.appendEntry('subagent-cost-v1', data);
   try { sessionObservability()[Symbol.for('yunus-pi.health.v1')]?.('subagent.accounted',{count:results.length}); } catch {}
+  return true;
 }
 
 /** Recover retained detached accounting by exact run IDs from this session;

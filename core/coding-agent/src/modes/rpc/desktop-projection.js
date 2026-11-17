@@ -4,6 +4,10 @@ import { createHash, randomUUID } from 'node:crypto';
 // saved in JSONL. Keep wire records bounded, including image-heavy history.
 const liveHistory = new WeakMap();
 const MAX_CACHED_LIVE_HISTORY_ENTRIES = 50_000;
+const PREVIEW_PARTS = 128;
+const ASSISTANT_TEXT_PREVIEW_CHARACTERS = 500_000;
+const THINKING_PREVIEW_CHARACTERS = 24_000;
+const STREAM_PREVIEW_CHARACTERS = 4 * 1024 * 1024;
 
 /** Harness-activity lines are drawn from their small, fixed-shape details (label, status, detail), never from model content. */
 const activityDetails = (customType, details) => {
@@ -48,7 +52,7 @@ export function desktopMessage(message, budget = { remaining: 8 * 1024 * 1024 })
     else {
     let remaining = Math.min(budget.remaining, 4 * 1024 * 1024);
     preview.content = [];
-    for (const part of (message.content ?? []).slice(0, 128)) {
+    for (const part of (message.content ?? []).slice(0, PREVIEW_PARTS)) {
         if (remaining < 300) break;
         let projected;
         if (part.type === 'image') {
@@ -58,9 +62,9 @@ export function desktopMessage(message, budget = { remaining: 8 * 1024 * 1024 })
                 projected = { type: 'text', text: '[Image retained in session history; omitted from this desktop preview.]' };
             }
         }
-        else if (part.type === 'thinking') projected = { type: 'thinking', thinking: clip(part.thinking, 24_000) };
+        else if (part.type === 'thinking') projected = { type: 'thinking', thinking: clip(part.thinking, THINKING_PREVIEW_CHARACTERS) };
         else if (part.type === 'toolCall') projected = { type: 'toolCall', id: part.id, name: part.name, arguments: desktopArguments(part.arguments) };
-        else projected = { type: 'text', text: clip(part.text ?? '', message.role === 'toolResult' ? 16_000 : 500_000) };
+        else projected = { type: 'text', text: clip(part.text ?? '', message.role === 'toolResult' ? 16_000 : ASSISTANT_TEXT_PREVIEW_CHARACTERS) };
         let bytes = Buffer.byteLength(JSON.stringify(projected));
         if (bytes > remaining) {
             const field = projected.type === 'thinking' ? 'thinking' : 'text';
@@ -141,4 +145,46 @@ export function desktopEvent(event) {
     if (event.type === 'tool_execution_start') return { ...event, args: desktopArguments(event.args) };
     if (event.type === 'tool_execution_end') return { ...event, result: desktopMessage({ ...event.result, role: 'toolResult' }) };
     return event;
+}
+
+/** The active assistant preview as of the latest record queued for desktop stdout. */
+export function createDesktopStreamingPreview() {
+    let active = null;
+    let remaining = STREAM_PREVIEW_CHARACTERS;
+    return {
+        observe(event) {
+            if (event.type === 'message_start' && event.message?.role === 'assistant') {
+                const { timestamp, provider, model } = event.message;
+                active = { role: 'assistant', content: [], timestamp, provider, model, stopReason: 'pending' };
+                remaining = STREAM_PREVIEW_CHARACTERS;
+                return;
+            }
+            if (event.type === 'agent_start' || event.type === 'agent_end' || event.type === 'message_end' && event.message?.role === 'assistant') {
+                active = null;
+                return;
+            }
+            if (!active || event.type !== 'message_update') return;
+            const update = event.assistantMessageEvent;
+            const type = update?.type === 'text_delta' ? 'text' : update?.type === 'thinking_delta' ? 'thinking' : undefined;
+            const index = update?.contentIndex;
+            if (!type || typeof update.delta !== 'string' || !Number.isInteger(index) || index < 0 || index >= PREVIEW_PARTS) return;
+            const part = active.content[index] ?? { type, [type]: '' };
+            if (part.type !== type) return;
+            const limit = type === 'text' ? ASSISTANT_TEXT_PREVIEW_CHARACTERS : THINKING_PREVIEW_CHARACTERS;
+            const available = Math.min(remaining, limit - part[type].length);
+            if (available <= 0) return;
+            const addition = update.delta.slice(0, available);
+            part[type] += addition;
+            active.content[index] = part;
+            remaining -= addition.length;
+        },
+        snapshot() {
+            if (!active) return null;
+            // Keep contentIndex stable for later deltas when an earlier block
+            // (such as a tool call) does not have an accumulated text preview.
+            const content = Array.from(active.content, part => part ?? { type: 'thinking', thinking: '' });
+            return desktopMessage({ ...active, content });
+        },
+        reset() { active = null; },
+    };
 }

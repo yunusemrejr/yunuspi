@@ -3,6 +3,7 @@ import type { AgentMessage } from "@yunuspi/agent-core";
 import { type ImageContent, type Message, type TextContent, type Usage } from "@yunuspi/ai";
 import { type BashExecutionMessage, type CustomMessage } from "./messages.ts";
 export declare const CURRENT_SESSION_VERSION = 3;
+export type SessionAccountingReceiptType = "auxiliary-model-usage-v1" | "subagent-cost-v1" | "subagent-lifecycle-v1";
 export interface SessionHeader {
     type: "session";
     version?: number;
@@ -228,7 +229,7 @@ export declare class SessionManager {
     usesDefaultSessionDir(): boolean;
     getSessionId(): string;
     getSessionFile(): string | undefined;
-    _persist(entry: SessionEntry, durable?: boolean): void;
+    _persist(entry: SessionEntry, durable?: boolean, accountingOwner?: BigIntStats): void;
     /** Persist buffered history without waiting for the first assistant; no-op for in-memory sessions. */
     flush(): void;
     private _appendEntry;
@@ -248,6 +249,8 @@ export declare class SessionManager {
     /** Append a custom entry (for extensions) as child of current leaf, then advance leaf. Returns entry id. */
     appendCustomEntry(customType: string, data?: unknown): string;
     appendSummaryUsageReceipt(data: unknown, parentId?: string | null): CustomEntry;
+    /** Bind a durable accounting append to the exact current session and leaf. */
+    bindAccountingReceipt(customType: SessionAccountingReceiptType): (data: unknown) => CustomEntry | undefined;
     /** Append a session info entry (e.g., display name). Returns entry id. */
     appendSessionInfo(name: string): string;
     /** Get the current session name from the latest session_info entry, if any. */

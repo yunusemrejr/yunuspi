@@ -18,6 +18,7 @@ const output = path.resolve(process.env.YUNUSPI_E2E_OUTPUT || path.join(os.tmpdi
 fs.mkdirSync(output, { recursive: true });
 const agentDir = path.join(scratch, 'agent'), dataDir = path.join(scratch, 'desktop');
 const alpha = path.join(scratch, 'project-alpha'), beta = path.join(scratch, 'project-beta');
+const attachGate = path.join(scratch, 'attach-gate'), attachHeld = path.join(scratch, 'attach-held');
 for (const directory of [agentDir, alpha, beta, path.join(agentDir, 'extensions')]) fs.mkdirSync(directory, { recursive: true });
 fs.writeFileSync(path.join(alpha, 'sample.txt'), 'The desktop tool fixture is readable.\n');
 const requests = [];
@@ -39,6 +40,10 @@ const server = http.createServer(async (req, res) => {
   if (prompt === 'Hold the queue recovery fixture') {
     chunk({ role: 'assistant', content: 'Holding this fixture turn open.' });
     return;
+  }
+  if (prompt === 'Reattach during the blocked stream start') {
+    chunk({ role: 'assistant', content: 'The streamed answer appears once.' });
+    finish('stop'); return;
   }
   // A turn of several steps: narration and one read per request, the second read failing, then the answer.
   if (prompt.includes('STEPS')) {
@@ -67,6 +72,14 @@ fs.writeFileSync(path.join(agentDir, 'extensions/desktop-fixture.ts'), `import {
 import fs from 'node:fs';
 export default function(pi) {
   let job;
+  pi.on('message_start', async (event, ctx) => {
+    const gate = ${JSON.stringify(attachGate)};
+    if (event.message.role !== 'assistant' || !fs.existsSync(gate) ||
+      fs.readFileSync(gate, 'utf8') !== ctx.sessionManager.getSessionId()) return;
+    fs.writeFileSync(${JSON.stringify(attachHeld)}, 'held');
+    const deadline = Date.now() + 15000;
+    while (fs.existsSync(gate) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 15));
+  });
   pi.registerCommand('desktop-job', {description:'Synthetic background ownership coverage',handler:async()=>{
     job=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});
     fs.writeFileSync(${JSON.stringify(path.join(scratch, 'job.pid'))},String(job.pid));
@@ -149,6 +162,22 @@ try {
   assert.doesNotMatch(await page.locator('#messages').innerText(), /alpha-session-two/);
   await page.waitForFunction(() => document.getElementById('usage-caption').textContent.includes('$~0.001000 total'));
   check('same-project simultaneous streams remain independent');
+  const attaching = await page.evaluate(projectId => window.yunuspi.createSession(projectId), pa.id);
+  fs.writeFileSync(attachGate, attaching.id);
+  try {
+    await page.evaluate(id => window.yunuspi.prompt(id, 'Reattach during the blocked stream start'), attaching.id);
+    const deadline = Date.now() + 10_000;
+    while (!fs.existsSync(attachHeld) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 15));
+    assert.ok(fs.existsSync(attachHeld), 'the assistant start is paused before any assistant event is sent');
+    await open(attaching.id);
+    assert.doesNotMatch(await page.locator('#messages').innerText(), /The streamed answer appears once/);
+  } finally { fs.rmSync(attachGate, { force: true }); }
+  await page.getByText('The streamed answer appears once.', { exact: true }).waitFor();
+  await done();
+  assert.equal((await page.locator('#messages').innerText()).match(/The streamed answer appears once/g)?.length, 1);
+  await page.evaluate(id => window.yunuspi.sessionAction(id, 'close'), attaching.id);
+  await open(first.id);
+  check('fresh desktop attach waits for the ordered stream event and renders the answer once');
   await page.evaluate(id => window.yunuspi.prompt(id, '/desktop-charge'), first.id);
   await page.waitForFunction(() => document.getElementById('usage-caption').textContent.includes('$~0.251000 total'));
   check('detached billing refreshes the live total while the session is idle');

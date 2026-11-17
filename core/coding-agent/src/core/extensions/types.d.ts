@@ -21,7 +21,7 @@ import type { KeybindingsManager } from "../keybindings.ts";
 import type { CustomMessage } from "../messages.ts";
 import type { ModelRegistry } from "../model-registry.ts";
 import type { ScopedModel } from "../model-resolver.ts";
-import type { BranchSummaryEntry, CompactionEntry, CustomEntry, ReadonlySessionManager, SessionEntry, SessionManager } from "../session-manager.ts";
+import type { BranchSummaryEntry, CompactionEntry, CustomEntry, ReadonlySessionManager, SessionAccountingReceiptType, SessionEntry, SessionManager } from "../session-manager.ts";
 import type { SlashCommandInfo } from "../slash-commands.ts";
 import type { SourceInfo } from "../source-info.ts";
 import type { BuildSystemPromptOptions } from "../system-prompt.ts";
@@ -1057,8 +1057,8 @@ export interface ExtensionAPI {
     }): Promise<void>;
     /** Append a custom entry to the session for state persistence (not sent to LLM). */
     appendEntry<T = unknown>(customType: string, data?: T): void;
-    /** Bind a durable auxiliary receipt sink to the current session before dispatch. */
-    bindAuxiliaryUsage?(): (data: unknown) => boolean;
+    /** Bind a durable accounting receipt sink to the current session before dispatch. */
+    bindAuxiliaryUsage?(customType?: SessionAccountingReceiptType): (data: unknown) => boolean;
     /** Set the session display name (shown in session selector). */
     setSessionName(name: string): void;
     /** Get the current session name, if set. */
@@ -1337,7 +1337,7 @@ export interface ExtensionActions {
     sendMessage: SendMessageHandler;
     sendUserMessage: SendUserMessageHandler;
     appendEntry: AppendEntryHandler;
-    bindAuxiliaryUsage: () => (data: unknown) => boolean;
+    bindAuxiliaryUsage: (customType?: SessionAccountingReceiptType) => (data: unknown) => boolean;
     setSessionName: SetSessionNameHandler;
     getSessionName: GetSessionNameHandler;
     setLabel: SetLabelHandler;

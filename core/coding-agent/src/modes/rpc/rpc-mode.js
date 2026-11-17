@@ -18,7 +18,7 @@ import { killTrackedDetachedChildren } from "../../utils/shell.js";
 import { theme } from "../interactive/theme/theme.js";
 import { toJsonEvent } from "../json-event.js";
 import { attachJsonlLineReader, serializeJsonLine } from "./jsonl.js";
-import { desktopEvent, desktopMessage, desktopSessionHistory } from "./desktop-projection.js";
+import { createDesktopStreamingPreview, desktopEvent, desktopMessage, desktopSessionHistory } from "./desktop-projection.js";
 /**
  * Run in RPC mode.
  * Listens for JSON commands on stdin, outputs events and responses on stdout.
@@ -28,9 +28,12 @@ export async function runRpcMode(runtimeHost) {
     let session = runtimeHost.session;
     let unsubscribe;
     let unsubscribeBackpressure;
+    const desktopStreamingPreview = process.env.PI_DESKTOP_SESSION === '1' ? createDesktopStreamingPreview() : undefined;
     const output = (obj) => {
-        const value = process.env.PI_DESKTOP_SESSION === '1' ? desktopEvent(obj) : obj;
-        if (value !== undefined) writeRawStdout(serializeJsonLine(value));
+        const value = desktopStreamingPreview ? desktopEvent(obj) : obj;
+        if (value === undefined) return;
+        writeRawStdout(serializeJsonLine(value));
+        desktopStreamingPreview?.observe(value);
     };
     const success = (id, command, data) => {
         if (data === undefined) {
@@ -239,6 +242,7 @@ export async function runRpcMode(runtimeHost) {
         await rebindSession();
     });
     const rebindSession = async () => {
+        if (session !== runtimeHost.session) desktopStreamingPreview?.reset();
         session = runtimeHost.session;
         await session.bindExtensions({
             uiContext: createExtensionUIContext(),
@@ -275,7 +279,9 @@ export async function runRpcMode(runtimeHost) {
         });
         unsubscribe?.();
         unsubscribeBackpressure?.();
+        const boundSession = session;
         unsubscribe = session.subscribe((event) => {
+            if (session !== boundSession) return;
             output(toJsonEvent(event));
             if (event.type === "agent_settled") {
                 void checkShutdownRequested();
@@ -584,12 +590,19 @@ export async function runRpcMode(runtimeHost) {
             case "get_messages": {
                 if (command.projection === 'desktop') {
                     const page = desktopSessionHistory(session.sessionManager, { limit: command.limit, before: command.before, anchor: command.anchor });
-                    if (page.reset) return success(id, "get_messages", { ...page, messages: [] });
-                    return success(id, "get_messages", {
+                    const live = session.agent.state.streamingMessage;
+                    const streamingMessage = command.before !== undefined ? null : desktopStreamingPreview
+                        ? desktopStreamingPreview.snapshot()
+                        : live?.role === 'assistant' ? desktopMessage(live) : null;
+                    const data = page.reset ? { ...page, messages: [] } : {
                         ...page,
                         isStreaming: session.isStreaming,
-                        streamingMessage: command.before === undefined && session.agent.state.streamingMessage?.role === 'assistant' ? desktopMessage(session.agent.state.streamingMessage) : null,
-                    });
+                        streamingMessage,
+                    };
+                    // Capture and queue this record without yielding to an
+                    // event that would advance the desktop replay boundary.
+                    output(success(id, "get_messages", data));
+                    return undefined;
                 }
                 return success(id, "get_messages", { messages: session.messages });
             }

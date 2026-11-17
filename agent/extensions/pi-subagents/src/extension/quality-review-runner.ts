@@ -74,7 +74,10 @@ export function registerQualityReviewRunner(pi: ExtensionAPI, launch: Launch): v
 		const execution = completionExecutionProfile(request.task,request.files,currentExecutionProfile(ctx));
 		const reviewers = Math.max(1, Math.min(aspects.length, request.automatic === true && adaptiveExecutionEnabled() ? execution.review.reviewers : REVIEW_LIMITS.reviewers));
 		const sessionFile = ctx.sessionManager.getSessionFile(), epoch = generation;
-		const owns = () => epoch === generation && ctx.sessionManager.getSessionFile() === sessionFile;
+		const owns = () => {
+			try { return epoch === generation && ctx.sessionManager.getSessionFile() === sessionFile; }
+			catch { return false; }
+		};
 		// Reviewers judge against the tracked R# requirements, not just a
 		// head-truncated task string: the middle of a long demand can hold
 		// the very criterion under review.
@@ -97,6 +100,28 @@ export function registerQualityReviewRunner(pi: ExtensionAPI, launch: Launch): v
 		const cancelled = new Promise<void>(resolve => { onAbort = resolve; signal.addEventListener('abort',onAbort,{once:true}); if(signal.aborted) resolve(); });
 		const reviewLeg = async (index: number, legSignal: AbortSignal, stop: AbortController) => {
 			const launchId = `quality-review-${randomUUID()}`, assigned = groups[index];
+			// Predispatch navigation invalidates review presentation. The captured
+			// ledger still owns the charge even if the reviewer returns afterward.
+			const canBind = typeof pi.bindAuxiliaryUsage === 'function';
+			const bindReceipt = (type: 'subagent-cost-v1' | 'subagent-lifecycle-v1') => {
+				let sink: ReturnType<NonNullable<ExtensionAPI['bindAuxiliaryUsage']>> | undefined;
+				try { sink = pi.bindAuxiliaryUsage?.(type); } catch { /* Launch can still report review results. */ }
+				return (data: unknown) => {
+					if (sink) return sink(data);
+					if (canBind || !owns()) return false;
+					pi.appendEntry(type, data);
+					return true;
+				};
+			};
+			const appendCost = bindReceipt('subagent-cost-v1');
+			const owner = {currentSessionId:sessionFile, completionOwnerId:launchId};
+			const persistCost = (results: unknown[], terminal?: 'failed') => {
+				try {
+					return persistSubagentCost(pi, owner, {sessionId:sessionFile, completionOwnerId:launchId, runId:launchId,
+						...(terminal ? {mode:'single', state:terminal} : {}), results}, appendCost);
+				} catch { return false; }
+			};
+			let costRecorded = false;
 			const pending = assigned.map((a:any)=>({aspect:a.id,ok:false,text:'',gap:'The native reviewer failed or returned no usable result.'}));
 			const reviewTools = Math.min(REVIEW_LIMITS.maxTools, REVIEW_LIMITS.tools + Math.max(0, assigned.length - 1) * REVIEW_LIMITS.toolsPerExtraAspect);
 			let status = 'failed';
@@ -119,7 +144,8 @@ export function registerQualityReviewRunner(pi: ExtensionAPI, launch: Launch): v
 				reports: request.previousReview.reports.filter((report:any) => assigned.some((aspect:any) => aspect.id === report?.aspect)).slice(0,6).map((report:any) => ({aspect:report.aspect,outcome:report.outcome,gap:String(report.gap ?? '').slice(0,300),findings:Array.isArray(report.findings) ? report.findings.slice(0,5).map((finding:any) => ({id:String(finding.id ?? '').slice(0,80),file:normalizeReviewPath(finding.file),detail:String(finding.detail ?? '').slice(0,600)})) : []})),
 			} : undefined;
 			const repairSection = previousReview ? `\nThis is a bounded repair review. Start with the previously blocking findings or missing evidence and source changed since that review. Verify the repair and affected contracts, including any new concrete regression; preserve coverage of your assigned aspects. Do not repeat the entire source tour or introduce a new round of optional polish. Prior reports are historical evidence, not current approval: ${JSON.stringify(previousReview)}.\n` : '';
-			if (owns()) try { pi.appendEntry('subagent-cost-v1',{runId:launchId,mode:'single',results:[{...identity,status:'running'}]}); } catch {}
+			try { appendCost({runId:launchId,mode:'single',results:[{...identity,status:'running'}]}); } catch {}
+			const appendLifecycle = bindReceipt('subagent-lifecycle-v1');
 			try {
 				const result = await launch(launchId, {
 					agent:'reviewer',context:'fresh',async:false,foregroundOnly:true,
@@ -134,9 +160,7 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 				// The executor has its own run ID. Link the helper receipt to it
 				// so native lifecycle and helper accounting describe one child.
 				const children = rows.map((r:any) => ({...identity,...r,...(rows.length === 1 && nativeRunId ? {runId:r?.runId ?? nativeRunId} : {})}));
-				if (owns()) {
-					try { persistSubagentCost(pi,{currentSessionId:sessionFile,completionOwnerId:launchId},{sessionId:sessionFile,completionOwnerId:launchId,runId:launchId,results:children}); } catch {}
-				}
+				costRecorded = persistCost(children);
 				const childResult = children[0];
 				const usageBudget = result?.details?.usageBudget ?? childResult?.usageBudget;
 				const budgetExhausted = usageBudget?.exhausted === true;
@@ -221,10 +245,17 @@ Return ONLY JSON {"reviews":[{"aspect":"assigned id","outcome":"pass|changes|unk
 				return reports;
 			} catch (error) {
 				launchFailure = helperLaunchFailure(error, launchId);
-				if (owns()) try { persistSubagentCost(pi,{currentSessionId:sessionFile,completionOwnerId:launchId},{sessionId:sessionFile,completionOwnerId:launchId,runId:launchId,mode:'single',state:'failed',results:[{...identity,...launchFailure,status:'failed'}]}); } catch {}
+				if (!costRecorded) persistCost([{...identity,...launchFailure,status:'failed'}], 'failed');
 				return pending.map(r=>({...r,gap:helperFailureGap(error,launchId)}));
 			}
-			finally { finishActivity(signal.aborted || !owns() ? 'cancelled' : status === 'completed' ? 'ok' : 'error'); if (owns()) try { if (signal.aborted) status='stopped'; pi.appendEntry('subagent-lifecycle-v1',{runId:launchId,mode:'single',state:status,results:[{...identity,...launchFailure,status,...(nativeRunId ? {runId:nativeRunId} : {})}]}); } catch {} }
+			finally {
+				const active = owns();
+				finishActivity(signal.aborted || !active ? 'cancelled' : status === 'completed' ? 'ok' : 'error');
+				if (active) try {
+					if (signal.aborted) status='stopped';
+					appendLifecycle({runId:launchId,mode:'single',state:status,results:[{...identity,...launchFailure,status,...(nativeRunId ? {runId:nativeRunId} : {})}]});
+				} catch {}
+			}
 		};
 		const work = Promise.all(groups.map(async (_assigned, index) => {
 			const reports = await reviewLeg(index, AbortSignal.any([signal, stops[index]!.signal]), stops[index]!);

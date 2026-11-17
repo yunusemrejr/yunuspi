@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { spawn } from 'node:child_process';
+import { AgentSession } from '../core/coding-agent/src/core/agent-session.js';
 const release = path.resolve(import.meta.dirname, '..');
 const agent = [path.join(release, 'agent'), path.resolve(release, '..')].find(p => fs.existsSync(path.join(p, 'extensions/pi-background-tasks/src/core/service-policy.ts')));
 const base = path.join(agent, 'extensions/pi-background-tasks/src/core');
@@ -121,7 +122,9 @@ test('completion wake waits until its durable receipt is accepted and ignores st
   assert.equal(sent.length, 1, 'a stale completion cannot wake a newer request');
 });
 
-test('a failed completion receipt cannot trigger inference with missing results', async () => {
+test('a failed completion receipt exhausts a bounded retry without triggering inference', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  t.mock.method(console, 'warn', () => {});
   const hooks = new Map(), sent = [];
   const ctx = { isIdle: () => true, sessionManager: { getBranch: () => [] } };
   const pi = { on: (name, fn) => hooks.set(name, fn), sendMessage(message, options) {
@@ -134,6 +137,77 @@ test('a failed completion receipt cannot trigger inference with missing results'
   await tick();
   await hooks.get('agent_settled')();
   assert.equal(sent.length, 1);
+  t.mock.timers.tick(100);
+  await tick();
+  t.mock.timers.tick(200);
+  await tick();
+  t.mock.timers.tick(1000);
+  assert.deepEqual(sent.map(attempt => attempt.options.triggerTurn), [false, false, false]);
+  hooks.get('session_shutdown')();
+});
+
+test('a transient background receipt write is retried before waking the model', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const hooks = new Map(), writes = [], wakes = [];
+  let attempts = 0;
+  const sessionManager = {
+    getBranch: () => [], flush() {},
+    appendCustomMessageEntry(_type, content) {
+      if (++attempts === 1) throw new Error('fixture temporary append failure');
+      writes.push(content);
+    },
+  };
+  const session = Object.assign(Object.create(AgentSession.prototype), {
+    sessionManager, agent: { state: { messages: [] } }, _customMessageAcceptances: new WeakMap(),
+    _customMessageDeliveryChecks: new WeakMap(), _pendingNextTurnMessages: new Set(), _emit() {},
+  });
+  const ctx = { isIdle: () => true, sessionManager };
+  const notify = createCompletionNotifier({ on: (name, handler) => hooks.set(name, handler), sendMessage(message, options) {
+    if (!options.triggerTurn) return session.sendCustomMessage(message, options);
+    wakes.push(message.content);
+    options.onAccepted();
+  } }, () => ctx, { graceMs: 0 });
+  notify({ customType: 'background-task-notification', content: 'completed fixture' }, { triggerTurn: true });
+  await tick();
+  hooks.get('agent_settled')();
+  assert.deepEqual([attempts, writes.length, wakes.length], [1, 0, 0]);
+  t.mock.timers.tick(100);
+  await tick();
+  assert.deepEqual(writes, ['completed fixture']);
+  assert.deepEqual(session.agent.state.messages.map(message => message.content), writes);
+  assert.match(wakes[0], /^1 background task completion/);
+  t.mock.timers.tick(1000);
+  assert.deepEqual([attempts, wakes.length], [2, 1]);
+  hooks.get('session_shutdown')();
+});
+
+test('receipt retry preserves the task record without waking newer input and stops on shutdown', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const hooks = new Map(), sent = [];
+  const ctx = { isIdle: () => true, sessionManager: { getBranch: () => [] } };
+  const notify = createCompletionNotifier({ on: (name, fn) => hooks.set(name, fn), sendMessage(message, options) {
+    sent.push([message.content, options.triggerTurn]);
+    if (message.content === 'after new input' && sent.length > 1) options.onAccepted();
+    if (message.content === 'accepted despite rejection') options.onAccepted();
+    return Promise.reject(new Error('fixture write result'));
+  } }, () => ctx, { graceMs: 0 });
+  notify({ content: 'after new input' }, { triggerTurn: true });
+  await tick();
+  hooks.get('input')({ source: 'interactive' });
+  t.mock.timers.tick(100);
+  await tick();
+  assert.deepEqual(sent, [['after new input', false], ['after new input', false]]);
+  notify({ content: 'accepted despite rejection' }, { triggerTurn: false });
+  await tick();
+  t.mock.timers.tick(1000);
+  await tick();
+  assert.deepEqual(sent.slice(2), [['accepted despite rejection', false]]);
+  notify({ content: 'shutdown' }, { triggerTurn: true });
+  await tick();
+  hooks.get('session_shutdown')();
+  t.mock.timers.tick(1000);
+  await tick();
+  assert.deepEqual(sent.slice(2), [['accepted despite rejection', false], ['shutdown', false]]);
 });
 
 test('same-generation completion arriving during a wake drains after the settled event', async () => {

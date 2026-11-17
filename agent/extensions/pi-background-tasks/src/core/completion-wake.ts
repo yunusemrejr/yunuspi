@@ -3,6 +3,7 @@ import type {
   ExtensionAPI,
   ExtensionContext,
 } from "@yunuspi/coding-agent";
+const RECEIPT_RETRY_DELAYS_MS = [100, 200];
 /** Completion observations are durable independently of permission to start inference. */
 export function pausesCompletionWake(message: any): boolean {
   // agent_settled occurs after ordinary retries. Any terminal failure/abort must
@@ -26,6 +27,13 @@ export function createCompletionNotifier(
   let wakeTimer: ReturnType<typeof setTimeout> | undefined;
   let compactTimer: ReturnType<typeof setTimeout> | undefined;
   let wakeSignal: AbortSignal | undefined, wakeAbort: (() => void) | undefined;
+  let receiptEpoch = 0;
+  const receiptRetries = new Set<ReturnType<typeof setTimeout>>();
+  const clearReceiptRetries = () => {
+    receiptEpoch++;
+    for (const timer of receiptRetries) clearTimeout(timer);
+    receiptRetries.clear();
+  };
   const clearWake = () => {
     if (wakeTimer) clearTimeout(wakeTimer);
     wakeTimer = undefined;
@@ -103,6 +111,7 @@ export function createCompletionNotifier(
     if (wakeSignal?.aborted) wakeAbort();
   };
   pi.on("session_start", (_event, ctx) => {
+    clearReceiptRetries();
     generation++; clearWake(); clearCompact(); graceDeadline = undefined; inFlight = undefined; drainRequested = false; active = true; compactionBlocked = false; pending = 0;
     const last = [...ctx.sessionManager.getBranch()]
       .reverse()
@@ -145,6 +154,7 @@ export function createCompletionNotifier(
   });
   pi.on("agent_settled", requestFlush);
   pi.on("session_shutdown", () => {
+    clearReceiptRetries();
     generation++; clearWake(); clearCompact(); graceDeadline = undefined; inFlight = undefined; drainRequested = false; active = false; pending = 0;
   });
   return (message: any, options: { triggerTurn: boolean }) => {
@@ -159,9 +169,11 @@ export function createCompletionNotifier(
     // triggerTurn:false also bypasses the follow-up queue during an active run.
     // Thus completions queued before a later invalid request cannot re-wake it.
     const ticket = generation;
+    const receiptOwner = receiptEpoch;
+    const ownsReceipt = () => active && receiptOwner === receiptEpoch;
     let acknowledged = false;
     const accepted = () => {
-      if (acknowledged) return;
+      if (acknowledged || !ownsReceipt()) return;
       acknowledged = true;
       // Never wake a newer request for an old receipt or before its results arrive.
       if (active && ticket === generation && options.triggerTurn) {
@@ -171,12 +183,29 @@ export function createCompletionNotifier(
         requestFlush();
       }
     };
-    try {
-      const receipt = pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: false, onAccepted: accepted });
-      void Promise.resolve(receipt).catch(() => {});
-    } catch {
-      // The durable task record remains authoritative when a UI/session queue
-      // is already closing; the next session_start will rediscover it.
-    }
+    const deliverReceipt = (attempt = 0) => {
+      if (acknowledged || !ownsReceipt()) return;
+      const rejected = () => {
+        if (acknowledged || !ownsReceipt()) return;
+        const delay = RECEIPT_RETRY_DELAYS_MS[attempt];
+        if (delay === undefined) {
+          console.warn("[background-tasks] Completion receipt could not be saved; the terminal task record is retained.");
+          return;
+        }
+        const timer = setTimeout(() => {
+          receiptRetries.delete(timer);
+          deliverReceipt(attempt + 1);
+        }, delay);
+        receiptRetries.add(timer);
+        timer.unref?.();
+      };
+      try {
+        const receipt = pi.sendMessage(message, { deliverAs: "followUp", triggerTurn: false, onAccepted: accepted });
+        // A resolved send can already be in the host's pending-message queue.
+        // Retry rejection only, before acceptance, to avoid a duplicate append.
+        void Promise.resolve(receipt).catch(rejected);
+      } catch { rejected(); }
+    };
+    deliverReceipt();
   };
 }

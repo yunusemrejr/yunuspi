@@ -142,8 +142,7 @@ test('desktop shows the first provider delta once before EOF and preserves repea
       return;
     }
     // Capture the same current partial that get_messages uses on reattach.
-    resumed = createConversation([desktopMessage(event.message)]);
-    resumed.streaming = resumed.messages[0].key;
+    resumed = createConversation([], desktopMessage(event.message));
     body.enqueue(frame({ content: text }));
     body.enqueue(frame({}, 'stop'));
     body.close();

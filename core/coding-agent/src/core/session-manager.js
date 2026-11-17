@@ -122,11 +122,18 @@ function buildEntryIndex(entries, byId) {
     }
     return index;
 }
+const accountingReceiptTypes = new Set(["auxiliary-model-usage-v1", "subagent-cost-v1", "subagent-lifecycle-v1"]);
 function isRecoveredChildCost(entry) {
     return entry.type === "custom" && entry.customType === "subagent-cost-v1" && typeof entry.data?.recoveredForSessionId === "string";
 }
 export function isAccountingOnlySessionEntry(entry) {
-    return isRecoveredChildCost(entry) || entry.type === "custom" && entry.customType === "auxiliary-model-usage-v1" && entry.accountingOnly === true;
+    return isRecoveredChildCost(entry) || entry.type === "custom" && entry.accountingOnly === true &&
+        accountingReceiptTypes.has(entry.customType);
+}
+
+class AccountingOwnerChanged extends Error {}
+function matchesAccountingOwner(stat, expected) {
+    return stat?.isFile() && stat.dev === expected.dev && stat.ino === expected.ino;
 }
 function buildSessionPath(entries, leafId, byId) {
     const index = buildEntryIndex(entries, byId);
@@ -404,44 +411,45 @@ function parseSessionHeaderCandidate(line) {
         return null;
     return entry;
 }
-function readSessionHeader(filePath) {
-    const fd = openSync(filePath, "r");
-    try {
-        const decoder = new StringDecoder("utf8");
-        const buffer = Buffer.allocUnsafe(SESSION_HEADER_READ_BUFFER_SIZE);
-        const lineChunks = [];
-        let scannedBytes = 0;
-        while (scannedBytes < MAX_SESSION_HEADER_SCAN_BYTES) {
-            const readLength = Math.min(buffer.length, MAX_SESSION_HEADER_SCAN_BYTES - scannedBytes);
-            const bytesRead = readSync(fd, buffer, 0, readLength, null);
-            if (bytesRead === 0) {
-                lineChunks.push(decoder.end());
-                return parseSessionHeaderCandidate(lineChunks.join("")) ?? null;
-            }
-            scannedBytes += bytesRead;
-            const chunk = decoder.write(buffer.subarray(0, bytesRead));
-            let lineStart = 0;
-            let newlineIndex = chunk.indexOf("\n", lineStart);
-            while (newlineIndex !== -1) {
-                lineChunks.push(chunk.slice(lineStart, newlineIndex));
-                const header = parseSessionHeaderCandidate(lineChunks.join(""));
-                if (header !== undefined)
-                    return header;
-                lineChunks.length = 0;
-                lineStart = newlineIndex + 1;
-                newlineIndex = chunk.indexOf("\n", lineStart);
-            }
-            lineChunks.push(chunk.slice(lineStart));
-        }
-        // Probe for EOF so a final header without a newline is allowed when it ends
-        // exactly at the scan limit. Any additional byte exceeds the bounded scan.
-        const probe = Buffer.allocUnsafe(1);
-        if (readSync(fd, probe, 0, probe.length, null) === 0) {
+function readSessionHeaderFromFile(fd, filePath) {
+    const decoder = new StringDecoder("utf8");
+    const buffer = Buffer.allocUnsafe(SESSION_HEADER_READ_BUFFER_SIZE);
+    const lineChunks = [];
+    let scannedBytes = 0;
+    while (scannedBytes < MAX_SESSION_HEADER_SCAN_BYTES) {
+        const readLength = Math.min(buffer.length, MAX_SESSION_HEADER_SCAN_BYTES - scannedBytes);
+        const bytesRead = readSync(fd, buffer, 0, readLength, scannedBytes);
+        if (bytesRead === 0) {
             lineChunks.push(decoder.end());
             return parseSessionHeaderCandidate(lineChunks.join("")) ?? null;
         }
-        throw new SessionHeaderScanLimitError(filePath);
+        scannedBytes += bytesRead;
+        const chunk = decoder.write(buffer.subarray(0, bytesRead));
+        let lineStart = 0;
+        let newlineIndex = chunk.indexOf("\n", lineStart);
+        while (newlineIndex !== -1) {
+            lineChunks.push(chunk.slice(lineStart, newlineIndex));
+            const header = parseSessionHeaderCandidate(lineChunks.join(""));
+            if (header !== undefined)
+                return header;
+            lineChunks.length = 0;
+            lineStart = newlineIndex + 1;
+            newlineIndex = chunk.indexOf("\n", lineStart);
+        }
+        lineChunks.push(chunk.slice(lineStart));
     }
+    // Probe for EOF so a final header without a newline is allowed when it ends
+    // exactly at the scan limit. Any additional byte exceeds the bounded scan.
+    const probe = Buffer.allocUnsafe(1);
+    if (readSync(fd, probe, 0, probe.length, scannedBytes) === 0) {
+        lineChunks.push(decoder.end());
+        return parseSessionHeaderCandidate(lineChunks.join("")) ?? null;
+    }
+    throw new SessionHeaderScanLimitError(filePath);
+}
+function readSessionHeader(filePath) {
+    const fd = openSync(filePath, "r");
+    try { return readSessionHeaderFromFile(fd, filePath); }
     finally {
         closeSync(fd);
     }
@@ -823,18 +831,39 @@ export class SessionManager {
     getSessionFile() {
         return this.sessionFile;
     }
-    _persist(entry, durable = false) {
+    _persist(entry, durable = false, accountingOwner) {
         if (!this.persist || !this.sessionFile)
             return;
         if (this.persistenceError) throw this.persistenceError;
         if (this.flushed) {
             return withSessionWriteLock(this.sessionFile, () => {
-                const fd = openSync(this.sessionFile, "a", 0o600);
+                const verifyOwner = () => {
+                    if (!matchesAccountingOwner(lstatSync(this.sessionFile, { bigint: true, throwIfNoEntry: false }), accountingOwner)) {
+                        throw new AccountingOwnerChanged();
+                    }
+                };
+                let fd;
+                if (accountingOwner) {
+                    verifyOwner();
+                    try {
+                        fd = openSync(this.sessionFile, constants.O_RDWR | constants.O_APPEND | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+                    }
+                    catch (error) {
+                        if (error.code === "ENOENT" || error.code === "ELOOP") throw new AccountingOwnerChanged();
+                        throw error;
+                    }
+                }
+                else fd = openSync(this.sessionFile, "a", 0o600);
                 let size;
                 try {
+                    if (accountingOwner && (!matchesAccountingOwner(fstatSync(fd, { bigint: true }), accountingOwner) ||
+                        readSessionHeaderFromFile(fd, this.sessionFile)?.id !== this.sessionId)) {
+                        throw new AccountingOwnerChanged();
+                    }
                     size = fstatSync(fd).size;
                     writeFileSync(fd, `${JSON.stringify(entry)}\n`);
                     if (durable) fsyncSync(fd);
+                    if (accountingOwner) verifyOwner();
                 }
                 catch (error) {
                     // A failed/partial append is not an accepted history entry.
@@ -885,12 +914,12 @@ export class SessionManager {
             this.flushed = true;
         });
     }
-    _appendEntry(entry, durable = false) {
+    _appendEntry(entry, durable = false, accountingOwner) {
         const previousLeaf = this.leafId;
         this.fileEntries.push(entry);
         this.byId.set(entry.id, entry);
         if (!isAccountingOnlySessionEntry(entry)) this.leafId = entry.id;
-        try { this._persist(entry, durable); }
+        try { this._persist(entry, durable, accountingOwner); }
         catch (error) {
             this.fileEntries.pop();
             this.byId.delete(entry.id);
@@ -979,13 +1008,38 @@ export class SessionManager {
     }
     /** Persist summary accounting without creating a navigable branch node. */
     appendSummaryUsageReceipt(data, parentId = this.leafId) {
+        return this._appendAccountingReceipt("auxiliary-model-usage-v1", data, parentId);
+    }
+    _appendAccountingReceipt(customType, data, parentId, accountingOwner) {
         this.flush();
         const entry = {
-            type: "custom", customType: "auxiliary-model-usage-v1", accountingOnly: true,
+            type: "custom", customType, accountingOnly: true,
             id: generateId(this.byId), parentId, timestamp: new Date().toISOString(), data,
         };
-        this._appendEntry(entry, true);
+        this._appendEntry(entry, true, accountingOwner);
         return entry;
+    }
+    /** Capture an accounting owner before the request can outlive this runtime. */
+    bindAccountingReceipt(customType) {
+        if (!accountingReceiptTypes.has(customType)) throw new TypeError("Unsupported accounting receipt type");
+        const sessionId = this.sessionId, file = this.sessionFile, parentId = this.leafId;
+        let identity = file && lstatSync(file, { bigint: true, throwIfNoEntry: false });
+        const unavailable = file && (this.flushed || identity) && !identity?.isFile();
+        return data => {
+            if (unavailable || this.sessionId !== sessionId || this.sessionFile !== file) return undefined;
+            try {
+                if (file && !identity) {
+                    this.flush();
+                    identity = lstatSync(file, { bigint: true, throwIfNoEntry: false });
+                    if (!identity?.isFile()) return undefined;
+                }
+                return this._appendAccountingReceipt(customType, data, parentId, identity);
+            }
+            catch (error) {
+                if (error instanceof AccountingOwnerChanged) return undefined;
+                throw error;
+            }
+        };
     }
     /** Append a session info entry (e.g., display name). Returns entry id. */
     appendSessionInfo(name) {
@@ -1295,7 +1349,8 @@ export class SessionManager {
         const pathEntryIds = new Set(pathWithoutLabels.map((e) => e.id));
         const accountingEntries = this.getBranchAccountingEntries(path)
             // These requests settle in the original file even after a fork.
-            .filter(entry => entry.data?.status !== "pending" || !["jev", "project-memory", "project-memory-rerank"].includes(entry.data.owner)).map(entry => ({
+            .filter(entry => entry.customType === "auxiliary-model-usage-v1" &&
+                (entry.data?.status !== "pending" || !["jev", "project-memory", "project-memory-rerank"].includes(entry.data.owner))).map(entry => ({
             ...entry, parentId: pathEntryIds.has(entry.parentId) ? entry.parentId : null,
         }));
         const labelsToWrite = [];
