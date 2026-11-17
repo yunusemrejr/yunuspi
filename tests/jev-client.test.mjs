@@ -788,7 +788,8 @@ test('malformed typed judgments never reach the cache or report success', async 
   });
 });
 
-test('one deadline bounds slow helper routes and reports an error-colored outcome', async () => {
+test('one deadline bounds slow helper routes and reports an error-colored outcome', async t => {
+  mockDeadline(t);
   const states = [];
   const requests = [];
   const key = Symbol.for('yunus-pi.activity.v1'), previous = globalThis[key];
@@ -804,19 +805,26 @@ test('one deadline bounds slow helper routes and reports an error-colored outcom
   });
   jev.configureJevClient({ requestTimeoutMs: 45 });
   try {
-    const started = performance.now();
-    const result = await jev.askJev('deadline', 'synthetic evidence', { ping: { type: 'noul' } });
-    assert.ok(['timeout', 'unavailable'].includes(result.skipped), 'the overall or both route deadlines stop work');
-    assert.ok(performance.now() - started < 250);
+    const waiting = jev.askJev('deadline', 'synthetic evidence', { ping: { type: 'noul' } });
+    await tick();
+    assert.equal(requests.length, 1);
+    t.mock.timers.tick(20);
+    await tick();
+    assert.equal(requests.length, 2, 'the first family cutoff admits the fallback');
+    assert.equal(requests[0].aborted, true);
+    assert.equal(requests[1].aborted, false);
+    // Advance directly to the overall cutoff, as when the event loop is late
+    // servicing the fallback timer. No further request may dispatch.
+    t.mock.timers.tick(25);
+    const result = await Promise.race([waiting, tick()]);
+    assert.deepEqual(result, { ok: false, skipped: 'timeout' });
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].aborted, true);
+    // The caller can finish before the physical promise releases its lease.
+    await tick();
     assert.equal(states.at(-1), 'error');
     assert.ok(states.includes('jev'));
-    const health=jev.jevHealth();
-    assert.ok(requests.length>0 && requests.length<=2 && requests.every(signal=>signal.aborted), 'deadline cancels every admitted slow request');
-    assert.ok(health.routes.every(route=>route.active===0), 'every route lease is released');
-    // Overall cancellation can preempt a family's own timeout on a loaded
-    // runner. That family remains healthy; elapsed wall time cannot prove
-    // that both independent routes completed a failure/cooldown transition.
-    if(health.routes.every(route=>route.state==='cooling')) assert.equal(health.state,'open');
+    assert.ok(jev.jevHealth().routes.every(route => route.active === 0), 'every route lease is released');
   } finally {
     jev.configureJevClient({ requestTimeoutMs: jev.JEV_REQUEST_TIMEOUT_MS });
     if (previous === undefined) delete globalThis[key]; else globalThis[key] = previous;
