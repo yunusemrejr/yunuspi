@@ -138,15 +138,15 @@ export class FooterComponent {
     }
     readMeasurements(state) {
         const manager = this.session.sessionManager;
-        const revision = manager.getEntriesRevision?.();
+        const revision = manager.getAccountingEntriesRevision?.() ?? manager.getEntriesRevision?.();
         const canCache = Number.isSafeInteger(revision);
         let snapshot = this.measurements;
         if (!canCache || snapshot?.manager !== manager || snapshot.revision !== revision) {
-            snapshot = { manager, revision, entries: manager.getEntries(), name: manager.getSessionName() };
+            snapshot = { manager, revision, entries: manager.getAccountingEntries?.() ?? manager.getEntries(), name: manager.getSessionName() };
             this.measurements = canCache ? snapshot : undefined;
         }
         if (snapshot.costLabel === undefined) {
-            snapshot.costLabel = collectSessionCost(snapshot.entries).formatted;
+            snapshot.costLabel = manager.isAccountingIncomplete?.() ? "$?" : collectSessionCost(snapshot.entries).formatted;
         }
         if (this.expanded && !snapshot.usageTotals) snapshot.usageTotals = expandedUsage(snapshot.entries);
         const live = globalThis[metricsView];

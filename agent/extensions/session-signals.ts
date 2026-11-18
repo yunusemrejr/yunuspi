@@ -1378,14 +1378,17 @@ export default function (pi: any) {
     description:
       "Session cost by model, child runs and auxiliary usage, with pricing coverage",
     handler: async (_args: string, ctx: any) => {
-      const cost = collectSessionCost(ctx.sessionManager.getEntries());
+      const manager = ctx.sessionManager;
+      const cost = collectSessionCost(manager.getAccountingEntries?.() ?? manager.getEntries());
+      const incomplete = manager.isAccountingIncomplete?.();
       const money = (n: number) =>
         n > 0 && n < 0.000001 ? `$${n.toExponential(3)}` : `$${n.toFixed(6)}`;
       const lines = [
         "Session cost · all retained entries",
-        `${cost.formatted} total (USD)`,
+        `${incomplete ? "$?" : cost.formatted} total (USD)`,
         `Reported    ${money(cost.reported)}`,
         `Estimated   ${money(cost.estimated)}`,
+        ...(incomplete ? ["Incomplete transcript: amounts below reflect retained evidence."] : []),
         ...(cost.unknown ? ["Partial total: some recorded activity has missing prices or usage."] : []),
         ...(cost.pending ? [`${cost.pending} operation(s) awaiting final cost evidence.`] : []),
         "", "By scope and model",
@@ -1766,7 +1769,7 @@ export default function (pi: any) {
           // Full retained history plus the live telemetry segment, like the
           // TUI footer and /cost: branch-only reads undercount after forks
           // and skew from the live numbers.
-          entries = ctx.sessionManager.getEntries?.() ?? ctx.sessionManager.getBranch?.() ?? [];
+          entries = ctx.sessionManager.getAccountingEntries?.() ?? ctx.sessionManager.getEntries?.() ?? ctx.sessionManager.getBranch?.() ?? [];
         } catch (error) {
           throw new Error(
             `Session usage is unavailable: ${error instanceof Error ? error.message : String(error)}`,
@@ -1783,6 +1786,10 @@ export default function (pi: any) {
           id: ctx?.model?.id,
           thinking: ctx?.thinkingLevel,
         }, helperUsageView(ctx.sessionManager.getSessionId()), live);
+        if (ctx.sessionManager.isAccountingIncomplete?.()) {
+          summary.session.cost = "$?";
+          summary.session.costUnknown = true;
+        }
         const file = await openHtmlPopup("used", "What this session used", usedSummaryHtml(summary), ctx);
         ctx.ui?.notify?.(`Detailed session usage ${ctx.hasUI === false ? "saved" : "opened"}: ${file}`, "info");
       })().catch((error) => popupError("used", error, ctx));

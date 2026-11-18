@@ -235,7 +235,7 @@ async function workerFor(id) {
         // Detached work and helpers can settle after the final turn, while the
         // session is idle. Coalesce bursts and guarantee a follow-up for changes
         // made while an earlier request was in flight.
-        if (event.type === 'turn_end' || event.type === 'agent_end' ||
+        if (event.type === 'turn_end' || event.type === 'agent_end' || event.type === 'accounting_updated' ||
           event.type === 'entry_appended' && accountingEntries.has(event.entry?.customType)) refreshWorkerStats(id, worker);
       });
       worker.on('stopped', result => {

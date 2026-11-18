@@ -516,15 +516,15 @@ test('role views of one query scan each store once', async (t) => {
   const embedder = testEmbedder(32);
   await indexEvent(store, 'prj_views', { kind: 'decision', sessionId: 's', text: 'Decision: observer advice is delivered once per task epoch with a receipt.' }, { embedder });
   await indexEvent(store, 'prj_views', { kind: 'observation', sessionId: 's', text: 'Observation: the observer advice receipt is ledgered before display.' }, { embedder });
-  const counts = { lexical: 0, vector: 0, atom: 0 };
-  for (const [name, key] of [['lexicalSearch', 'lexical'], ['vectorSearch', 'vector'], ['atomVectorSearch', 'atom']]) {
+  const counts = { lexical: 0, vector: 0, atom: 0, chunks: 0, fragments: 0 };
+  for (const [name, key] of [['lexicalSearch', 'lexical'], ['vectorSearch', 'vector'], ['atomVectorSearch', 'atom'], ['getChunks', 'chunks'], ['getAtomsForChunks', 'fragments']]) {
     const original = store[name].bind(store);
     store[name] = (...args) => { counts[key]++; return original(...args); };
   }
   const views = await retrieveFamilyViews([{ store, relation: 'self' }], 'observer advice receipt', { embedder, rerank: false });
   assert.deepEqual(Object.keys(views).sort(), ['main', 'observer', 'subagent']);
   assert.ok(views.main.length > 0);
-  assert.deepEqual(counts, { lexical: 1, vector: 1, atom: 1 }, 'three role views share one scan per store');
+  assert.deepEqual(counts, { lexical: 1, vector: 1, atom: 1, chunks: 1, fragments: 1 }, 'three role views share one scan and evidence load per store');
 });
 
 // ---------------------------------------------------------------------------
@@ -601,6 +601,9 @@ test('temporal filters, superseded demotion and validation', async (t) => {
   store.markSuperseded(stale.ids[0], live.ids[0], '2026-09-25T11:00:00.000Z');
   const ranked = await retrieveProjectMemory(store, 'bramblethorn build', { rerank: false });
   assert.equal(ranked.hits[0].chunk.id, live.ids[0]);
+  const historical = await retrieveProjectMemory(store, 'bramblethorn build', { rerank: false, includeSuperseded: true });
+  const staleScore = result => result.hits.find(hit => hit.chunk.id === stale.ids[0]).score;
+  assert.ok(staleScore(historical) > staleScore(ranked), 'an explicit historical lookup lifts the superseded penalty');
   const since = await retrieveProjectMemory(store, 'bramblethorn build', { since: '2026-09-24T00:00:00.000Z', rerank: false, includeSuperseded: true });
   assert.ok(since.hits.every((h) => h.chunk.timestamp >= '2026-09-24T00:00:00.000Z'));
   const typed = await retrieveProjectMemory(store, 'bramblethorn build', { types: ['decision'], rerank: false });
@@ -1127,6 +1130,28 @@ for (const filter of ['types', 'since', 'minAuthority']) test(`lexical ${filter}
   const opts = filter === 'types' ? { types: ['decision'] } : filter === 'since' ? { since: '2026-10-01T00:00:00.000Z' } : { minAuthority: 0.9 };
   const result = await retrieveProjectMemory(store, 'quasarflux', { ...opts, rerank: false });
   assert.deepEqual(result.hits.map(hit => hit.chunk.id), ['eligible']);
+  const views = await retrieveFamilyViews([{ store, relation: 'self' }], 'quasarflux', opts);
+  for (const hits of Object.values(views)) assert.deepEqual(hits.map(hit => hit.chunk.id), ['eligible']);
+});
+
+test('literal lookup reuses eligible evidence and avoids model calls for an exact match below rank eight', async t => {
+  const dir = tmpRoot(); cleanup(t, dir);
+  const store = openTestStore(dir); t.after(() => store.close());
+  const space = { id: 'fixture:space', backend: 'test', model: 'fixture', version: 1, dim: 2 };
+  const common = { project_id: store.projectId, source_type: 'decision', embeddingSpace: space, embedding: [1, 0] };
+  for (let i = 0; i < 12; i++) store.upsertChunk({ ...common, id: 'decoy-' + i, text: 'symbol alias', content_hash: 'decoy-' + i });
+  store.upsertChunk({ ...common, id: 'exact', text: 'Background details. '.repeat(100) + 'Use symbol.alias to look up the mapping.', content_hash: 'exact' });
+  const rank = store.lexicalSearch('symbol.alias', 40).findIndex(hit => hit.id === 'exact');
+  assert.ok(rank >= 8);
+  let embeds = 0, reranks = 0;
+  const opts = { embedder: { id: space.id, embed: async () => { embeds++; return [[1, 0]]; } },
+    rerank: { rank: async () => { reranks++; return undefined; } } };
+  const result = await retrieveFamily([{ store, relation: 'self' }], 'symbol.alias', opts);
+  assert.equal(result.hits[0]?.chunk.id, 'exact');
+  assert.deepEqual([embeds, reranks], [0, 0]);
+  assert.match(result.hits[0].fragment, /symbol\.alias/);
+  await assert.rejects(retrieveFamilyViews([{ store, relation: 'self' }], 'x'.repeat(513), opts), /3–512/);
+  assert.equal(embeds, 0, 'invalid queries are rejected before inference');
 });
 
 for (const family of [false, true]) test(`an excluded exact match cannot suppress ${family ? 'family' : 'project'} semantic recall`, async t => {

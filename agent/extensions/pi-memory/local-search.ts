@@ -9,7 +9,13 @@ import fs from "node:fs/promises";
 import { constants } from "node:fs";
 import path from "node:path";
 
-export interface MemoryBlock { file: string; line: number; heading: string; text: string; mtimeMs: number; daily: boolean; }
+export interface MemoryBlock {
+  file: string;
+  /** Line within the text read. Tail-only reads cite the absolute byte offset instead. */
+  line: number;
+  byteOffset?: number;
+  heading: string; text: string; mtimeMs: number; daily: boolean;
+}
 export interface MemoryHit { block: MemoryBlock; score: number; matched: string[]; }
 
 const STOP = new Set("a an and are as at be but by for from has have i in into is it its of on or that the this to was were will with we you your our not no do does did can could should would".split(" "));
@@ -71,20 +77,34 @@ export function splitBlocks(file: string, text: string, mtimeMs: number, daily: 
  * within file and byte budgets. */
 export async function readMemoryBlocks(files: Array<{ file: string; daily: boolean }>, budget = { files: 400, bytes: 12 * 1024 * 1024, fileBytes: 1024 * 1024 }): Promise<{ blocks: MemoryBlock[]; files: number; truncated: boolean }> {
   const blocks: MemoryBlock[] = [];
-  let bytes = 0, read = 0, truncated = false;
+  let bytes = 0, inspected = 0, read = 0, truncated = false;
   for (const { file, daily } of files) {
-    if (read >= budget.files || bytes >= budget.bytes) { truncated = true; break; }
+    if (inspected >= budget.files || bytes >= budget.bytes) { truncated = true; break; }
     try {
-      const stat = await fs.lstat(file);
-      if (!stat.isFile() || stat.isSymbolicLink()) continue;
+      if (!(await fs.lstat(file)).isFile()) continue;
       const handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
       try {
-        const size = Math.min(stat.size, budget.fileBytes), buffer = Buffer.alloc(size);
-        const { bytesRead } = await handle.read(buffer, 0, size, Math.max(0, stat.size - size));
-        const text = buffer.subarray(0, bytesRead).toString("utf8");
-        if (text.includes("\0")) continue;
-        bytes += bytesRead; read++;
-        blocks.push(...splitBlocks(file, text, stat.mtimeMs, daily));
+        const stat = await handle.stat();
+        if (!stat.isFile()) continue;
+        inspected++;
+        const size = Math.min(stat.size, budget.fileBytes, budget.bytes - bytes);
+        const start = stat.size - size, buffer = Buffer.alloc(size);
+        const { bytesRead } = await handle.read(buffer, 0, size, start);
+        bytes += bytesRead;
+        if (bytesRead < stat.size) truncated = true;
+        const chunk = buffer.subarray(0, bytesRead);
+        if (chunk.includes(0)) continue;
+        read++;
+        // Count original newline bytes. Re-encoding a tail cut mid-UTF-8
+        // character would shift every subsequent source offset.
+        let line = 1, offset = 0;
+        for (const block of splitBlocks(file, chunk.toString("utf8"), stat.mtimeMs, daily)) {
+          if (start > 0) {
+            while (line < block.line) { offset = chunk.indexOf(10, offset) + 1; line++; }
+            block.byteOffset = start + offset;
+          }
+          blocks.push(block);
+        }
       } finally { await handle.close(); }
     } catch { /* unreadable memory files are skipped */ }
   }
@@ -163,7 +183,8 @@ export function formatHits(hits: MemoryHit[], home = process.env.HOME ?? ""): st
   return hits.map((hit, i) => {
     const file = home && hit.block.file.startsWith(home) ? "~" + hit.block.file.slice(home.length) : hit.block.file;
     const text = hit.block.text.replace(REDACT, "[redacted]");
-    return [`### Result ${i + 1}`, `**File:** ${file}:${hit.block.line}${hit.block.heading ? ` (${hit.block.heading})` : ""}`, `**Score:** ${Math.round(hit.score * 100) / 100} · matched ${hit.matched.join(", ")}`, "", text].join("\n");
+    const location = hit.block.byteOffset === undefined ? `${file}:${hit.block.line}` : `${file} (byte offset ${hit.block.byteOffset})`;
+    return [`### Result ${i + 1}`, `**File:** ${location}${hit.block.heading ? ` (${hit.block.heading})` : ""}`, `**Score:** ${Math.round(hit.score * 100) / 100} · matched ${hit.matched.join(", ")}`, "", text].join("\n");
   }).join("\n\n---\n\n");
 }
 

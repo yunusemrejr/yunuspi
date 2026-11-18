@@ -215,6 +215,7 @@
     "quality-refinement.ts",
     "video-motion.ts",
     "blender-studio.ts",
+    "guard-readiness.ts",
     "guarded-process.ts",
     "xml-lite.ts",
     "image-understand.ts",

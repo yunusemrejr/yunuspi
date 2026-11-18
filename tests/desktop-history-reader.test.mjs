@@ -46,6 +46,16 @@ test('reading a complete final line does not repair or rewrite the source file',
   assert.equal(digest(f.file), hash); assert.equal(fs.statSync(f.file).mtimeMs, stat.mtimeMs);
 });
 
+test('saved stats preserve readable history and flag damaged billing records', async t => {
+  const f = fixture(t, { entries: [entry('first', null, 'Recorded request.')] });
+  fs.appendFileSync(f.file, '{"type":"custom",broken}\n');
+  const result = await readHistory(f);
+  assert.equal(result.stats.accountingIncomplete, true);
+  assert.equal(result.stats.costLabel, '$?');
+  assert.equal(result.messages[0].content, 'Recorded request.');
+  assert.equal((await readHistory({ ...f, statsOnly: true })).stats.accountingIncomplete, true);
+});
+
 test('paged snapshots notice same-size rewrites and appended history', async t => {
   const f = fixture(t, { entries: [entry('first', null, 'before'), entry('next', 'first', 'next')] });
   const mtime = new Date('2025-01-01T00:00:00.000Z');

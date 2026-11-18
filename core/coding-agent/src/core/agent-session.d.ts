@@ -64,6 +64,8 @@ export type AgentSessionEvent = Exclude<AgentEvent, {
     type: "entry_appended";
     entry: SessionEntry;
 } | {
+    type: "accounting_updated";
+} | {
     type: "session_info_changed";
     name: string | undefined;
 } | {
@@ -202,10 +204,11 @@ export interface SessionStats {
         cacheWrite: number;
         total: number;
     };
-    /** Session total across main, delegated and helper model calls (USD). */
+    /** Known amount across main, delegated and helper model calls (USD). */
     cost: number;
     /** `cost` formatted with partial (`+?`), estimate (`~`) and subscription markers. */
     costLabel: string;
+    accountingIncomplete?: true;
     costParts: { main: number; delegated: number; helpers: number };
     costRoutes: Array<{ route: string; cost: number }>;
     contextUsage?: ContextUsage;

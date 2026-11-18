@@ -149,13 +149,13 @@ test("extension dispatch preserves multiline args and reports handler failure on
   assert.equal(errors[0].error, "Command failed");
 });
 
-test("skills and prompt templates use the same whitespace command boundary", () => {
+test("skills and prompt templates use the same whitespace command boundary", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "yunuspi-command-"));
   try {
     const filePath = path.join(dir, "SKILL.md");
     fs.writeFileSync(filePath, "---\nname: fixture\n---\nSkill instructions.\n");
     const session = { resourceLoader: { getSkills: () => ({ skills: [{ name: "fixture", filePath, baseDir: dir }] }) } };
-    const result = AgentSession.prototype._expandSkillCommand.call(session, "/skill:fixture\tfirst\nsecond");
+    const result = await AgentSession.prototype._expandSkillCommand.call(session, "/skill:fixture\tfirst\nsecond", new AbortController().signal);
     assert.ok(result.includes("Skill instructions."));
     assert.ok(result.endsWith("\n\nfirst\nsecond"));
     assert.equal(expandPromptTemplate("/fixture\tfirst\nsecond", [{ name: "fixture", content: "$1 then $2" }]), "first then second");

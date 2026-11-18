@@ -217,12 +217,14 @@ async function responseText(response: Response, signal?: AbortSignal): Promise<s
 type ImageBillingRoute = "openai" | "openrouter";
 type NativeImageReply = { payload: any; route?: ImageBillingRoute };
 
+const openRouterImagesUrl = /^https:\/\/(?:(?:us|eu)\.)?openrouter\.ai\/api\/v1\/images$/;
+
 function imageBillingRoute(requestUrl: string, response: Response): ImageBillingRoute | undefined {
   if (response.redirected) return undefined;
   try {
     const url = new URL(requestUrl);
     if (response.url && new URL(response.url).href !== url.href) return undefined;
-    if (/^https:\/\/(?:(?:us|eu)\.)?openrouter\.ai\/api\/v1\/images$/.test(url.href)) return "openrouter";
+    if (openRouterImagesUrl.test(url.href)) return "openrouter";
     if (url.href === "https://api.openai.com/v1/images/generations" || url.href === "https://api.openai.com/v1/images/edits") return "openai";
   } catch { /* Unknown origin has no pricing contract. */ }
   return undefined;
@@ -235,9 +237,7 @@ async function nativeImageReply(response: Response, requestUrl: string, signal: 
   catch { throw new Error("Image backend returned a non-JSON payload"); }
 }
 
-async function postJson(apiUrl: string, key: string, endpoint: string, body: unknown, signal: AbortSignal | undefined, timeoutMs: number): Promise<NativeImageReply> {
-  const deadline = AbortSignal.timeout(timeoutMs);
-  const bounded = signal ? AbortSignal.any([signal, deadline]) : deadline;
+async function postJson(apiUrl: string, key: string, endpoint: string, body: unknown, signal: AbortSignal, redirect: RequestRedirect): Promise<NativeImageReply> {
   const url = `${apiUrl}${endpoint}`;
   let response: Response;
   try {
@@ -245,12 +245,12 @@ async function postJson(apiUrl: string, key: string, endpoint: string, body: unk
       method: "POST",
       headers: { "content-type": "application/json", authorization: `Bearer ${key}` },
       body: JSON.stringify(body),
-      signal: bounded,
+      signal, redirect,
     });
   } catch (error: any) {
     throw new Error(`Image backend unreachable: ${redactSecrets(String(error?.message ?? error)).slice(0, 300)}`);
   }
-  return nativeImageReply(response, url, bounded);
+  return nativeImageReply(response, url, signal);
 }
 
 async function imageBytesFromPayload(payload: any, signal: AbortSignal | undefined): Promise<Buffer> {
@@ -531,23 +531,32 @@ export async function imageRecoverRun(params: { path?: unknown }, cwd: string, s
   return storeGenerated(bytes, saved.brief, saved.params, saved.backend, 'generated', root, signal, { ...extra, usage: saved.usage ?? null, recovered: true });
 }
 
-async function plannedImageParams(params: any, signal?: AbortSignal) {
-  if (params.model !== 'auto' && params.maxCostUsd === undefined) return { params, quote: undefined };
-  const quote = await planImageModel(params, signal);
-  return { params: { ...params, model: quote.model, transport: 'images' }, quote };
+async function prepareImageRun(params: any, env: Record<string, string | undefined>, runtime: ImageRuntime, signal?: AbortSignal) {
+  const defaultModel = env.PI_IMAGE_MODEL?.trim() || (params.maxCostUsd !== undefined ? 'auto' : undefined);
+  const selected = params.model === undefined ? defaultModel : params.model;
+  const backend = resolveImageBackend(imageBackendEnvironment(env, !!runtime.providerKey, selected), !!runtime.providerKey);
+  if (!backend.configured) throw new Error(`${backend.reason} ${backend.setup ?? ""}`.trim());
+  if (backend.model !== 'auto' && params.maxCostUsd === undefined) {
+    runtime.onModel?.(backend.model!);
+    return { params, backend, quote: undefined };
+  }
+  // A catalog quote applies only to the route and model it actually priced.
+  if (backend.name !== 'openrouter' || !openRouterImagesUrl.test(new URL(backend.apiUrl! + '/images').href)) {
+    throw Error("Capped/automatic image planning requires an official OpenRouter Images API endpoint");
+  }
+  if (params.transport !== undefined && params.transport !== 'images') throw Error("Capped/automatic image planning requires the images transport");
+  const quote = await planImageModel({ ...params, model: backend.model }, signal);
+  runtime.onModel?.(quote.model);
+  return { params: { ...params, model: quote.model, transport: 'images' }, backend: { ...backend, model: quote.model }, quote };
 }
 
 export async function imageGenerateRun(
   params: { maxCostUsd?: unknown; model?: unknown; prompt?: unknown; role?: unknown; negative?: unknown; aspect?: unknown; aspectRatio?: unknown; resolution?: unknown; size?: unknown; seed?: unknown; transparent?: unknown; quality?: unknown; format?: unknown; compression?: unknown; transport?: unknown; inputFidelity?: unknown },
   cwd: string, signal: AbortSignal | undefined, direction?: CreativeDirection, env: Record<string, string | undefined> = process.env, runtime: ImageRuntime = {},
 ) {
-  const planned = await plannedImageParams(params, signal);
-  if (planned.quote && env.PI_IMAGE_BACKEND && env.PI_IMAGE_BACKEND !== "openrouter") throw Error("Capped/automatic image planning requires the OpenRouter backend");
+  const planned = await prepareImageRun(params, env, runtime, signal);
   params = planned.params;
-  env = imageBackendEnvironment(env, !!runtime.providerKey, params.model);
-  runtime.onModel?.(String(params.model ?? env.PI_IMAGE_MODEL ?? ""));
-  const backend = resolveImageBackend(env, !!runtime.providerKey);
-  if (!backend.configured) throw new Error(`${backend.reason} ${backend.setup ?? ""}`.trim());
+  const { backend } = planned;
   if (backend.name !== "openrouter" && (params.aspectRatio !== undefined || params.resolution !== undefined)) throw Error("aspectRatio/resolution require OpenRouter; use size with compatible backends");
   const brief = buildGenerationBrief(direction, params);
   const key = backendKey(backend, env, runtime);
@@ -561,7 +570,7 @@ export async function imageGenerateRun(
   const body = buildImageRequest(brief, { ...params, model: backend.model! });
   if (backend.name === "openrouter") routerImageOptions(body, params, true);
   if (planned.quote) body.provider = { only: [planned.quote.provider], allow_fallbacks: false };
-  const { bytes, usage, checkpoint } = await nativeImage(runtime, signal, active => postJson(backend.apiUrl!, key, backend.name === "openrouter" ? "/images" : "/images/generations", body, active, 240_000), { cwd, brief, params, backend, extra: { quote: planned.quote } });
+  const { bytes, usage, checkpoint } = await nativeImage(runtime, signal, active => postJson(backend.apiUrl!, key, backend.name === "openrouter" ? "/images" : "/images/generations", body, active, planned.quote ? "error" : "follow"), { cwd, brief, params, backend, extra: { quote: planned.quote } });
   return storeGenerated(bytes, brief, params, backend, "generated", cwd, signal, { usage, quote: planned.quote }, checkpoint);
 }
 
@@ -569,13 +578,9 @@ export async function imageEditRun(
   params: { maxCostUsd?: unknown; model?: unknown; path?: unknown; references?: unknown; mask?: unknown; prompt?: unknown; role?: unknown; negative?: unknown; aspect?: unknown; aspectRatio?: unknown; resolution?: unknown; size?: unknown; seed?: unknown; transparent?: unknown; quality?: unknown; format?: unknown; compression?: unknown; inputFidelity?: unknown; transport?: unknown },
   cwd: string, signal: AbortSignal | undefined, direction?: CreativeDirection, env: Record<string, string | undefined> = process.env, runtime: ImageRuntime = {},
 ) {
-  const planned = await plannedImageParams(params, signal);
-  if (planned.quote && env.PI_IMAGE_BACKEND && env.PI_IMAGE_BACKEND !== "openrouter") throw Error("Capped/automatic image planning requires the OpenRouter backend");
+  const planned = await prepareImageRun(params, env, runtime, signal);
   params = planned.params;
-  env = imageBackendEnvironment(env, !!runtime.providerKey, params.model);
-  runtime.onModel?.(String(params.model ?? env.PI_IMAGE_MODEL ?? ""));
-  const backend = resolveImageBackend(env, !!runtime.providerKey);
-  if (!backend.configured) throw new Error(`${backend.reason} ${backend.setup ?? ""}`.trim());
+  const { backend } = planned;
   if (backend.name !== "openrouter" && (params.aspectRatio !== undefined || params.resolution !== undefined)) throw Error("aspectRatio/resolution require OpenRouter; use size with compatible backends");
   if (backend.name === "openrouter" && params.mask !== undefined) throw new Error("Masked edits require the openai-compatible backend; OpenRouter reference edits do not define mask semantics");
   const inputs = params.references === undefined ? [params.path] : params.references;
@@ -630,7 +635,7 @@ export async function imageEditRun(
       routerImageOptions(body, params, true);
       if (planned.quote) body.provider = { only: [planned.quote.provider], allow_fallbacks: false };
       body.input_references = references.map(bytes => ({ type: "image_url", image_url: { url: `data:image/${sniffImage(bytes)};base64,${bytes.toString("base64")}` } }));
-      const generated = await nativeImage(runtime, signal, active => postJson(backend.apiUrl!, backendKey(backend, env, runtime), "/images", body, active, 240000), { cwd, brief, params, backend, extra: { ...extra, quote: planned.quote } });
+      const generated = await nativeImage(runtime, signal, active => postJson(backend.apiUrl!, backendKey(backend, env, runtime), "/images", body, active, planned.quote ? "error" : "follow"), { cwd, brief, params, backend, extra: { ...extra, quote: planned.quote } });
       bytes = generated.bytes;
       checkpoint = generated.checkpoint;
       Object.assign(extra, { usage: generated.usage, quote: planned.quote });

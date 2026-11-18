@@ -1,5 +1,6 @@
 import { isPersistentService, servicePort, taskTriggersCompletion } from "./service-policy.ts";
 import { guardedCommand } from "../../../lib/self-mutation-guard.ts";
+import { createMountedReadyParser } from "../../../lib/guard-readiness.ts";
 import { fileSizeLimitPrefix, getDiskLimits, watchDisk } from "../../../lib/disk-guard.ts";
 import { ownProcessGroup } from "../../../lib/process-owner.ts";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
@@ -1119,18 +1120,17 @@ export class BackgroundTaskRegistry {
         if (timeoutSeconds === undefined || task.finalized || task.killKind !== undefined) return;
         task.timeoutHandle = setTimeout(() => expire(`Timed out after ${String(timeoutSeconds)}s`), timeoutSeconds * 1000);
       };
-      const readyPrefix = guarded.readyStdoutPrefix;
-      let ready = !readyPrefix;
-      let readyLength = 0;
+      const readAdmission = guarded.readyStdoutPrefix ? createMountedReadyParser(guarded.readyStdoutPrefix) : undefined;
+      let ready = !readAdmission;
       child.stdout?.on("data", (data) => {
-        if (ready || !readyPrefix) {
+        if (ready || !readAdmission) {
           this.appendChildOutput(task, data, "stdout");
           return;
         }
         if (processFailure !== undefined) return;
-        const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data);
-        const length = Math.min(bytes.length, readyPrefix.length - readyLength);
-        if (!bytes.subarray(0, length).equals(readyPrefix.subarray(readyLength, readyLength + length))) {
+        const output = readAdmission(Buffer.isBuffer(data) ? data : Buffer.from(data));
+        if (output === "pending") return;
+        if (output === "invalid") {
           if (task.killKind !== undefined) return;
           processFailure = task.error = "Invalid background task isolation readiness.";
           this.writeNotice(task, `\n[background task: ${processFailure}]\n`, true);
@@ -1141,13 +1141,11 @@ export class BackgroundTaskRegistry {
           }
           return;
         }
-        readyLength += length;
-        if (readyLength !== readyPrefix.length) return;
         ready = true;
         clearTimeout(task.timeoutHandle);
         task.timeoutHandle = undefined;
         armExecutionTimeout();
-        if (bytes.length > length) this.appendChildOutput(task, bytes.subarray(length), "stdout");
+        if (output.length > 0) this.appendChildOutput(task, output, "stdout");
       });
       child.stderr?.on("data", (data) => {
         this.appendChildOutput(task, data, "stderr");

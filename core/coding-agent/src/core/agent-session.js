@@ -182,7 +182,9 @@ export class AgentSession {
             return false;
         };
         this.sessionManager = config.sessionManager;
-        this._unsubscribeExternalAccounting = this.sessionManager.subscribeExternalAccountingReceipts(entry => this._emit({ type: "entry_appended", entry }));
+        this._unsubscribeExternalAccounting = this.sessionManager.subscribeExternalAccountingReceipts(entry => {
+            this._emit(entry ? { type: "entry_appended", entry } : { type: "accounting_updated" });
+        });
         this.settingsManager = config.settingsManager;
         this._scopedModels = config.scopedModels ?? [];
         this._resourceLoader = config.resourceLoader;
@@ -3216,10 +3218,12 @@ export class AgentSession {
      * actually billed across the session.
      */
     getSessionStats() {
+        const incomplete = this.sessionManager.isAccountingIncomplete?.();
         return {
             sessionFile: this.sessionFile,
             sessionId: this.sessionId,
-            ...collectSessionStats(this.sessionManager.getEntries()),
+            ...collectSessionStats(this.sessionManager.getAccountingEntries?.() ?? this.sessionManager.getEntries()),
+            ...(incomplete ? { accountingIncomplete: true, costLabel: "$?" } : {}),
             contextUsage: this.getContextUsage(),
         };
     }

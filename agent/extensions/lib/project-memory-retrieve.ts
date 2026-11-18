@@ -123,8 +123,8 @@ export interface MemoryHit {
   chunk: StoredChunk;
   /** Final policy-scored value (higher is better). Ranks, proves nothing. */
   score: number;
-  /** The exact matched fragment (atom text) or the leading slice when the
-   * hit is lexical-only. What a compact candidate shows; the parent behind
+  /** The exact matched fragment (atom text) or an excerpt around the query
+   * when the hit is lexical-only. What a compact candidate shows; the parent behind
    * project_memory read holds the authoritative context. */
   fragment: string;
   /** Source span of the matched fragment, retained for bounded reranker input. */
@@ -183,16 +183,21 @@ const containsLiteralTerms = (chunk: StoredChunk, query: string): boolean => {
   return query.toLowerCase().split(/\s+/).every(term => text.includes(term));
 };
 
-/** Literal symbol/path lookups already have strong lexical evidence. Keep
- * that evidence first and avoid both embedding and reranking calls. */
-function exactLookup(stores: ProjectVectorStore[], query: string, opts: RetrieveOptions): boolean {
-  if (query.split(/\s+/).length > 3 || !/(?:[_.\/:]|[a-z][A-Z]|\b[A-Z][A-Z0-9]{2,}\b|^[a-f0-9]{7,40}$)/.test(query)) return false;
-  return stores.some(store => store.getChunks(store.lexicalSearch(query, 8, { ...opts, types: opts.types?.filter(isChunkType) }).map(hit => hit.id))
-    .some(chunk => containsLiteralTerms(chunk, query)));
+function normalizedQuery(query: string): string {
+  const clean = query.trim().replace(/\s+/g, " ");
+  if (clean.length < 3 || clean.length > 512) throw new Error("query must contain 3–512 characters");
+  return clean;
 }
 
-async function queryEmbedding(stores: ProjectVectorStore[], query: string, opts: RetrieveOptions): Promise<QueryEmbedding> {
-  if (exactLookup(stores, query, opts)) return { batch: null, degraded: [], skipped: 'exact-lexical' };
+function lexicalCandidates(store: ProjectVectorStore, query: string, opts: RetrieveOptions) {
+  const hits = store.lexicalSearch(query, 40, { types: opts.types?.filter(isChunkType), since: opts.since, minAuthority: opts.minAuthority });
+  const literal = query.split(/\s+/).length <= 3 && /(?:[_.\/:]|[a-z][A-Z]|\b[A-Z][A-Z0-9]{2,}\b|^[a-f0-9]{7,40}$)/.test(query);
+  const chunks = literal ? store.getChunks(hits.map(hit => hit.id)) : [];
+  return { hits, chunks, exact: chunks.some(chunk => containsLiteralTerms(chunk, query)) };
+}
+
+async function queryEmbedding(stores: ProjectVectorStore[], query: string, opts: RetrieveOptions, exact: boolean): Promise<QueryEmbedding> {
+  if (exact) return { batch: null, degraded: [], skipped: 'exact-lexical' };
   if (opts.signal?.aborted) return { batch: null, degraded: ['cancelled'] };
   const spaces = stores.flatMap(store => store.embeddingSpaces().filter(space => space.count > 0));
   const compatible = new Set(spaces.map(space => space.id));
@@ -210,26 +215,15 @@ async function queryEmbedding(stores: ProjectVectorStore[], query: string, opts:
   return { batch: null, degraded: [opts.signal?.aborted ? 'cancelled' : batch ? 'dimension-mismatch' : 'embeddings-unavailable'] };
 }
 
-export async function retrieveProjectMemory(
-  store: ProjectVectorStore,
-  query: string,
-  opts: RetrieveOptions = {},
-  prepared?: QueryEmbedding,
-): Promise<RetrieveResult> {
+function collectCandidates(
+  store: ProjectVectorStore, clean: string, opts: RetrieveOptions,
+  lexicalResult: ReturnType<typeof lexicalCandidates>, semantic: QueryEmbedding,
+): RetrieveResult {
   const started = Date.now();
-  const degraded: string[] = [];
-  const clean = query.trim().replace(/\s+/g, " ");
-  if (clean.length < 3 || clean.length > 512) throw new Error("query must contain 3–512 characters");
-  const role = opts.role && isRetrievalRole(opts.role) ? opts.role : "main";
-  const policy = ROLE_POLICIES[role];
-  const limit = Math.max(1, Math.min(25, opts.limit ?? 5));
-  const now = opts.now ?? Date.now;
-
   const types = opts.types?.filter(isChunkType);
-  const lexical = store.lexicalSearch(clean, 40, { types, since: opts.since, minAuthority: opts.minAuthority });
+  const lexical = lexicalResult.hits;
+  const degraded = [...semantic.degraded];
   let vectorRanks: Array<{ id: string; score: number; atomId?: string; source?: "atom" | "chunk" }> = [];
-  const semantic = prepared ?? await queryEmbedding([store], clean, opts);
-  degraded.push(...semantic.degraded);
   let atomCandidates = 0;
   if (semantic.batch) {
       const { space, vectors } = semantic.batch;
@@ -288,24 +282,32 @@ export async function retrieveProjectMemory(
     entry.vectorSource = hit.source;
     fused.set(hit.id, entry);
   });
-  if (!fused.size) {
-    return { hits: [], stats: { lexical: 0, vector: vectorRanks.length, atoms: atomCandidates, fused: 0, reranked: false, ms: Date.now() - started, degraded, space: semantic.batch?.space.id, semanticSkipped: semantic.skipped } };
-  }
 
-  const chunks = new Map(store.getChunks([...fused.keys()]).map((c) => [c.id, c]));
-  const nowMs = now();
-  const scored: MemoryHit[] = [];
+  // A model call can yield to index updates. Re-read candidates after that boundary.
+  const reusable = semantic.skipped === "exact-lexical" ? lexicalResult.chunks : [];
+  const chunks = new Map(reusable.map(chunk => [chunk.id, chunk]));
+  const missing = [...fused.keys()].filter(id => !chunks.has(id));
+  if (missing.length) {
+    for (const chunk of store.getChunks(missing)) chunks.set(chunk.id, chunk);
+  }
+  const candidates: MemoryHit[] = [];
   for (const [id, entry] of fused) {
     const chunk = chunks.get(id);
-    if (!chunk) continue;
-    if (types?.length && !types.includes(chunk.source_type)) continue;
-    if (opts.since && chunk.timestamp < opts.since) continue;
-    if (opts.minAuthority !== undefined && chunk.authority < opts.minAuthority) continue;
-    const tombstoned = chunk.valid_until !== null || chunk.superseded_by !== "";
-    if (tombstoned && !opts.includeSuperseded) {
-      // Still retrievable (provenance), heavily demoted.
-    }
-    let score = entry.fused * (TYPE_WEIGHTS[chunk.source_type] ?? 0.5) * (policy.typeBoost[chunk.source_type] ?? 1);
+    if (!chunk || (types?.length && !types.includes(chunk.source_type)) ||
+        (opts.since && chunk.timestamp < opts.since) ||
+        (opts.minAuthority !== undefined && chunk.authority < opts.minAuthority)) continue;
+    candidates.push({ chunk, score: entry.fused, fragment: "", signals: { ...entry, vectorScore: vectorRanks.find(hit => hit.id === id)?.score, reranked: false } });
+  }
+  hydrateFragments(store, candidates, clean);
+  return { hits: candidates, stats: { lexical: lexical.length, vector: vectorRanks.length, atoms: atomCandidates, fused: fused.size, reranked: false, ms: Date.now() - started, degraded, space: semantic.batch?.space.id, semanticSkipped: semantic.skipped } };
+}
+
+function scoreCandidates(candidates: RetrieveResult, query: string, opts: RetrieveOptions): MemoryHit[] {
+  const policy = ROLE_POLICIES[opts.role && isRetrievalRole(opts.role) ? opts.role : "main"];
+  const nowMs = (opts.now ?? Date.now)();
+  const scored = candidates.hits.map(hit => {
+    const chunk = hit.chunk;
+    let score = hit.signals.fused * (TYPE_WEIGHTS[chunk.source_type] ?? 0.5) * (policy.typeBoost[chunk.source_type] ?? 1);
     if (policy.recencyHalfLifeDays > 0) {
       const ageMs = Math.max(0, nowMs - Date.parse(chunk.timestamp || chunk.valid_from || ""));
       const halfLife = policy.recencyHalfLifeDays * 86_400_000;
@@ -314,14 +316,29 @@ export async function retrieveProjectMemory(
     score *= 1 - policy.authorityWeight + policy.authorityWeight * (0.5 + chunk.authority);
     if (chunk.authority >= 0.95) score *= policy.canonicalBoost;
     score *= 0.7 + 0.3 * chunk.importance;
-    if (tombstoned) score *= SUPERSEDED_PENALTY;
-    scored.push({ chunk, score, fragment: "", signals: { lexicalRank: entry.lexicalRank, vectorRank: entry.vectorRank, vectorScore: vectorRanks.find(hit => hit.id === id)?.score, atomId: entry.atomId, vectorSource: entry.vectorSource, fused: entry.fused, reranked: false } });
-  }
-  hydrateFragments(store, scored, clean);
-  scored.sort((a, b) => b.score - a.score);
-  if (semantic.skipped === 'exact-lexical') scored.sort((a, b) => Number(containsLiteralTerms(b.chunk, clean)) - Number(containsLiteralTerms(a.chunk, clean)));
-  const head = scored.slice(0, Math.max(limit, 12));
+    if (!opts.includeSuperseded && (chunk.valid_until !== null || chunk.superseded_by !== "")) score *= SUPERSEDED_PENALTY;
+    return { ...hit, score, signals: { ...hit.signals } };
+  });
+  sortCandidates(scored, query, candidates.stats.semanticSkipped === 'exact-lexical');
+  return scored;
+}
 
+function sortCandidates(hits: MemoryHit[], query: string, exact: boolean) {
+  hits.sort((a, b) => b.score - a.score);
+  if (exact) hits.sort((a, b) => Number(containsLiteralTerms(b.chunk, query)) - Number(containsLiteralTerms(a.chunk, query)));
+}
+
+export async function retrieveProjectMemory(
+  store: ProjectVectorStore, query: string, opts: RetrieveOptions = {}, prepared?: QueryEmbedding,
+): Promise<RetrieveResult> {
+  const started = Date.now();
+  const clean = normalizedQuery(query);
+  const lexical = lexicalCandidates(store, clean, opts);
+  const semantic = prepared ?? await queryEmbedding([store], clean, opts, lexical.exact);
+  const candidates = collectCandidates(store, clean, opts, lexical, semantic);
+  const limit = Math.max(1, Math.min(25, opts.limit ?? 5));
+  const head = scoreCandidates(candidates, clean, opts).slice(0, Math.max(limit, 12));
+  const degraded = candidates.stats.degraded;
   let reranked = false;
   const ranker = opts.rerank === undefined ? memoryRanker() : opts.rerank;
   if (ranker && head.length > 1 && semantic.skipped !== 'exact-lexical' && !opts.signal?.aborted) {
@@ -347,7 +364,7 @@ export async function retrieveProjectMemory(
 
   return {
     hits: head.slice(0, limit),
-    stats: { lexical: lexical.length, vector: vectorRanks.length, atoms: atomCandidates, fused: fused.size, reranked, ms: Date.now() - started, degraded, space: semantic.batch?.space.id, semanticSkipped: semantic.skipped },
+    stats: { ...candidates.stats, reranked, ms: Date.now() - started },
   };
 }
 
@@ -378,13 +395,13 @@ function centerFragment(text: string, query: string, maxChars: number): string {
 }
 
 /** Fill each hit's display fragment: the matched atom text when a vector
- * matched, otherwise the leading slice of the parent. One batched lookup. */
+ * matched, otherwise the matching parent excerpt. One batched lookup. */
 export function hydrateFragments(store: ProjectVectorStore, hits: MemoryHit[], query = ""): void {
   const wanted = [...new Set(hits.filter((hit) => hit.signals.atomId).map((hit) => hit.chunk.id))];
   const atoms = wanted.length ? store.getAtomsForChunks(wanted) : new Map<string, StoredAtom[]>();
   for (const hit of hits) {
     const matched = hit.signals.atomId ? (atoms.get(hit.chunk.id) ?? []).find((atom) => atom.id === hit.signals.atomId) : undefined;
-    hit.fragment = centerFragment(matched?.text ?? hit.chunk.text, matched ? query : "", MEMORY_FRAGMENT_CHARS);
+    hit.fragment = centerFragment(matched?.text ?? hit.chunk.text, query, MEMORY_FRAGMENT_CHARS);
     hit.fragmentSource = citePath(matched ? { ...hit.chunk, source_start: matched.source_start, source_end: matched.source_end } : hit.chunk);
   }
 }
@@ -445,26 +462,41 @@ export async function retrieveFamily(
   prepared?: QueryEmbedding,
 ): Promise<RetrieveFamilyResult> {
   const started = Date.now();
-  const clean = query.trim().replace(/\s+/g, " ");
-  if (clean.length < 3 || clean.length > 512) throw new Error("query must contain 3–512 characters");
+  const clean = normalizedQuery(query);
+  const candidates = await collectFamily(stores, clean, opts, prepared);
+  return rankFamily(candidates, clean, opts, started);
+}
+
+async function collectFamily(stores: FamilyStore[], clean: string, opts: RetrieveOptions, prepared?: QueryEmbedding) {
   if (!stores.length) throw new Error("retrieveFamily requires at least one store");
+  const lexical = stores.map(({ store }) => lexicalCandidates(store, clean, opts));
+  const semantic = prepared ?? await queryEmbedding(stores.map(member => member.store), clean, opts, lexical.some(result => result.exact));
+  return {
+    semantic,
+    members: stores.map(({ store, relation }, index) => ({
+      projectId: store.projectId, relation,
+      result: collectCandidates(store, clean, opts, lexical[index], semantic),
+    })),
+  };
+}
+
+async function rankFamily(
+  { semantic, members }: Awaited<ReturnType<typeof collectFamily>>, clean: string,
+  opts: RetrieveOptions & { perStoreLimit?: number }, started: number,
+): Promise<RetrieveFamilyResult> {
   const limit = Math.max(1, Math.min(25, opts.limit ?? 5));
   const perStore = Math.max(1, Math.min(25, opts.perStoreLimit ?? Math.max(limit, 12)));
   const degraded = new Set<string>();
   const merged: FamilyHit[] = [];
   const storeStats: RetrieveFamilyResult["stats"]["stores"] = [];
-  // One compatible query vector for the whole family, never one paid call per DB.
-  const semantic = prepared ?? await queryEmbedding(stores.map(member => member.store), clean, opts);
-  for (const { store, relation } of stores) {
-    const result = await retrieveProjectMemory(store, clean, { ...opts, limit: perStore, rerank: false }, semantic);
+  for (const { projectId, relation, result } of members) {
     for (const flag of result.stats.degraded) degraded.add(flag);
-    storeStats.push({ projectId: store.projectId, relation, lexical: result.stats.lexical, vector: result.stats.vector, atoms: result.stats.atoms, fused: result.stats.fused });
-    for (const hit of result.hits) {
-      merged.push({ ...hit, score: hit.score * (FAMILY_WEIGHTS[relation] ?? 0.5), projectId: store.projectId, relation });
+    storeStats.push({ projectId, relation, lexical: result.stats.lexical, vector: result.stats.vector, atoms: result.stats.atoms, fused: result.stats.fused });
+    for (const hit of scoreCandidates(result, clean, opts).slice(0, perStore)) {
+      merged.push({ ...hit, score: hit.score * (FAMILY_WEIGHTS[relation] ?? 0.5), projectId, relation });
     }
   }
-  merged.sort((a, b) => b.score - a.score);
-  if (semantic.skipped === 'exact-lexical') merged.sort((a, b) => Number(containsLiteralTerms(b.chunk, clean)) - Number(containsLiteralTerms(a.chunk, clean)));
+  sortCandidates(merged, clean, semantic.skipped === 'exact-lexical');
   const head = merged.slice(0, Math.max(limit, 12));
   let reranked = false;
   const ranker = opts.rerank === undefined ? memoryRanker() : opts.rerank;
@@ -494,52 +526,15 @@ export async function retrieveFamily(
   };
 }
 
-/**
- * The search stage (lexical match plus brute-force vector scans) does not depend on the
- * retrieval role: only the scoring after it does. Views of one query reuse each store's scan
- * results instead of re-reading every stored vector once per role.
- */
-function shareScans(members: FamilyStore[]): FamilyStore[] {
-  return members.map(({ store, relation }) => {
-    const lexical = new Map<string, ReturnType<ProjectVectorStore["lexicalSearch"]>>();
-    const scans = new WeakMap<object, Map<string, { hits: unknown; scan: ProjectVectorStore["lastVectorScan"] }>>();
-    const scanned = (kind: "vector" | "atom", vector: ArrayLike<number> & object, rest: unknown) => {
-      const key = `${kind}:${JSON.stringify(rest)}`;
-      const byVector = scans.get(vector) ?? new Map();
-      scans.set(vector, byVector);
-      const cached = byVector.get(key);
-      if (cached) { store.lastVectorScan = cached.scan; return cached.hits; }
-      const hits = kind === "vector" ? store.vectorSearch(vector as Float32Array, rest as never) : store.atomVectorSearch(vector as Float32Array, rest as never);
-      byVector.set(key, { hits, scan: store.lastVectorScan });
-      return hits;
-    };
-    const shared = new Proxy(store, {
-      get(target, prop) {
-        if (prop === "lexicalSearch") return (query: string, limit?: number) => {
-          const key = `${limit}:${query}`;
-          const hit = lexical.get(key) ?? target.lexicalSearch(query, limit);
-          lexical.set(key, hit);
-          return hit;
-        };
-        if (prop === "vectorSearch") return (vector: Float32Array, rest: unknown) => scanned("vector", vector, rest);
-        if (prop === "atomVectorSearch") return (vector: Float32Array, rest: unknown) => scanned("atom", vector, rest);
-        const value = Reflect.get(target, prop, target);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-      set(target, prop, value) { (target as any)[prop] = value; return true; },
-    });
-    return { store: shared, relation };
-  });
-}
-
 /** Shared priming for the main agent and reviewers: one query embedding and one scan per
  * store, role-specific policy views, no additional ranking or embedding requests. */
 export async function retrieveFamilyViews(stores: FamilyStore[], query: string, opts: RetrieveOptions = {}): Promise<Record<RetrievalRole, FamilyHit[]>> {
-  const semantic = await queryEmbedding(stores.map(member => member.store), query, opts);
-  const members = shareScans(stores);
+  const started = Date.now();
+  const clean = normalizedQuery(query);
+  const candidates = await collectFamily(stores, clean, opts);
   const views = {} as Record<RetrievalRole, FamilyHit[]>;
   for (const role of ['main', 'observer', 'subagent'] as const) {
-    views[role] = (await retrieveFamily(members, query, { ...opts, role, rerank: false, limit: 2 }, semantic)).hits;
+    views[role] = (await rankFamily(candidates, clean, { ...opts, role, rerank: false, limit: 2 }, started)).hits;
   }
   return views;
 }

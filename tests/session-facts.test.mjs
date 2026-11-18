@@ -122,6 +122,36 @@ test('one stored model-only facts message per human message, byte-stable on late
 	assert.match(replayed[1], /Last run: \d+ min\.$/m, 'a run that cost nothing reports its minutes only');
 });
 
+test('run budgets read the accounting projection once per revision and omit an incomplete starting balance', async t => {
+	const f = fixture(t, { entries: [assistantEntry({ total: 10 })] });
+	let revision = 1, reads = 0, incomplete = false;
+	let accounting = [assistantEntry({ total: 0.02 })];
+	Object.assign(f.ctx.sessionManager, {
+		getAccountingEntries: () => { reads++; return accounting; },
+		getAccountingEntriesRevision: () => revision,
+		isAccountingIncomplete: () => incomplete,
+	});
+	registerSessionFacts(f.pi);
+	const [start] = await f.humanMessage('Check the invoice.');
+	assert.match(start.message.content, /Session: \$0\.02/);
+	for (let i = 0; i < 20; i++) await f.emit('turn_end');
+	assert.equal(reads, 1, 'unchanged billing is not rescanned on repeated budget reads');
+	accounting = [assistantEntry({ total: 0.12 })];
+	revision++;
+	await f.emit('turn_end');
+	assert.equal(reads, 2);
+	incomplete = true;
+	revision++;
+	const [damaged] = await f.humanMessage('Continue.');
+	assert.doesNotMatch(damaged.message.content, /\$/);
+	incomplete = false;
+	revision++;
+	await f.emit('turn_end');
+	const [recovered] = await f.humanMessage('Check again.');
+	assert.match(recovered.message.content, /Session: \$0\.12/);
+	assert.match(recovered.message.content, /Last run: \d+ min\./, 'a lost starting balance cannot measure run cost');
+});
+
 test('unknown figures are left out: no price, no cache data, no context usage', async (t) => {
 	const unpriced = fixture(t, { entries: [assistantEntry({ total: null })] });
 	registerSessionFacts(unpriced.pi);

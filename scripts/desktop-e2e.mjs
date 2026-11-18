@@ -150,19 +150,35 @@ const started = performance.now();
 try {
   electron = await _electron.launch({ args: [path.join(repo, 'desktop/main.mjs')], env, timeout: 30_000 });
   page = await electron.firstWindow();
+  const viewport = () => page.evaluate(() => [innerWidth, innerHeight]);
+  const resizeViewport = async (width, height) => {
+    await electron.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height), { width, height });
+    const atTarget = timeout => page.waitForFunction(
+      ([w, h]) => innerWidth === w && innerHeight === h, [width, height], { timeout });
+    try { await atTarget(1500); }
+    catch (error) {
+      if (error.name !== 'TimeoutError') throw error;
+      // Wayland may settle the initial window decorations after setContentSize.
+      // Correct the native frame by the measured CSS delta, then require the exact viewport.
+      const [actualWidth, actualHeight] = await viewport();
+      await electron.evaluate(({ BrowserWindow }, [dw, dh]) => {
+        const window = BrowserWindow.getAllWindows()[0], [w, h] = window.getSize();
+        window.setSize(w + dw, h + dh);
+      }, [width - actualWidth, height - actualHeight]);
+      await atTarget(8000);
+    }
+  };
   const errors = []; page.on('pageerror', error => errors.push(error.message));
   await page.waitForSelector('#welcome h1'); report.bootMs = Math.round(performance.now() - started);
   await page.waitForFunction(() => !document.getElementById('prompt').disabled, { timeout: 60_000 }); report.readyMs = Math.round(performance.now() - started);
   assert.equal(await page.locator('#welcome .suggestions button').first().getAttribute('data-suggest'), 'goal');
   await page.screenshot({ path: path.join(output, 'desktop-welcome.png') }); report.screenshots.push('desktop-welcome.png');
-  const opened = await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getContentSize());
-  await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(560, 640));
-  await page.waitForTimeout(120);
+  const opened = await viewport();
+  await resizeViewport(560, 640);
   const narrow = await page.evaluate(() => ({ width: innerWidth, overflow: document.documentElement.scrollWidth - innerWidth, right: Math.max(...[...document.querySelectorAll('#welcome .suggestions button')].map(node => node.getBoundingClientRect().right)) }));
   assert.ok(narrow.overflow <= 1 && narrow.right <= narrow.width, `welcome actions leave a ${narrow.width}px window (${Math.round(narrow.right)})`);
   await page.screenshot({ path: path.join(output, 'desktop-welcome-560.png') }); report.screenshots.push('desktop-welcome-560.png');
-  await electron.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size[0], size[1]), opened);
-  await page.waitForTimeout(120);
+  await resizeViewport(...opened);
   check('the empty session opens on the rat and offers a goal first');
   const nativePid = await electron.evaluate(() => process.pid);
   assert.ok(activePiProcesses(path.join(repo, 'core/coding-agent')).includes(nativePid), 'the running Electron executable remains an owner without a core CLI parent');
@@ -244,6 +260,16 @@ try {
   await page.evaluate(id => window.yunuspi.prompt(id, '/desktop-charge'), first.id);
   await page.waitForFunction(() => document.getElementById('usage-caption').textContent.includes('$~0.251000 total'));
   check('detached billing refreshes the live total while the session is idle');
+  const firstTranscriptDir = store.transcriptDirectory(first.id);
+  const firstFiles = fs.readdirSync(firstTranscriptDir).filter(name => name.endsWith('.jsonl'));
+  assert.equal(firstFiles.length, 1, 'the idle fixture owns one transcript');
+  const detachedWriter = SessionManager.open(path.join(firstTranscriptDir, firstFiles[0]));
+  detachedWriter.appendSummaryUsageReceipt({
+    id: 'fixture-external-process', owner: 'fixture', provider: 'desktop-example', model: 'metered-helper',
+    status: 'completed', usage: { cost: { total: 0.125, source: 'provider-reported' } },
+  });
+  await page.waitForFunction(() => document.getElementById('usage-caption').textContent.includes('$~0.376000 total'), undefined, { timeout: 8_000 });
+  check('a receipt written outside the worker refreshes the live desktop total');
   await page.locator('#prompt').fill('unsent alpha draft');
   await open(third.id); await send('beta-project-three'); await done();
   await open(first.id); assert.equal(await page.locator('#prompt').inputValue(), 'unsent alpha draft');
@@ -363,12 +389,12 @@ try {
   gap = await page.locator('#conversation').evaluate(node => node.scrollHeight - node.scrollTop - node.clientHeight);
   assert.ok(gap < 3, `composer resize moved pinned view ${gap}`);
   for (const [width, height] of [[1440, 900], [1000, 720], [560, 420]]) {
-    await electron.evaluate(({ BrowserWindow }, size) => BrowserWindow.getAllWindows()[0].setContentSize(size.width, size.height), { width, height });
-    await page.waitForTimeout(120);
-    const bounds = await page.evaluate(() => ({ width: innerWidth, overflow: document.documentElement.scrollWidth - innerWidth, scrollHeight: document.getElementById('conversation').clientHeight, composer: document.getElementById('composer').getBoundingClientRect().toJSON() }));
+    await resizeViewport(width, height);
+    const bounds = await page.evaluate(() => ({ width: innerWidth, height: innerHeight, overflow: document.documentElement.scrollWidth - innerWidth, scrollHeight: document.getElementById('conversation').clientHeight, composer: document.getElementById('composer').getBoundingClientRect().toJSON() }));
+    assert.deepEqual([bounds.width, bounds.height], [width, height], 'composer measured at an unexpected viewport size');
     assert.ok(bounds.overflow <= 1, `horizontal document overflow at ${width}`);
     assert.ok(bounds.scrollHeight >= 100, `conversation is too short at ${width}`);
-    assert.ok(bounds.composer.bottom <= height, 'composer is clipped');
+    assert.ok(bounds.composer.bottom <= bounds.height + 1, `composer bottom ${bounds.composer.bottom} is clipped at ${bounds.width}×${bounds.height}`);
     if (width === 560) {
       await page.locator('#workbench-toggle').click();
       assert.equal(await page.locator('#workbench').getAttribute('aria-modal'), 'true');
@@ -378,7 +404,7 @@ try {
     await page.screenshot({ path: path.join(output, `desktop-${width}.png`) }); report.screenshots.push(`desktop-${width}.png`);
   }
   check('wide, compact and short windows preserve composer and scrolling');
-  await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1320, 850));
+  await resizeViewport(1320, 850);
   await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
   await page.locator('#prompt').fill(''); await page.screenshot({ path: path.join(output, 'desktop-dark.png') }); report.screenshots.push('desktop-dark.png');
   assert.equal(await page.locator('.working-mark i').first().evaluate(node => getComputedStyle(node).animationName), 'none');
@@ -519,11 +545,9 @@ try {
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => !document.getElementById('team-legwork').hasAttribute('aria-busy'));
   assert.match(await page.locator('#team-legwork').innerText(), /desktop-example · desktop-fixture$/, 'Enter on the search picks the model and saves it');
-  const teamWindow = await electron.evaluate(({ BrowserWindow }) => {
-    const window = BrowserWindow.getAllWindows()[0], size = window.getContentSize();
-    window.setMinimumSize(360, 320); window.setContentSize(400, 700); return size;
-  });
-  await page.waitForTimeout(150);
+  const teamWindow = await viewport();
+  await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setMinimumSize(360, 320));
+  await resizeViewport(400, 700);
   const fit = await page.evaluate(() => {
     const content = document.getElementById('dialog-content').getBoundingClientRect();
     document.getElementById('team-helper').click();
@@ -534,8 +558,8 @@ try {
   });
   assert.ok(fit.overflow <= 1 && fit.outside === 0, `the Team section fits a ${fit.width}px window without sideways scrolling`);
   await page.screenshot({ path: path.join(output, 'desktop-settings-team-narrow.png') }); report.screenshots.push('desktop-settings-team-narrow.png');
-  await electron.evaluate(({ BrowserWindow }, size) => { const window = BrowserWindow.getAllWindows()[0]; window.setMinimumSize(560, 420); window.setContentSize(size[0], size[1]); }, teamWindow);
-  await page.waitForTimeout(150);
+  await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setMinimumSize(560, 420));
+  await resizeViewport(...teamWindow);
   // Escape inside an open picker closes only the picker; the next one closes the dialog.
   assert.equal(await page.locator('#team-helper').getAttribute('aria-expanded'), 'true');
   await page.keyboard.press('Escape');

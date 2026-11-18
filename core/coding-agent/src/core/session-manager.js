@@ -1,8 +1,8 @@
 import { uuidv7 } from "@yunuspi/ai/utils/uuid";
 import { randomUUID } from "crypto";
-import { appendFileSync, closeSync, constants, createReadStream, existsSync, fstatSync, fsyncSync, ftruncateSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync, writeFileSync, } from "fs";
-import { readdir, stat } from "fs/promises";
-import { dirname, join, resolve } from "path";
+import { appendFileSync, closeSync, constants, createReadStream, existsSync, fstatSync, fsyncSync, ftruncateSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, statSync, unlinkSync, watch, writeFileSync, } from "fs";
+import { lstat, open, readdir, stat } from "fs/promises";
+import { basename, dirname, join, resolve } from "path";
 import { createInterface } from "readline";
 import { StringDecoder } from "string_decoder";
 import { APP_NAME, getAgentDir as getDefaultAgentDir, getSessionsDir } from "../config.js";
@@ -123,13 +123,24 @@ function buildEntryIndex(entries, byId) {
     return index;
 }
 const accountingReceiptTypes = new Set(["auxiliary-model-usage-v1", "subagent-cost-v1", "subagent-lifecycle-v1"]);
+const MAX_ACCOUNTING_REPLAY_BYTES = 128 * 1024 * 1024;
+const MAX_ACCOUNTING_REPLAY_RECORDS = 200_000;
 // Open views can share a transcript with a retired runtime that still owns a
 // billable request. Observe only the exact file generation and session ID.
 const accountingViews = new Map();
 function accountingViewKey(file, sessionId, identity) {
     return `${file}\0${sessionId}\0${identity.dev}:${identity.ino}`;
 }
-function releaseAccountingView({ key, ref }) {
+function stopAccountingWatch(view) {
+    view.watcher?.close();
+    view.watcher = undefined;
+    clearTimeout(view.timer);
+    view.timer = undefined;
+    view.dirty = false;
+}
+function releaseAccountingView(view) {
+    stopAccountingWatch(view);
+    const { key, ref } = view;
     const views = accountingViews.get(key);
     if (!views) return;
     views.delete(ref);
@@ -295,16 +306,20 @@ class SessionHeaderScanLimitError extends Error {
         this.name = "SessionHeaderScanLimitError";
     }
 }
-function parseSessionEntryLine(line) {
+function parseSessionEntryLine(line, onInvalidRecord) {
     if (!line.trim())
         return null;
-    try {
-        return JSON.parse(line);
-    }
+    let entry;
+    try { entry = JSON.parse(line); }
     catch {
-        // Skip malformed lines
+        onInvalidRecord?.();
         return null;
     }
+    if (onInvalidRecord && (typeof entry?.type !== "string" || (entry.type === "message" && typeof entry.message?.role !== "string"))) {
+        onInvalidRecord();
+        return null;
+    }
+    return entry;
 }
 class SessionReadBoundsError extends Error {
     constructor(code, message) {
@@ -315,9 +330,73 @@ class SessionReadBoundsError extends Error {
 function sessionReadChanged() {
     return new SessionReadBoundsError("SESSION_READ_CHANGED", "The transcript changed while opening or reading it.");
 }
+function sameSessionReadStat(current, expected) {
+    return matchesAccountingOwner(current, expected) && current.size === expected.size &&
+        current.mtimeNs === expected.mtimeNs && current.ctimeNs === expected.ctimeNs;
+}
 function verifySessionReadStat(current, expected) {
-    if (!current?.isFile() || current.dev !== expected.dev || current.ino !== expected.ino || current.size !== expected.size ||
-        current.mtimeNs !== expected.mtimeNs || current.ctimeNs !== expected.ctimeNs) throw sessionReadChanged();
+    if (!sameSessionReadStat(current, expected)) throw sessionReadChanged();
+}
+
+function createSessionLineReader(acceptLine) {
+    const decoder = new StringDecoder("utf8");
+    const parts = [];
+    return {
+        append(bytes) {
+            const chunk = decoder.write(bytes);
+            let from = 0;
+            for (let newline = chunk.indexOf("\n"); newline !== -1; newline = chunk.indexOf("\n", from)) {
+                const line = chunk.slice(from, newline);
+                if (parts.length) parts.push(line);
+                acceptLine(parts.length ? parts.join("") : line);
+                parts.length = 0;
+                from = newline + 1;
+            }
+            if (from < chunk.length) parts.push(chunk.slice(from));
+        },
+        finish() {
+            parts.push(decoder.end());
+            return parts.join("");
+        },
+    };
+}
+
+/** An unaccounted revision may replace bytes in the same inode. Recheck the
+ * complete disk order off the render path instead of assuming a prefix. */
+async function readAccountingLedger(filePath, sessionId, expected) {
+    if (expected.size > BigInt(MAX_ACCOUNTING_REPLAY_BYTES)) {
+        throw new SessionReadBoundsError("SESSION_READ_BYTE_LIMIT", "Live accounting replay exceeds its byte limit.");
+    }
+    const file = await open(filePath, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+        verifySessionReadStat(await file.stat({ bigint: true }), expected);
+        const end = Number(expected.size);
+        const buffer = Buffer.allocUnsafe(Math.min(SESSION_READ_BUFFER_SIZE, end));
+        const entries = [];
+        const invalidRecord = () => { throw new SessionReadBoundsError("SESSION_READ_INVALID_RECORD", "Incomplete live accounting record."); };
+        const reader = createSessionLineReader(line => {
+            const entry = parseSessionEntryLine(line, invalidRecord);
+            if (!entry) return;
+            if (entries.length >= MAX_ACCOUNTING_REPLAY_RECORDS) {
+                throw new SessionReadBoundsError("SESSION_READ_RECORD_LIMIT", "Live accounting replay exceeds its record limit.");
+            }
+            entries.push(entry);
+        });
+        for (let position = 0; position < end;) {
+            const { bytesRead } = await file.read(buffer, 0, Math.min(buffer.length, end - position), position);
+            if (bytesRead === 0) throw sessionReadChanged();
+            position += bytesRead;
+            reader.append(buffer.subarray(0, bytesRead));
+        }
+        verifySessionReadStat(await file.stat({ bigint: true }), expected);
+        verifySessionReadStat(await lstat(filePath, { bigint: true }), expected);
+        // Legitimate appends and migrated transcripts end in a newline. An
+        // incomplete append is never an accepted accounting boundary.
+        if (reader.finish() || !entries.length) invalidRecord();
+        if (entries[0].type !== "session" || entries[0].id !== sessionId) throw new AccountingOwnerChanged();
+        return entries;
+    }
+    finally { await file.close(); }
 }
 
 /** Load entries, optionally verifying and reading a bounded immutable snapshot. */
@@ -338,7 +417,7 @@ export function loadEntriesFromFile(filePath, options) {
             throw new Error("Bounded session reads require no-follow and non-blocking file opens.");
         }
         try {
-            return loadEntriesUnlocked(resolvedFilePath, false, bounds);
+            return loadEntriesUnlocked(resolvedFilePath, false, bounds, options.onInvalidRecord);
         }
         catch (error) {
             if (["ENOENT", "ENOTDIR", "ELOOP", "ENXIO"].includes(error?.code)) throw sessionReadChanged();
@@ -350,7 +429,7 @@ export function loadEntriesFromFile(filePath, options) {
     if (options?.readOnly) return loadEntriesUnlocked(resolvedFilePath, false);
     return withSessionWriteLock(resolvedFilePath, () => loadEntriesUnlocked(resolvedFilePath));
 }
-function loadEntriesUnlocked(resolvedFilePath, repair = true, bounds) {
+function loadEntriesUnlocked(resolvedFilePath, repair = true, bounds, onInvalidRecord) {
     const entries = [];
     let pending = "";
     const fd = openSync(resolvedFilePath, bounds ? constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK : "r");
@@ -358,40 +437,24 @@ function loadEntriesUnlocked(resolvedFilePath, repair = true, bounds) {
         if (bounds) verifySessionReadStat(fstatSync(fd, { bigint: true }), bounds.expected);
         const end = bounds ? Number(bounds.expected.size) : Infinity;
         let loaded = 0;
-        const decoder = new StringDecoder("utf8");
         const buffer = Buffer.allocUnsafe(Math.min(SESSION_READ_BUFFER_SIZE, end));
-        const lineParts = [];
         const acceptLine = line => {
-            const entry = parseSessionEntryLine(line);
+            const entry = parseSessionEntryLine(line, onInvalidRecord);
             if (!entry) return;
             if (bounds && entries.length >= bounds.maxRecords) {
                 throw new SessionReadBoundsError("SESSION_READ_RECORD_LIMIT", "The transcript exceeds the parsed record limit for this read.");
             }
             entries.push(entry);
         };
+        const reader = createSessionLineReader(acceptLine);
         while (loaded < end) {
             const bytesRead = readSync(fd, buffer, 0, Math.min(buffer.length, end - loaded), null);
             if (bytesRead === 0)
                 break;
             loaded += bytesRead;
-            const chunk = decoder.write(buffer.subarray(0, bytesRead));
-            let lineStart = 0;
-            let newlineIndex = chunk.indexOf("\n", lineStart);
-            while (newlineIndex !== -1) {
-                const line = chunk.slice(lineStart, newlineIndex);
-                if (lineParts.length) {
-                    lineParts.push(line);
-                    acceptLine(lineParts.join(""));
-                    lineParts.length = 0;
-                }
-                else acceptLine(line);
-                lineStart = newlineIndex + 1;
-                newlineIndex = chunk.indexOf("\n", lineStart);
-            }
-            if (lineStart < chunk.length) lineParts.push(chunk.slice(lineStart));
+            reader.append(buffer.subarray(0, bytesRead));
         }
-        lineParts.push(decoder.end());
-        pending = lineParts.join("");
+        pending = reader.finish();
         acceptLine(pending);
         if (bounds) {
             if (loaded !== end) throw sessionReadChanged();
@@ -688,6 +751,7 @@ export class SessionManager {
     persistenceError;
     fileEntries = [];
     entriesRevision = 0;
+    accountingRevision = 0;
     accountingView;
     externalAccountingListeners = new Set();
     byId = new Map();
@@ -723,7 +787,8 @@ export class SessionManager {
                 const identity = lstatSync(this.sessionFile, { bigint: true, throwIfNoEntry: false });
                 // Discovery's preload may be stale. Read, migrate, and initialize
                 // under one ownership interval so no accepted tail is overwritten.
-                const entries = loadEntriesUnlocked(this.sessionFile);
+                let incomplete = false;
+                const entries = loadEntriesUnlocked(this.sessionFile, true, undefined, () => { incomplete = true; });
                 // If file was empty, initialize it with a valid session header. If it was
                 // non-empty but did not parse as a pi session, fail without modifying it.
                 if (entries.length === 0) {
@@ -733,15 +798,15 @@ export class SessionManager {
                     }
                     this.newSession();
                     this.sessionFile = explicitPath;
-                    this._rewriteFileUnlocked();
+                    const written = this._rewriteFileUnlocked();
                     this.flushed = true;
+                    if (written && identity?.isFile()) this._trackWrittenAccountingView(written);
                     return;
                 }
                 this._loadEntries(entries, undefined, true);
                 this.flushed = true;
-                if (identity?.isFile() && matchesAccountingOwner(lstatSync(this.sessionFile, { bigint: true, throwIfNoEntry: false }), identity)) {
-                    this._trackAccountingView(identity);
-                }
+                if (identity?.isFile()) this._trackWrittenAccountingView(identity);
+                if (incomplete && this.accountingView) this._setAccountingIncomplete(this.accountingView);
             }
             else {
                 const explicitPath = this.sessionFile;
@@ -806,8 +871,19 @@ export class SessionManager {
         let views = accountingViews.get(key);
         if (!views) accountingViews.set(key, views = new Set());
         views.add(ref);
-        this.accountingView = { key, ref };
+        this.accountingView = { key, ref, identity, file: this.sessionFile, sessionId: this.sessionId,
+            revision: identity, retry: 0 };
         accountingViewFinalizer.register(this, this.accountingView, this);
+        this._watchAccountingView();
+    }
+    _trackWrittenAccountingView(previous) {
+        // A watch is optional. A failed post-commit observation cannot turn a
+        // successfully persisted session into a failed flush.
+        try {
+            const identity = lstatSync(this.sessionFile, { bigint: true, throwIfNoEntry: false });
+            if (identity?.isFile() && (!previous || matchesAccountingOwner(identity, previous))) this._trackAccountingView(identity);
+        }
+        catch { }
     }
     _releaseAccountingView() {
         if (!this.accountingView) return;
@@ -818,7 +894,122 @@ export class SessionManager {
     /** Observe durably committed receipts from another open view of this file. */
     subscribeExternalAccountingReceipts(listener) {
         this.externalAccountingListeners.add(listener);
-        return () => { this.externalAccountingListeners.delete(listener); };
+        this._watchAccountingView();
+        return () => {
+            this.externalAccountingListeners.delete(listener);
+            if (!this.externalAccountingListeners.size && this.accountingView) stopAccountingWatch(this.accountingView);
+        };
+    }
+    _watchAccountingView() {
+        const view = this.accountingView;
+        if (!view || view.watcher || !this.externalAccountingListeners.size) return;
+        const name = basename(view.file);
+        // The directory watch survives a file rename, so identity is checked
+        // before adoption and a replacement never inherits the old cursor.
+        try {
+            view.watcher = watch(dirname(view.file), { persistent: false }, (_event, changed) => {
+                if (!changed || changed === name || (view.retry && changed === `${name}.write-lock`)) {
+                    view.ref.deref()?._scheduleAccountingRefresh(view);
+                }
+            });
+            view.watcher.on("error", () => stopAccountingWatch(view));
+            this._scheduleAccountingRefresh(view);
+        }
+        catch { stopAccountingWatch(view); }
+    }
+    _scheduleAccountingRefresh(view, delay = 30) {
+        if (this.accountingView !== view || !view.watcher) return;
+        view.dirty = true;
+        if (view.timer || view.reading) return;
+        view.timer = setTimeout(() => {
+            view.timer = undefined;
+            void view.ref.deref()?._refreshAccountingView(view);
+        }, delay);
+        view.timer.unref();
+    }
+    _advanceAccountingView(entry, commit) {
+        const view = this.accountingView;
+        if (!view || !commit || !matchesAccountingOwner(commit.before, view.identity)) return;
+        if (commit.after && view.rejected && sameSessionReadStat(commit.before, view.rejected)) {
+            view.rejected = commit.after;
+            return;
+        }
+        // A known local append can advance only the exact observed generation.
+        // If an unknown revision precedes it, replay it in physical order.
+        if (!commit.after || !sameSessionReadStat(commit.before, view.revision)) {
+            this._scheduleAccountingRefresh(view);
+            return;
+        }
+        view.revision = commit.after;
+        if (view.entries) view.entries.push(entry);
+    }
+    async _refreshAccountingView(view) {
+        if (this.accountingView !== view || !view.watcher) return;
+        view.dirty = false;
+        view.reading = true;
+        let expected;
+        const start = view.revision;
+        try {
+            const observed = await lstat(view.file, { bigint: true, throwIfNoEntry: false });
+            if (this.accountingView !== view || !view.watcher) return;
+            if (!matchesAccountingOwner(observed, view.identity)) {
+                this._setAccountingIncomplete(view);
+                stopAccountingWatch(view);
+                return;
+            }
+            if (sameSessionReadStat(observed, view.revision) || (view.rejected && sameSessionReadStat(observed, view.rejected))) {
+                view.retry = 0;
+                return;
+            }
+            // Observe a completed commit, then verify the same revision on
+            // the opened descriptor without holding the lock through I/O.
+            expected = withSessionWriteLock(view.file, () => lstatSync(view.file, { bigint: true, throwIfNoEntry: false }), { wait: false });
+            if (!matchesAccountingOwner(expected, view.identity)) {
+                this._setAccountingIncomplete(view);
+                stopAccountingWatch(view);
+                return;
+            }
+            if (view.revision !== start || sameSessionReadStat(expected, start)) return;
+            const entries = await readAccountingLedger(view.file, view.sessionId, expected);
+            if (this.accountingView !== view || !view.watcher || view.revision !== start) return;
+            const current = lstatSync(view.file, { bigint: true, throwIfNoEntry: false });
+            verifySessionReadStat(current, expected);
+            view.entries = entries;
+            view.revision = expected;
+            view.rejected = undefined;
+            view.incomplete = false;
+            view.retry = 0;
+            this.accountingRevision++;
+            this._notifyExternalAccounting();
+        }
+        catch (error) {
+            if (this.accountingView !== view || !view.watcher) return;
+            if (error instanceof AccountingOwnerChanged) {
+                this._setAccountingIncomplete(view);
+                stopAccountingWatch(view);
+            } else if (["ESESSIONBUSY", "SESSION_READ_CHANGED"].includes(error?.code) && view.retry < 6) {
+                view.retry++;
+                view.dirty = true;
+            } else {
+                if (["SESSION_READ_BYTE_LIMIT", "SESSION_READ_RECORD_LIMIT", "SESSION_READ_INVALID_RECORD"].includes(error?.code)) view.rejected = expected;
+                this._setAccountingIncomplete(view);
+            }
+        }
+        finally {
+            view.reading = false;
+            if (view.dirty) this._scheduleAccountingRefresh(view, Math.min(500, 30 * 2 ** view.retry));
+        }
+    }
+    _setAccountingIncomplete(view) {
+        if (view.incomplete) return;
+        view.incomplete = true;
+        this.accountingRevision++;
+        this._notifyExternalAccounting();
+    }
+    _notifyExternalAccounting(entry) {
+        for (const listener of this.externalAccountingListeners) {
+            try { listener(entry); } catch { /* The receipt is already durable. */ }
+        }
     }
     _buildIndex() {
         this.byId.clear();
@@ -854,6 +1045,7 @@ export class SessionManager {
             for (const entry of this.fileEntries) {
                 writeFileSync(fd, `${JSON.stringify(entry)}\n`);
             }
+            try { return fstatSync(fd, { bigint: true }); } catch { return undefined; }
         }
         finally {
             closeSync(fd);
@@ -900,32 +1092,40 @@ export class SessionManager {
                     }
                 }
                 else fd = openSync(this.sessionFile, "a", 0o600);
-                let size, line;
+                let before, after, line, bytes;
                 try {
-                    if (accountingOwner && (!matchesAccountingOwner(fstatSync(fd, { bigint: true }), accountingOwner) ||
+                    before = fstatSync(fd, { bigint: true });
+                    if (accountingOwner && (!matchesAccountingOwner(before, accountingOwner) ||
                         readSessionHeaderFromFile(fd, this.sessionFile)?.id !== this.sessionId)) {
                         throw new AccountingOwnerChanged();
                     }
-                    size = fstatSync(fd).size;
                     line = `${JSON.stringify(entry)}\n`;
-                    writeFileSync(fd, line);
+                    bytes = Buffer.from(line);
+                    writeFileSync(fd, bytes);
                     if (durable) fsyncSync(fd);
                     if (accountingOwner) verifyOwner();
                 }
                 catch (error) {
                     // A failed/partial append is not an accepted history entry.
                     // Refuse further writes if restoring the prior tail also fails.
-                    try { if (size !== undefined) { ftruncateSync(fd, size); if (durable) fsyncSync(fd); } }
+                    try { if (before && line !== undefined) { ftruncateSync(fd, Number(before.size)); if (durable) fsyncSync(fd); } }
                     catch (rollback) { this.persistenceError = new Error(`Session persistence rollback failed: ${rollback.message}`, { cause: error }); }
                     throw this.persistenceError ?? error;
                 }
                 finally {
+                    if (bytes && (this.accountingView || accountingOwner)) {
+                        try {
+                            const written = fstatSync(fd, { bigint: true });
+                            if (written.size === before.size + BigInt(bytes.length)) after = written;
+                        }
+                        catch { /* Remain at the last observed revision. */ }
+                    }
                     // fsync, when requested, is the commit point. A later close
                     // error must not roll memory back and replay a committed receipt.
                     try { closeSync(fd); }
                     catch (error) { console.warn(`Session file close failed: ${error.message}`); }
                 }
-                return accountingOwner ? line : undefined;
+                return { before, after, line: accountingOwner ? line : undefined };
             });
         }
         const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
@@ -939,11 +1139,13 @@ export class SessionManager {
         if (this.persistenceError) throw this.persistenceError;
         return withSessionWriteLock(this.sessionFile, () => {
             const fd = openSync(this.sessionFile, "wx", 0o600);
+            let written;
             try {
                 for (const e of this.fileEntries) {
                     writeFileSync(fd, `${JSON.stringify(e)}\n`);
                 }
                 fsyncSync(fd);
+                try { written = fstatSync(fd, { bigint: true }); } catch { /* Only used to start watching. */ }
                 const directory = openSync(dirname(this.sessionFile), "r");
                 try { fsyncSync(directory); }
                 finally { try { closeSync(directory); } catch (error) { console.warn(`Session directory close failed: ${error.message}`); } }
@@ -960,6 +1162,7 @@ export class SessionManager {
                 catch (error) { console.warn(`Session file close failed: ${error.message}`); }
             }
             this.flushed = true;
+            if (written) this._trackWrittenAccountingView(written);
         });
     }
     _appendEntry(entry, durable = false, accountingOwner) {
@@ -967,8 +1170,8 @@ export class SessionManager {
         this.fileEntries.push(entry);
         this.byId.set(entry.id, entry);
         if (!isAccountingOnlySessionEntry(entry)) this.leafId = entry.id;
-        let committedLine;
-        try { committedLine = this._persist(entry, durable, accountingOwner); }
+        let commit;
+        try { commit = this._persist(entry, durable, accountingOwner); }
         catch (error) {
             this.fileEntries.pop();
             this.byId.delete(entry.id);
@@ -976,7 +1179,8 @@ export class SessionManager {
             throw error;
         }
         this.entriesRevision++;
-        return committedLine;
+        this._advanceAccountingView(entry, commit);
+        return commit;
     }
     /** Append a message as child of current leaf, then advance leaf. Returns entry id.
      * Does not allow writing CompactionSummaryMessage and BranchSummaryMessage directly.
@@ -1066,24 +1270,23 @@ export class SessionManager {
             type: "custom", customType, accountingOnly: true,
             id: accountingOwner ? randomUUID() : generateId(this.byId), parentId, timestamp: new Date().toISOString(), data,
         };
-        const committedLine = this._appendEntry(entry, true, accountingOwner);
-        if (committedLine) {
+        const commit = this._appendEntry(entry, true, accountingOwner);
+        if (commit?.line) {
             const views = accountingViews.get(accountingViewKey(this.sessionFile, this.sessionId, accountingOwner));
             const adopted = [];
             for (const ref of views ?? []) {
                 const view = ref.deref();
                 if (!view || view === this || view.sessionFile !== this.sessionFile || view.sessionId !== this.sessionId || view.byId.has(entry.id)) continue;
-                const recorded = JSON.parse(committedLine);
+                const recorded = JSON.parse(commit.line);
                 view.fileEntries.push(recorded);
                 view.byId.set(recorded.id, recorded);
                 view.entriesRevision++;
+                view._advanceAccountingView(recorded, commit);
                 adopted.push({ view, recorded });
             }
             // Stage the append in all views before notifying reentrant listeners.
             for (const { view, recorded } of adopted) {
-                for (const listener of view.externalAccountingListeners) {
-                    try { listener(recorded); } catch { /* The receipt is already durable. */ }
-                }
+                view._notifyExternalAccounting(recorded);
             }
         }
         return entry;
@@ -1258,6 +1461,19 @@ export class SessionManager {
         return this.fileEntries.filter(entry => entry.type !== "session" &&
             (!isRecoveredChildCost(entry) || entry.data.recoveredForSessionId === this.sessionId));
     }
+    /** Disk-ordered evidence for billing. This view never becomes agent context. */
+    getAccountingEntries() {
+        const entries = this.accountingView?.entries;
+        if (!entries) return this.getEntries();
+        return entries.filter(entry => entry.type !== "session" &&
+            (!isRecoveredChildCost(entry) || entry.data.recoveredForSessionId === this.sessionId));
+    }
+    getAccountingEntriesRevision() {
+        return this.entriesRevision + this.accountingRevision;
+    }
+    isAccountingIncomplete() {
+        return this.accountingView?.incomplete === true;
+    }
     /** Changes after an accepted append or ledger replacement, not a leaf move. */
     getEntriesRevision() {
         return this.entriesRevision;
@@ -1363,7 +1579,7 @@ export class SessionManager {
             }
         }
         // A filesystem-attested child correction belongs to its originating file.
-        return this.getEntries().filter(entry => isAccountingOnlySessionEntry(entry) && !isRecoveredChildCost(entry) &&
+        return this.getAccountingEntries().filter(entry => isAccountingOnlySessionEntry(entry) && !isRecoveredChildCost(entry) &&
             (branchIds.has(entry.parentId) || summaryIds.has(entry.data?.id)));
     }
     /**
@@ -1458,8 +1674,9 @@ export class SessionManager {
             // no-assistant guard later resets flushed to false.
             const hasAssistant = this.fileEntries.some((e) => e.type === "message" && e.message.role === "assistant");
             if (hasAssistant || accountingEntries.length > 0) {
-                this._rewriteFile();
+                const written = this._rewriteFile();
                 this.flushed = true;
+                if (written) this._trackWrittenAccountingView(written);
             }
             else {
                 this.flushed = false;

@@ -175,7 +175,7 @@ export function runBudgetNote(level: 1 | 2, minutes: number, usd: number | undef
 
 interface Run {
 	/** Session spend when the user's message arrived; 0 before anything was priced. */
-	startedUsd: number;
+	startedUsd: number | undefined;
 	limits: RunBudget;
 	activeMs: number;
 	lastEventAt: number;
@@ -192,6 +192,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 
 	let run: Run | undefined;
 	let runOwner: object | undefined;
+	let measured: { manager: object; revision: number; usd?: number } | undefined;
 	let lastRun: { minutes: number; usd?: number } | undefined;
 	/**
 	 * True while the last input was a human message that no run has started
@@ -205,7 +206,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 
 	const entriesOf = (ctx: any): any[] => {
 		try {
-			const entries = ctx?.sessionManager?.getEntries?.();
+			const entries = ctx?.sessionManager?.getAccountingEntries?.() ?? ctx?.sessionManager?.getEntries?.();
 			if (Array.isArray(entries)) return entries;
 			const branch = ctx?.sessionManager?.getBranch?.();
 			return Array.isArray(branch) ? branch : [];
@@ -214,17 +215,23 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		}
 	};
 	/** Measured session spend; undefined when the price or the plan makes it unknown. */
-	const sessionUsd = (entries: any[]): number | undefined => {
+	const sessionUsd = (ctx: any, entries?: any[]): number | undefined => {
 		try {
-			const cost = collectSessionCost(entries);
-			return cost.seen ? cost.total : undefined;
+			const manager = ctx?.sessionManager;
+			if (manager?.isAccountingIncomplete?.()) return undefined;
+			const revision = manager?.getAccountingEntriesRevision?.();
+			if (measured && measured.manager === manager && measured.revision === revision) return measured.usd;
+			const cost = collectSessionCost(entries ?? entriesOf(ctx));
+			const usd = cost.seen ? cost.total : undefined;
+			if (Number.isSafeInteger(revision)) measured = { manager, revision, usd };
+			return usd;
 		} catch {
 			return undefined;
 		}
 	};
 	const refreshUsd = (total: number | undefined): number | undefined => {
 		if (!run) return undefined;
-		run.usd = total === undefined ? undefined : Math.max(0, total - run.startedUsd);
+		run.usd = total === undefined || run.startedUsd === undefined ? undefined : Math.max(0, total - run.startedUsd);
 		return run.usd;
 	};
 	/** Count the time since the last event of this run; a longer gap is idle. */
@@ -242,7 +249,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		if (!run || ctx && ctx.sessionManager !== runOwner) return undefined;
 		if (ctx) {
 			touch();
-			refreshUsd(sessionUsd(entriesOf(ctx)));
+			refreshUsd(sessionUsd(ctx));
 		}
 		return { minutes: wholeMinutes(run.activeMs), usd: run.usd, limits: run.limits, budget: limitText(run.limits, " / ") };
 	};
@@ -251,6 +258,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	const reset = (): void => {
 		run = undefined;
 		runOwner = undefined;
+		measured = undefined;
 		lastRun = undefined;
 		pending = undefined;
 		hurrySent = false;
@@ -298,7 +306,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 			pending = undefined;
 			if (!input || input.signal?.aborted) return undefined;
 			const entries = entriesOf(ctx);
-			const spend = sessionUsd(entries);
+			const spend = sessionUsd(ctx, entries);
 			if (run) {
 				const lastSpend = refreshUsd(spend);
 				lastRun = { minutes: wholeMinutes(run.activeMs), ...(lastSpend === undefined ? {} : { usd: lastSpend }) };
@@ -306,7 +314,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 			let limits: RunBudget = DEFAULT_TEAM_CONFIG.run;
 			try { limits = loadTeamConfig(ctx?.cwd ?? process.cwd()).run; } catch { /* use defaults */ }
 			hurrySent = false;
-			run = { startedUsd: spend ?? 0, limits, activeMs: 0, lastEventAt: Date.now(), usd: undefined, noted: 0, resting: false };
+			run = { startedUsd: ctx?.sessionManager?.isAccountingIncomplete?.() ? undefined : spend ?? 0, limits, activeMs: 0, lastEventAt: Date.now(), usd: undefined, noted: 0, resting: false };
 			runOwner = ctx?.sessionManager;
 			const usage = typeof ctx?.getContextUsage === "function" ? ctx.getContextUsage() : undefined;
 			const window = Number(ctx?.model?.contextWindow);
@@ -341,7 +349,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	pi.on("turn_end", (_event: any, ctx: any) => {
 		try {
 			touch();
-			if (run) refreshUsd(sessionUsd(entriesOf(ctx)));
+			if (run) refreshUsd(sessionUsd(ctx));
 		} catch {
 			/* timing is advisory */
 		}
@@ -368,7 +376,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 			const activeMs = run.activeMs;
 			const minutes = wholeMinutes(run.activeMs);
 			const usd = limits.softUsd > 0 || activeMs >= limits.softMinutes * 60_000
-				? refreshUsd(sessionUsd(entriesOf(ctx)))
+				? refreshUsd(sessionUsd(ctx))
 				: run.usd;
 			const passed = (factor: number): boolean =>
 				(limits.softMinutes > 0 && activeMs >= limits.softMinutes * factor * 60_000) ||

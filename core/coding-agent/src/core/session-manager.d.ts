@@ -146,7 +146,7 @@ export interface SessionInfo {
     firstMessage: string;
     allMessagesText: string;
 }
-export type ReadonlySessionManager = Pick<SessionManager, "getCwd" | "getSessionDir" | "getSessionId" | "getSessionFile" | "getLeafId" | "getLeafEntry" | "getEntry" | "getLabel" | "getBranch" | "buildContextEntries" | "getHeader" | "getEntries" | "getTree" | "getSessionName"> & Partial<Pick<SessionManager, "getBranchAccountingEntries">>;
+export type ReadonlySessionManager = Pick<SessionManager, "getCwd" | "getSessionDir" | "getSessionId" | "getSessionFile" | "getLeafId" | "getLeafEntry" | "getEntry" | "getLabel" | "getBranch" | "buildContextEntries" | "getHeader" | "getEntries" | "getTree" | "getSessionName"> & Partial<Pick<SessionManager, "getBranchAccountingEntries" | "getAccountingEntries" | "getAccountingEntriesRevision" | "isAccountingIncomplete">>;
 export declare function assertValidSessionId(id: string): void;
 /** Exported for testing */
 export declare function migrateSessionEntries(entries: FileEntry[]): void;
@@ -184,6 +184,7 @@ export interface SessionReadBounds {
 export declare function loadEntriesFromFile(filePath: string, options?: { readOnly?: boolean; bounds?: never } | {
     readOnly: true;
     bounds: SessionReadBounds;
+    onInvalidRecord?: () => void;
 }): FileEntry[];
 /** Exported for testing */
 export declare function findMostRecentSession(sessionDir: string, cwd?: string): string | null;
@@ -229,7 +230,7 @@ export declare class SessionManager {
     usesDefaultSessionDir(): boolean;
     getSessionId(): string;
     getSessionFile(): string | undefined;
-    _persist(entry: SessionEntry, durable?: boolean, accountingOwner?: BigIntStats): void;
+    _persist(entry: SessionEntry, durable?: boolean, accountingOwner?: BigIntStats): { before: BigIntStats; after?: BigIntStats; line?: string } | undefined;
     /** Persist buffered history without waiting for the first assistant; no-op for in-memory sessions. */
     flush(): void;
     private _appendEntry;
@@ -251,7 +252,7 @@ export declare class SessionManager {
     appendSummaryUsageReceipt(data: unknown, parentId?: string | null): CustomEntry;
     /** Bind a durable accounting append to the exact current session and leaf. */
     bindAccountingReceipt(customType: SessionAccountingReceiptType): (data: unknown) => CustomEntry | undefined;
-    subscribeExternalAccountingReceipts(listener: (entry: CustomEntry) => void): () => void;
+    subscribeExternalAccountingReceipts(listener: (entry?: CustomEntry) => void): () => void;
     /** Append a session info entry (e.g., display name). Returns entry id. */
     appendSessionInfo(name: string): string;
     /** Get the current session name from the latest session_info entry, if any. */
@@ -311,6 +312,11 @@ export declare class SessionManager {
     getEntries(): SessionEntry[];
     /** Changes after an accepted append or ledger replacement, not a leaf move. */
     getEntriesRevision(): number;
+    /** Physical ledger order for billing, excluding the header and foreign recovered rows. */
+    getAccountingEntries(): SessionEntry[];
+    getAccountingEntriesRevision(): number;
+    /** The active file generation could not be safely replayed. */
+    isAccountingIncomplete(): boolean;
     /**
      * Get the session as a tree structure. Returns a shallow defensive copy of all entries.
      * A well-formed session has exactly one root (first entry with parentId === null).

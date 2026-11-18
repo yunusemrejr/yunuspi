@@ -77,6 +77,7 @@ test('media parameter precedence preserves explicit providers and independent lo
 test('quotes keep unknown billing unknown and include image variants and references', () => {
   assert.equal(quoteImageEndpoint({ pricing: [{ billable: 'output_image', unit: 'image', cost_usd: .02 }, { billable: 'output_image', unit: 'image', cost_usd: .04, variant: '4k' }, { billable: 'input_reference', unit: 'image', cost_usd: .01 }] }, 2), .06);
   assert.equal(quoteImageEndpoint({ pricing: [{ billable: 'output_image', unit: 'token', cost_usd: .00001 }] }), null);
+  assert.equal(quoteImageEndpoint({ pricing: [{ billable: 'output_image', unit: 'image', cost_usd: '  ' }] }), null);
   assert.ok(imageCapabilityIssues({ supported_parameters: { input_references: { min: 1, max: 2 } } }, { transparent: true }, 0).length >= 2);
   for (const value of [0, -1, NaN, Infinity, '2']) assert.throws(() => costLimit(value, 1), /maxCostUsd/);
 });

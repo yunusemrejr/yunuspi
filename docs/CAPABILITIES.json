@@ -2812,7 +2812,7 @@
       {
         "name": "commands",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1827
+        "line": 1834
       },
       {
         "name": "cost",
@@ -2832,7 +2832,7 @@
       {
         "name": "errors",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1791
+        "line": 1798
       },
       {
         "name": "export-json",
@@ -2987,7 +2987,7 @@
       {
         "name": "self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1715
+        "line": 1718
       },
       {
         "name": "subagent-cost",
@@ -3042,7 +3042,7 @@
       {
         "name": "sys-prompt",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1740
+        "line": 1743
       },
       {
         "name": "task-state",
@@ -3062,7 +3062,7 @@
       {
         "name": "used",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1759
+        "line": 1762
       },
       {
         "name": "websearch",
@@ -3142,7 +3142,7 @@
       {
         "name": "bash",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 645,
+        "line": 640,
         "kind": "sdk-factory",
         "evidence": "createBashToolDefinition() supplies the builtin bash definition"
       },
@@ -3367,7 +3367,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 693,
+        "line": 688,
         "kind": "literal"
       },
       {
@@ -3427,7 +3427,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1857,
+        "line": 1864,
         "kind": "literal"
       },
       {
@@ -3707,7 +3707,7 @@
       {
         "name": "process",
         "source": "agent/extensions/managed-bash.ts",
-        "line": 693,
+        "line": 688,
         "kind": "literal"
       },
       {
@@ -3767,7 +3767,7 @@
       {
         "name": "session_self",
         "source": "agent/extensions/session-signals.ts",
-        "line": 1857,
+        "line": 1864,
         "kind": "literal"
       },
       {
@@ -3880,7 +3880,7 @@
           "registration receives the SDK createBashToolDefinition() for the active cwd"
         ],
         "lines": [
-          648
+          643
         ],
         "knownNames": [
           "bash",
@@ -4036,7 +4036,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 663,
+      "sourceFiles": 664,
       "registrationSites": 60,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 77,
@@ -4439,6 +4439,10 @@
       },
       {
         "path": "agent/extensions/lib/goal-state.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/guard-readiness.ts",
         "exists": true
       },
       {

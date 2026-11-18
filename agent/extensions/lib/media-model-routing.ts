@@ -19,7 +19,11 @@ export function selectedMediaParams(params: any, kind: string, selections: any =
   return { ...params, model, mediaProvider: provider, ...(kind === 'image' && provider === 'openrouter' && params.transport === undefined ? { transport: 'images' } : {}), ...(kind === 'speech' ? { backend: 'elevenlabs' } : {}) };
 }
 
-const price = (value: unknown) => value !== null && value !== '' && (typeof value === 'number' || typeof value === 'string') && Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : null;
+function price(value: unknown) {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null;
+  const amount = Number(value);
+  return Number.isFinite(amount) && amount >= 0 ? amount : null;
+}
 export function costLimit(value: unknown, fallback: number) {
   const n = value === undefined ? fallback : typeof value === 'number' ? price(value) : null;
   if (n === null || n <= 0 || n > 500) throw Error('maxCostUsd must be a finite number greater than 0 and at most 500');

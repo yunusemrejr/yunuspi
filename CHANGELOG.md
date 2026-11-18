@@ -1,3 +1,12 @@
+## 0.56.31 — Session billing, memory retrieval and cost controls
+
+- Refresh live billing when another process appends a receipt. Use committed receipts for terminal and desktop totals, branch exports and run budgets. Mark damaged billing records as incomplete.
+- Start Managed Bash's command deadline after the sandbox reports mounted readiness, using the same parser as background jobs.
+- Load matching project-memory evidence once across agent roles. Apply search filters before limiting candidates, show excerpts around the match, and skip embedding and reranking when a literal identifier is already among the candidates.
+- Enforce local memory search byte limits and cite absolute byte offsets for partial files.
+- Honor the configured model and quoted endpoint for cost-limited image generation and editing.
+- Wait for the renderer to reach the requested viewport before checking desktop layout.
+
 ## 0.56.30 — Live billing after reopening a session
 
 - Refresh a reopened session in the same process when a pending request commits its billing receipt. Keep the existing transcript order and selected branch position while counting the receipt once.

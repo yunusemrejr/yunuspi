@@ -97,19 +97,20 @@ function readSnapshot(request, files, [manager, projection]) {
   const cwd = canonical(request.cwd);
   let selected, fallback;
   for (const file of files) {
-    const candidate = loadEntriesFromFile(file.path, { readOnly: true, bounds: {
+    let incomplete = false;
+    const candidate = loadEntriesFromFile(file.path, { readOnly: true, onInvalidRecord: () => { incomplete = true; }, bounds: {
       expected: file.stat, maxBytes: MAX_FILE_BYTES, maxRecords: MAX_RECORDS,
     } });
     if (candidate[0]?.type !== 'session' || candidate[0].id !== request.sessionId) {
       if (file.name.endsWith(`_${request.sessionId}.jsonl`) || file.name === `${request.sessionId}.jsonl`) throw Error('The transcript identity changed while opening it. Reopen the session to retry.');
       continue;
     }
-    const match = { entries: candidate, sessionFile: file.path };
+    const match = { entries: candidate, sessionFile: file.path, incomplete };
     if (files.length === 1 || typeof candidate[0].cwd === 'string' && canonical(candidate[0].cwd) === cwd) { selected = match; break; }
     // The dedicated folder and session ID retain ownership after a project moves.
     fallback ??= match;
   }
-  const { entries = [], sessionFile } = selected ?? fallback ?? {};
+  const { entries = [], sessionFile, incomplete } = selected ?? fallback ?? {};
   if (entries.some(entry => !entry || typeof entry !== 'object' || Array.isArray(entry))) throw Error('The transcript contains an invalid record. Its original file is retained.');
   // Migrate only in memory. Viewing a transcript never repairs or rewrites it.
   if (entries.length) migrateSessionEntries(entries);
@@ -133,16 +134,17 @@ function readSnapshot(request, files, [manager, projection]) {
   if (!request.statsOnly) snapshot.messages = desktopBranchMessages(branch);
   if (request.before === undefined) {
     snapshot.goal = desktopGoal(branch);
-    snapshot.accounting = { entries, sessionFile };
+    snapshot.accounting = { entries, sessionFile, incomplete };
   }
   return snapshot;
 }
 
 function updateSnapshotStats(snapshot, { collectSessionStats, recoverRetainedChildCosts }) {
   if (!snapshot.accounting) return;
-  const { entries, sessionFile } = snapshot.accounting;
+  const { entries, sessionFile, incomplete } = snapshot.accounting;
   const recovered = sessionFile ? recoverRetainedChildCosts(entries, { sessionFile }) : undefined;
   snapshot.stats = collectSessionStats(recovered?.entries.length ? [...entries, ...recovered.entries] : entries);
+  if (incomplete) Object.assign(snapshot.stats, { accountingIncomplete: true, costLabel: '$?' });
   // Keep the full accounting input only when a child can settle later without
   // changing the parent transcript. Pagination never reruns reconciliation.
   if (!recovered?.candidates) snapshot.accounting = undefined;

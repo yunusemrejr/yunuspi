@@ -31,6 +31,31 @@ test("blocks keep their section heading and split at list items", () => {
   assert.deepEqual(blocks.map(b => [b.heading, b.line, b.text]), [["Prefs", 3, "- one item here"], ["Prefs", 4, "- two item here"], ["Deploy", 8, "A paragraph that\nwraps lines."]]);
 });
 
+test("binary reads consume the file and byte budgets; tail hits cite their byte offsets", async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "memory-search-budget-"));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, "notes.md"), binary = path.join(dir, "binary.md");
+  const earlier = "Earlier searchable memory that exceeds the budget.\n\n";
+  const tail = "é fragment\r\n\r\nThe exact tail observation.\r\n";
+  fs.writeFileSync(binary, Buffer.alloc(17));
+  fs.writeFileSync(file, earlier + tail);
+  const files = [binary, file].map(file => ({ file, daily: false }));
+  const budget = { files: 2, bytes: 17 + Buffer.byteLength(tail) - 1, fileBytes: 1024 };
+  const result = await search.readMemoryBlocks(files, budget);
+  assert.equal(result.truncated, true);
+  assert.equal(result.files, 1);
+  assert.deepEqual(result.blocks.map(block => block.text), ["The exact tail observation."]);
+  const offset = Buffer.from(earlier + tail).indexOf("The exact tail");
+  assert.equal(result.blocks[0].byteOffset, offset);
+  assert.ok(search.formatHits(search.rankBlocks(result.blocks, "exact tail")).includes(`${file} (byte offset ${offset})`));
+  const binaryOnly = await search.readMemoryBlocks(files, { ...budget, files: 1 });
+  assert.deepEqual(binaryOnly.blocks, []);
+  assert.equal(binaryOnly.truncated, true);
+  const cappedFile = await search.readMemoryBlocks(files.slice(1), { ...budget, bytes: 1024, fileBytes: Buffer.byteLength(tail) });
+  assert.equal(cappedFile.truncated, true);
+  assert.equal(cappedFile.blocks.at(-1).byteOffset, offset);
+});
+
 test("BM25 ranks relevant blocks, tolerates typos and inflections, prefers recent logs", async () => {
   const { dir, paths } = fixture();
   try {

@@ -2678,6 +2678,9 @@ export class InteractiveMode {
                     this.ui.requestRender();
                 }
                 break;
+            case "accounting_updated":
+                this.ui.requestRender();
+                break;
             case "session_info_changed":
                 this.updateTerminalTitle();
                 this.footer.invalidate();
