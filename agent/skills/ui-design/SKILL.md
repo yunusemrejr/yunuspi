@@ -23,6 +23,8 @@ If the user's own words ask for one of the looks above, build exactly that. Thei
 
 For a filterable inventory, search results, or a confirmation step, open [Equipment checkout](examples/equipment-checkout.html). It combines labeled native filters, a responsive result list with an empty state, and a dialog with keyboard focus restoration. Adapt the component behavior to the existing design system. The page runs directly in a browser with sample data and no dependencies.
 
+For navigation, footer and call-to-action references, open [pattern galleries](references/patterns.md). For how real products write out a complete system of colour, type, spacing and radius, read the style systems at [Refero](https://styles.refero.design/).
+
 ## While building
 
 - **Real content only.** No invented numbers, logos, testimonials or status. A figure with no source is a labelled placeholder or it is not there.

@@ -1,0 +1,31 @@
+# Retro OS & themed CSS
+
+Whole operating-system aesthetics as stylesheets: Windows 98, XP, 7, System 6, 8-bit consoles, cyberpunk HUDs and terminals.
+
+25 libraries, from Uncommon Web (webdev.teknium.io, field guide vol. 1, October 2026). Versions are the ones shown there: check the current release before installing.
+
+- **98.css**: A CSS design system for faithful Windows 98 interfaces `npm i 98.css` · MIT v0.1.21 · [source](https://github.com/jdan/98.css) · [demo](https://webdev.teknium.io/d/retro/demos/win98-desktop/)
+- **XP.css**: A CSS framework for Windows XP Luna-style interfaces `npm i xp.css` · MIT v0.2.6 · [source](https://github.com/botoxparty/XP.css) · [demo](https://webdev.teknium.io/d/retro/demos/winxp-luna/)
+- **7.css**: A CSS framework for Windows 7 Aero interfaces `npm i 7.css` · MIT v0.21.1 · [source](https://github.com/khang-nd/7.css) · [demo](https://webdev.teknium.io/d/retro/demos/win7-aero/)
+- **system.css**: A design system for retro Apple System 6 interfaces `npm i @sakun/system.css` · MIT v0.1.11 · [source](https://github.com/sakofchit/system.css) · [demo](https://webdev.teknium.io/d/retro/demos/mac-system6/)
+- **NES.css**: An NES-style 8-bit CSS framework `npm i nes.css` · MIT v2.3.0 · [source](https://github.com/nostalgic-css/NES.css) · [demo](https://webdev.teknium.io/d/retro/demos/nes-8bit/)
+- **Webamp**: Winamp 2.9 reimplemented in HTML5 and JavaScript `npm i webamp` · MIT v2.3.1 · [source](https://github.com/captbaritone/webamp) · [demo](https://webdev.teknium.io/d/retro/demos/webamp-winamp/)
+- **augmented-ui**: Cyberpunk clipped-corner borders from a data attribute `npm i augmented-ui` · BSD-2-Clause v2.0.0 · [source](https://github.com/propjockey/augmented-ui) · [demo](https://webdev.teknium.io/d/retro/demos/augmented-hud/)
+- **WebTUI**: Modular CSS library that brings terminal UIs to the browser `npm i @webtui/css` · MIT v0.1.10 · [source](https://github.com/webtui/webtui) · [demo](https://webdev.teknium.io/d/retro/demos/webtui-terminal/)
+- **cursor-effects**: Old-school 90s cursor trail effects in modern JavaScript `npm i cursor-effects` · MIT v1.0.18 · [source](https://github.com/tholman/cursor-effects) · [demo](https://webdev.teknium.io/d/retro/demos/cursor-trails/)
+- **JS Paint**: A pixel-faithful MS Paint remake, as a static web app `git clone https://github.com/1j01/jspaint (static app, serve the folder)` · MIT vgit 53be67ab (v1.1.0) · [source](https://github.com/1j01/jspaint) · [demo](https://webdev.teknium.io/d/retro2/demos/jspaint-autopaint/)
+- **OS-GUI**: Retro Windows 98 windows, menus and scrollbars for the web `npm i os-gui jquery` · MIT v0.7.3 · [source](https://github.com/1j01/os-gui) · [demo](https://webdev.teknium.io/d/retro2/demos/os-gui-theme-forge/)
+- **WinBox**: A fast, dependency-free HTML5 window manager `npm i winbox` · Apache-2.0 v0.2.82 · [source](https://github.com/nextapps-de/winbox) · [demo](https://webdev.teknium.io/d/retro2/demos/winbox-tiling-desk/)
+- **React95**: Windows 95 UI components for React, with 20+ themes `npm i react95 styled-components` · MIT v4.0.0 · [source](https://github.com/react95-io/React95) · [demo](https://webdev.teknium.io/d/retro2/demos/react95-control-panel/)
+- **TuiCss**: Text-mode DOS / Turbo Vision interfaces in plain CSS `npm i tuicss` · MIT v2.1.2 · [source](https://github.com/vinibiavatti1/TuiCss) · [demo](https://webdev.teknium.io/d/retro2/demos/tuicss-commander/)
+- **oneko**: The classic Neko pixel cat that chases your pointer `npm i oneko` · MIT (sprite art credited in SKIN-CREDITS.md) v0.4.1 · [source](https://github.com/0xdhrv/oneko) · [demo](https://webdev.teknium.io/d/retro2/demos/oneko-cat-parade/)
+- **Classic Stylesheets**: Five classic desktop themes and 205 skins for plain HTML `npm i classic-stylesheets` · MIT v2.1.3 · [source](https://github.com/nielssp/classic-stylesheets) · [demo](https://webdev.teknium.io/d/retro3/demos/classic-stylesheets-theme-switcher/)
+- **Aqua**: Mac OS X–era Aqua rebuilt as a shadcn/ui component registry `npx shadcn@latest add https://aqua.duca.dev/r/theme.json https://aqua.duca.dev/r/button.json https://aqua.duca.dev/r/dock.json` · MIT vregistry (git d729261) · [source](https://github.com/igorfelipeduca/aqua) · [demo](https://webdev.teknium.io/d/retro3/demos/aqua-pinstripe-desktop/)
+- **PSone.css**: 32-bit console BIOS and JRPG menu styles in plain CSS `npm i github:micah5/PSone.css` · MIT vgit c0c3025 · [source](https://github.com/micah5/PSone.css) · [demo](https://webdev.teknium.io/d/retro3/demos/psone-memory-card/)
+- **TheSims.css**: Design system after the 2000 life-sim's blue bevel UI `npm i thesims.css` · MIT v0.1.2 · [source](https://github.com/inbn/TheSims.css) · [demo](https://webdev.teknium.io/d/retro3/demos/thesims-needs-panel/)
+- **YoRHa CSS**: Classless CSS in a sepia android-terminal interface language `npm i yorha` · MIT v1.2.0 · [source](https://github.com/metakirby5/yorha) · [demo](https://webdev.teknium.io/d/retro3/demos/yorha-unit-terminal/)
+- **Frutiger.js**: Frutiger Aero design system: glossy glass, bubbles, sky-and-grass gradients `npm i @frutiger.js/core @frutiger.js/react` · MIT v1.13.0 · [source](https://github.com/biagio-scaglia/frutiger-js) · [demo](https://webdev.teknium.io/d/retro3/demos/frutiger-aero-welcome/)
+- **A E S T H E T I C**: Vaporwave CSS framework: Win95 windows, neon gradients, CRT and glitch `npm i aesthetic-css` · MIT v1.0.1 · [source](https://github.com/torch2424/aesthetic-css) · [demo](https://webdev.teknium.io/d/retro3/demos/aesthetic-css-vaporwave-desk/)
+- **BOOTSTRA.386**: Bootstrap theme that renders every component as DOS text mode `git clone https://github.com/kristopolous/BOOTSTRA.386` · Apache-2.0 vgit 5a42e54 (v5.3.1) · [source](https://github.com/kristopolous/BOOTSTRA.386) · [demo](https://webdev.teknium.io/d/retro3/demos/bootstra386-bbs/)
+- **3GS UI**: React components in the iPhone OS 3 glossy gel style `npm i @3gs/ui` · MIT v0.1.1 · [source](https://github.com/TimonBozzApps/design-system-3gs) · [demo](https://webdev.teknium.io/d/retro3/demos/3gs-ui-settings/)
+- **Retrostrap**: Build like it's 2026, look like it's 1999: a Web 1.0 framework `npm i retrostrap` · MIT v0.1.1 · [source](https://github.com/retrostrap/retrostrap) · [demo](https://webdev.teknium.io/d/retro3/demos/retrostrap-geocities-home/)

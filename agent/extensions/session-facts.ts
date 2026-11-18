@@ -28,6 +28,10 @@ import { resolveTimeZone } from "./lib/session-signals.ts";
 import { goalUserWords } from "./lib/goal-state.ts";
 import { goalAssignment } from "./lib/presets.ts";
 import { catalogSkills, matchingGuides, type CatalogSkill } from "./lib/skill-review.ts";
+import { askJev } from "./lib/jev-client.ts";
+import { askTypedDecision, EXAMPLE_SCALE_DESCRIPTIONS, type ExampleScale } from "./lib/micro-intelligence/jev-decisions.ts";
+import type { JudgeFn } from "./lib/micro-intelligence/review.ts";
+import { uiPromptCue } from "./lib/ui-doctrine.ts";
 
 const RUN_STATE = Symbol.for("yunus-pi.run.v1");
 const CUSTOM_TYPE = "session-facts";
@@ -115,6 +119,8 @@ export interface SessionFactsInput {
 	lastRun?: { minutes: number; usd?: number };
 	/** Installed guides that match the request; the line is left out when there are none. */
 	guides?: readonly CatalogSkill[];
+	/** The picked example libraries for visual work, as one complete sentence. */
+	examples?: string;
 }
 
 /** `name: description clipped at a word (file)`, as the facts line lists a guide. */
@@ -140,7 +146,8 @@ export function sessionFactsText(input: SessionFactsInput): string {
 	const guides = input.guides?.length
 		? `\nGuides that match this request (read the ones that bear on it before choosing the approach): ${input.guides.map(guideText).join("; ")}`
 		: "";
-	return line + guides;
+	const examples = input.examples ? `\n${input.examples}` : "";
+	return line + guides + examples;
 }
 
 /**
@@ -155,6 +162,168 @@ function matchingGuidesFor(event: any): CatalogSkill[] {
 		return matchingGuides(catalogSkills(event), words === undefined ? prompt : goalAssignment(words));
 	} catch {
 		return [];
+	}
+}
+
+/** The example pick may take this long; a slow judge falls back to the static pick. */
+export const DESIGN_EXAMPLES_TIMEOUT_MS = 3_500;
+const MAX_EXAMPLE_CANDIDATES = 12;
+/** The static pick for a clearly visual request when the judge abstains or fails. */
+const STATIC_EXAMPLE_IDS = ["scrolltide:landing-pages", "scrolltide:heroes", "refero"];
+
+export interface ExampleCandidate {
+	/** Short id the judge chooses among. */
+	id: string;
+	/** Where to read it: an installed reference file or a public URL. */
+	path: string;
+	/** What it offers, for the judge's choice. */
+	about: string;
+}
+
+const SCROLLTIDE_REFERENCES: ReadonlyArray<readonly [string, string]> = [
+	["landing-pages", "whole pages told on the scrollbar"],
+	["heroes", "first screens people remember"],
+	["3d-websites", "pages built around a 3D scene"],
+	["components", "buttons, cards, loaders, navigation and text with a physical idea"],
+	["sections", "features, pricing, contact, call to action and footer sections"],
+	["shaders", "moving gradient, aurora, metal, halftone and fluid backgrounds"],
+	["ui-screens", "dashboard, finance and commerce app screens"],
+];
+
+/** Uncommon Web families, with the words that make each one relevant. */
+const UNCOMMON_REFERENCES: ReadonlyArray<readonly [string, string, string]> = [
+	["dither-pixel-ascii", "1-bit screens, halftone, newsprint, CRT and live ASCII", "dither ascii 1-bit pixel crt halftone newsprint screen"],
+	["text-mode-braille-graphics", "characters as pictures: braille, glyph maps, terminal UI", "braille terminal text characters glyph banner"],
+	["paper-shaders-in-depth", "shader fills, filters and borders for product UI", "paper shader filter border card"],
+	["typography-text", "text split, scrambled, annotated, hand-written or set like print", "type typography text headline font letter heading"],
+	["shaders-webgl-3d", "GPU backdrops: globes, fluid, gradients with depth", "shader webgl gpu 3d globe fluid gradient background hero"],
+	["materials-3d-splats", "refracting glass, soft surfaces and 3D scenes", "glass surface material splat 3d product"],
+	["visual-effects-generative-art", "glitch, generative patterns and low-poly fields", "glitch generative pattern effect visual noise"],
+	["audio-visual-feedback", "music visualisers and feedback loops", "audio music visualiser sound feedback"],
+	["generative-art-plotters", "ink landscapes, plotter lines, pigment and procedural plants", "ink landscape plotter pigment plant drawing art"],
+	["data-maps-graphs-as-art", "data as the picture: flight arcs, graphs, projections", "map graph chart data projection flight network"],
+	["hand-drawn-sketchy", "wobbly, sketched shapes, charts and whiteboards", "sketch hand-drawn wobbly whiteboard drawing"],
+	["retro-os-themed-css", "a whole operating-system look as a stylesheet", "retro operating system os window desktop 90s"],
+	["css-only-stylesheets", "CSS paint worklets, patterns, foil and typographic stylesheets", "css pattern foil stylesheet paint"],
+	["motion-physics-interaction", "springs, timelines, layout transitions and smooth scroll", "motion animation spring transition scroll interaction"],
+	["scroll-pages-transitions", "page curls, folds, zooming and scrollytelling", "scroll scrollytelling page transition curl fold zoom"],
+	["physics-simulation", "water, cloth and rigid bodies that behave like matter", "physics water cloth rigid body simulation"],
+	["tactile-odd-widgets", "split-flap boards, knobs, counters and brushes", "widget split-flap knob counter brush interactive control"],
+	["react-component-registries", "copy-in React components and the usual primitives", "react component registry ui"],
+	["react-bits-in-depth", "animated React components installed as editable source", "react animated component motion"],
+	["opinionated-component-kits", "component kits with an identity: 8-bit, neo-brutalist, with sound", "component kit 8-bit brutalist sound"],
+	["creative-coding-sound", "sketchbooks, live-coded visuals and tiny engines", "creative coding live sketch engine"],
+	["music-synths-notation", "synths, trackers, sheet music and tabs", "music synth tracker sheet tabs"],
+	["games-consoles-emulators", "small game engines, fantasy consoles and emulators", "game console emulator engine"],
+];
+
+/** Up to three Uncommon Web families whose own vocabulary appears in the request. */
+export function uncommonReferencesFor(prompt: string): string[] {
+	const words = new Set(String(prompt ?? "").toLowerCase().match(/[a-z0-9]+/g) ?? []);
+	return UNCOMMON_REFERENCES
+		.map(([id, , terms]) => ({ id, hits: terms.split(" ").filter((term) => words.has(term)).length }))
+		.filter((entry) => entry.hits > 0)
+		.sort((a, b) => b.hits - a.hits)
+		.slice(0, 3)
+		.map((entry) => entry.id);
+}
+
+/** The installed skill's directory, with a trailing slash, from the prompt catalogue. */
+function skillReferenceRoot(event: any, name: string): string | undefined {
+	const skill = catalogSkills(event).find((entry) => entry.name === name);
+	if (!skill) return undefined;
+	const file = String(skill.file).replaceAll("\\", "/");
+	const slash = file.lastIndexOf("/");
+	return slash >= 0 ? file.slice(0, slash + 1) : undefined;
+}
+
+/** The example index for this request: the scrolltide files, the relevant Uncommon Web families, the galleries and Refero. */
+export function exampleCandidates(event: any, prompt: string): ExampleCandidate[] {
+	const candidates: ExampleCandidate[] = [];
+	const scrolltide = skillReferenceRoot(event, "scrolltide");
+	if (scrolltide) {
+		for (const [id, about] of SCROLLTIDE_REFERENCES) {
+			candidates.push({ id: `scrolltide:${id}`, path: `${scrolltide}references/${id}.md`, about });
+		}
+	}
+	const uncommon = skillReferenceRoot(event, "uncommon-web");
+	if (uncommon) {
+		for (const id of uncommonReferencesFor(prompt)) {
+			const about = UNCOMMON_REFERENCES.find((entry) => entry[0] === id)?.[1] ?? id;
+			candidates.push({ id: `uncommon:${id}`, path: `${uncommon}references/${id}.md`, about });
+		}
+	}
+	const design = skillReferenceRoot(event, "ui-design");
+	if (design) {
+		candidates.push({ id: "ui-design:galleries", path: `${design}references/patterns.md`, about: "navigation bar, footer and call-to-action galleries" });
+	}
+	candidates.push({ id: "refero", path: "https://styles.refero.design/", about: "written style systems of real products" });
+	return candidates.slice(0, MAX_EXAMPLE_CANDIDATES);
+}
+
+/**
+ * One line naming the example libraries to open. The judge picks the best one
+ * and an optional second; a failure, timeout or abstention falls back to
+ * landing pages, heroes and Refero. The line is advisory and never blocks the
+ * turn beyond its 3.5 s deadline.
+ */
+export async function pickExampleLine(
+	candidates: readonly ExampleCandidate[],
+	request: string,
+	judge: JudgeFn | undefined,
+	signal?: AbortSignal,
+): Promise<string | undefined> {
+	if (!candidates.length) return undefined;
+	const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+	const judged = await askTypedDecision(
+		"design-examples",
+		{
+			state: {
+				request: request.slice(0, 1500),
+				examples: candidates.map((candidate) => `${candidate.id} = ${candidate.about}`).join("; "),
+			},
+			candidates: candidates.map((candidate) => candidate.id),
+		},
+		{ judge, signal },
+	);
+	const picked: string[] = [];
+	let scale: ExampleScale | undefined;
+	if (judged.ok) {
+		const best = typeof judged.verdict?.best === "string" ? judged.verdict.best : "";
+		const second = typeof judged.verdict?.second === "string" ? judged.verdict.second : "";
+		const judgedScale = judged.verdict?.scale;
+		if (typeof judgedScale === "string" && Object.hasOwn(EXAMPLE_SCALE_DESCRIPTIONS, judgedScale)) scale = judgedScale as ExampleScale;
+		if (best) picked.push(best);
+		if (second && second !== best) picked.push(second);
+	}
+	let ids = picked.filter((id) => byId.has(id)).slice(0, 2);
+	if (!ids.length) ids = STATIC_EXAMPLE_IDS.filter((id) => byId.has(id));
+	if (!ids.length) return undefined;
+	const paths = ids.map((id) => byId.get(id)!.path);
+	const tail = scale === "keep-design"
+		? "Keep the existing design; use the examples only for the detail being fixed."
+		: "Open several, take the parts that fit, adapt them to this project, iterate on screenshots.";
+	let line = `Examples for this request: ${paths.join(", ")}. ${tail}`;
+	if (scale) line += ` Change scale the request implies: ${scale} (${EXAMPLE_SCALE_DESCRIPTIONS[scale]}); the logo stays unless asked, and colors and layout stay unless the scale or the user says otherwise.`;
+	return line;
+}
+
+/**
+ * The example line for a message that reads as visual work, and nothing for
+ * any other message. Clear visual vocabulary needs no judge to enter; the
+ * judge only picks among the installed examples.
+ */
+export async function designExamplesLineFor(event: any, judge: JudgeFn | undefined): Promise<string | undefined> {
+	const prompt = typeof event?.prompt === "string" ? event.prompt : "";
+	if (uiPromptCue(prompt).strength !== "strong") return undefined;
+	const candidates = exampleCandidates(event, prompt);
+	if (!candidates.length) return undefined;
+	const deadline = AbortSignal.timeout(DESIGN_EXAMPLES_TIMEOUT_MS);
+	const signal = event?.signal ? AbortSignal.any([event.signal, deadline]) : deadline;
+	try {
+		return await pickExampleLine(candidates, prompt, judge, signal);
+	} catch {
+		return undefined;
 	}
 }
 
@@ -298,7 +467,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		return undefined;
 	});
 
-	pi.on("before_agent_start", (event: any, ctx: any) => {
+	pi.on("before_agent_start", async (event: any, ctx: any) => {
 		try {
 			touch();
 			if (run) run.resting = false;
@@ -329,6 +498,8 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 			} catch {
 				/* no usable cache data: the figure stays out */
 			}
+			const examples = await designExamplesLineFor(event, (site, state, questions, options) =>
+				askJev(site, state, questions, { pi, signal: options?.signal, timeoutMs: DESIGN_EXAMPLES_TIMEOUT_MS }));
 			const content = sessionFactsText({
 				now: new Date(),
 				zone: resolveTimeZone().zone,
@@ -337,6 +508,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 				cachePercent,
 				lastRun,
 				guides: matchingGuidesFor(event),
+				examples,
 			});
 			const hurry = hurryRequested(event?.prompt) ? `\n${HURRY_NOTE}` : "";
 			if (hurry) hurrySent = true;

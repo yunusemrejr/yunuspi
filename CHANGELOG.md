@@ -1,3 +1,10 @@
+## 0.56.32 — Example libraries and the scale of a visual change
+
+- Ship the scrolltide and uncommon-web guides with their reference files, the navigation, footer and call-to-action galleries under ui-design, and a link to Refero's written style systems. The guide index points visual work at both libraries.
+- A message that clearly asks for visual work gets one stored facts line naming the example files to open. A typed decision picks the best one and an optional second from the installed index within 3.5 seconds, falls back to landing pages, heroes and Refero on a timeout or failure, and makes no call for other messages.
+- The same decision reports the change scale the request implies (keep-design, polish, improve, redesign or fresh-build) when it reaches a majority. Keep-design keeps the existing design and uses the examples only for the fixed detail.
+- Working notes ask for the taste to be read before visual choices, carry the example libraries and their limits, and add rules for token-free testing, unrequested backups, delegated work, prompt leakage and style words.
+
 ## 0.56.31 — Session billing, memory retrieval and cost controls
 
 - Refresh live billing when another process appends a receipt. Use committed receipts for terminal and desktop totals, branch exports and run budgets. Mark damaged billing records as incomplete.

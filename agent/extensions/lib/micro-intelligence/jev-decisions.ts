@@ -23,6 +23,7 @@ export type TypedDecisionId =
   | "review-aspects"
   | "memory-admission"
   | "delegation-topology"
+  | "design-examples"
   | "recovery-strategy"
   | "verification-method"
   | "evidence-relevance"
@@ -56,6 +57,8 @@ export interface TypedVerdict {
 const NOUL_HIGH = 0.8;
 const NOUL_LOW = 0.2;
 const CHOICE_MIN = 0.35;
+/** A runner-up example joins the pick only with real weight behind it. */
+const SECOND_PICK_MIN = 0.2;
 
 const noul = (instructions: string) => ({ type: "noul", instructions });
 const choice = (instructions: string, candidates: string[]) => ({
@@ -93,6 +96,17 @@ export const TOPOLOGY_CHOICES = ["single", "fanout"] as const;
 export const RECOVERY_CHOICES = ["retry-same", "switch-route", "cooldown-wait", "escalate"] as const;
 export const VERIFY_CHOICES = ["tests", "review", "render", "probe", "deploy-verify"] as const;
 export const REVIEW_ASPECT_IDS = ["correctness", "security", "interface", "content", "runtime", "delivery"] as const;
+export const EXAMPLE_SCALE_CHOICES = ["keep-design", "polish", "improve", "redesign", "fresh-build"] as const;
+export type ExampleScale = (typeof EXAMPLE_SCALE_CHOICES)[number];
+export const EXAMPLE_SCALE_DESCRIPTIONS: Record<ExampleScale, string> = {
+  "keep-design": "a small fix inside an existing design",
+  polish: "spacing, type, contrast and states; layout and palette stay",
+  improve: "visible gains; structure recognizable; colors may change",
+  redesign: "layout and flow may change",
+  "fresh-build": "new, no existing design",
+};
+/** A scale enters the facts line only as a majority, never as a coin flip. */
+const EXAMPLE_SCALE_MIN = 0.5;
 
 const NOUL_PAIR = (yes: string, no: string) => ({
   acceptHigh: (score: number): TypedVerdict => ({ ok: true, verdict: { supported: true, label: yes }, confidence: score }),
@@ -277,6 +291,45 @@ export const TYPED_DECISIONS: Record<TypedDecisionId, DecisionSpec> = {
     interpret: (answers, ctx) => {
       const candidates = (ctx.candidates ?? []).slice(0, 12);
       return acceptChoice(answers.best, candidates, "best");
+    },
+  },
+  "design-examples": {
+    site: "design-examples",
+    owner: "visual-work guidance owns example exploration; Jev only picks from the installed example index",
+    maxStateChars: 3000,
+    questions: (ctx) => {
+      const candidates = (ctx.candidates ?? []).filter((name) => typeof name === "string" && name && name.length <= 80).slice(0, 12);
+      if (candidates.length < 2) return { reject: "trivial" };
+      return {
+        best: choice("Which installed example library or reference file best matches the content, medium and motion this visual request needs? Judge the examples named in state, not a shared word.", candidates),
+        scale: {
+          type: "choice",
+          instructions: "How much visual change does this request ask for or imply? A fix or polish is surgical; sleek, modern, superior, awesome or amazing licenses a bold change. Judge the user's words and the existing design, not the requested subject.",
+          criteria: Object.fromEntries(EXAMPLE_SCALE_CHOICES.map((id) => [id, EXAMPLE_SCALE_DESCRIPTIONS[id]])),
+        },
+      };
+    },
+    interpret: (answers, ctx) => {
+      const candidates = (ctx.candidates ?? []).filter((name) => typeof name === "string" && name && name.length <= 80).slice(0, 12);
+      const read = readJevChoice(answers.best, candidates);
+      if (!read || read.probability < CHOICE_MIN || !(read.margin > 0)) {
+        return { ok: false, reason: "low-confidence", ...(read ? { probabilities: read.probabilities, margin: read.margin } : {}) };
+      }
+      // The runner-up is a real alternative only when the distribution gives it weight.
+      const second = candidates
+        .filter((name) => name !== read.choice)
+        .map((name) => ({ name, probability: read.probabilities?.[name] ?? 0 }))
+        .sort((a, b) => b.probability - a.probability)[0];
+      const scaleRead = readJevChoice(answers.scale, EXAMPLE_SCALE_CHOICES);
+      const scale = scaleRead && scaleRead.probability >= EXAMPLE_SCALE_MIN ? scaleRead.choice : undefined;
+      return {
+        ok: true,
+        verdict: { best: read.choice, ...(second && second.probability >= SECOND_PICK_MIN ? { second: second.name } : {}), ...(scale ? { scale } : {}) },
+        confidence: read.probability,
+        probabilities: read.probabilities,
+        margin: read.margin,
+        ...(read.modelConfidence !== undefined ? { modelConfidence: read.modelConfidence } : {}),
+      };
     },
   },
   "ui-work": {

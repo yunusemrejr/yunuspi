@@ -6,6 +6,9 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { SessionManager, sessionEntryToContextMessages } from '../core/coding-agent/dist/core/session-manager.js';
 
+// No test here may reach the decision model over the network.
+process.env.PI_JEV = 'off';
+
 const root = path.resolve(import.meta.dirname, '..');
 const extensionUrl = pathToFileURL(path.join(root, 'agent/extensions/session-facts.ts')).href;
 const { default: registerSessionFacts, hurryRequested, HURRY_NOTE } = await import(extensionUrl);

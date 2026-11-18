@@ -1685,7 +1685,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 29 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 31 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `3d-cad` — [`agent/skills/3d-cad/SKILL.md`](../agent/skills/3d-cad/SKILL.md)
 - `anatomy` — [`agent/skills/anatomy/SKILL.md`](../agent/skills/anatomy/SKILL.md)
@@ -1711,10 +1711,12 @@ The exporter includes 29 public skill directories. This list is a path inventory
 - `painterly-canvas` — [`agent/skills/painterly-canvas/SKILL.md`](../agent/skills/painterly-canvas/SKILL.md)
 - `research` — [`agent/skills/research/SKILL.md`](../agent/skills/research/SKILL.md)
 - `research-writing` — [`agent/skills/research-writing/SKILL.md`](../agent/skills/research-writing/SKILL.md)
+- `scrolltide` — [`agent/skills/scrolltide/SKILL.md`](../agent/skills/scrolltide/SKILL.md)
 - `signature-experience` — [`agent/skills/signature-experience/SKILL.md`](../agent/skills/signature-experience/SKILL.md)
 - `svg-images` — [`agent/skills/svg-images/SKILL.md`](../agent/skills/svg-images/SKILL.md)
 - `systems-languages` — [`agent/skills/systems-languages/SKILL.md`](../agent/skills/systems-languages/SKILL.md)
 - `ui-design` — [`agent/skills/ui-design/SKILL.md`](../agent/skills/ui-design/SKILL.md)
+- `uncommon-web` — [`agent/skills/uncommon-web/SKILL.md`](../agent/skills/uncommon-web/SKILL.md)
 - `web-motion` — [`agent/skills/web-motion/SKILL.md`](../agent/skills/web-motion/SKILL.md)
 
 ## Migration test fixtures

@@ -6628,6 +6628,10 @@
         "path": "agent/skills/research-writing/SKILL.md"
       },
       {
+        "name": "scrolltide",
+        "path": "agent/skills/scrolltide/SKILL.md"
+      },
+      {
         "name": "signature-experience",
         "path": "agent/skills/signature-experience/SKILL.md"
       },
@@ -6642,6 +6646,10 @@
       {
         "name": "ui-design",
         "path": "agent/skills/ui-design/SKILL.md"
+      },
+      {
+        "name": "uncommon-web",
+        "path": "agent/skills/uncommon-web/SKILL.md"
       },
       {
         "name": "web-motion",

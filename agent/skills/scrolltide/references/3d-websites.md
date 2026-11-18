@@ -1,0 +1,23 @@
+# 3D Website
+
+20 examples from Scrolltide, each in the site's own words (cut short). The preview films are on https://www.scrolltide.co/templates; each entry links to its page.
+- **Oeuvre**: A night-gallery art marketplace whose hero fans a hand of artwork cards into a 3D arc, then folds and cascades … [look](https://www.scrolltide.co/templates/oeuvre)
+- **MOLT**: An outerwear store whose hero is a person cast in see-through glass, refracting a chrome wordmark and an LED floor … [look](https://www.scrolltide.co/templates/molt)
+- **The Long Light**: A real 3D book on a sunlit linen table: open it and drag pages that curl with gravity and air … [look](https://www.scrolltide.co/templates/the-long-light)
+- **Ephyra**: An immersive studio site built as a dive: hold to burst a glass egg and release a fully procedural jellyfish … [look](https://www.scrolltide.co/templates/ephyra)
+- **Synapse**: A violet field of ambient intelligence with a live session assembling itself mid-frame — built for products that answer before … [look](https://www.scrolltide.co/templates/synapse)
+- **Fabrica**: A hand-drawn anatomy atlas where nine organs are sculpted in code and turned on a plinth — pins to read … [look](https://www.scrolltide.co/templates/fabrica)
+- **ARÊTE**: A summit-weather page printed on a live-simulated ripstop banner — scroll climbs the day from first light to night, the … [look](https://www.scrolltide.co/templates/arete)
+- **Vesper**: A real bottle held dead centre of an oxblood frame while the whole page travels past it — scroll poses … [look](https://www.scrolltide.co/templates/vesper)
+- **Gummy Grove**: A physics playground of glossy jelly fruits on a studio floor — drag one and it wobbles, slice it with … [look](https://www.scrolltide.co/templates/gummy-grove)
+- **AeroForce**: Two scroll mechanics at once: a ten-second aerial plate decoded to 240 stills and scrubbed on a canvas, with one … [look](https://www.scrolltide.co/templates/aeroforce)
+- **Apogee**: One continuous shot of the Earth from orbit, where scroll moves the camera through four solved framings and swings the … [look](https://www.scrolltide.co/templates/apogee)
+- **Camera**: An exploded-view camera drifts apart in cold studio light, every lens and shutter plate suspended mid-thought — a hero for … [look](https://www.scrolltide.co/templates/camera)
+- **Bottle**: Acid-green display type the size of the frame with a bottle turning slowly through the letters — a product hero … [look](https://www.scrolltide.co/templates/bottle)
+- **Astera**: Loose stars drift and settle until the spiral resolves into one constellation — for brands whose whole pitch is turning … [look](https://www.scrolltide.co/templates/astera)
+- **Abyssal**: Bioluminescent drift falls through water that has never seen daylight, a depth counter ticking past two hundred metres — built … [look](https://www.scrolltide.co/templates/abyssal)
+- **Meristem**: A wireframe leaf draws itself vein by vein in the gap between ROOT and REACH — a hero for studios … [look](https://www.scrolltide.co/templates/meristem)
+- **Billet**: A machined titanium card turning above black water, lit by an eclipse on the horizon — the surface reads the … [look](https://www.scrolltide.co/templates/billet)
+- **Noctis**: Ribbons of graded light drifting behind a Didone headline, for a colour product that has to prove it can grade … [look](https://www.scrolltide.co/templates/noctis)
+- **Halide**: Ninety thousand grains of light bloom into a single anemone of green and violet and hold there, breathing — a … [look](https://www.scrolltide.co/templates/halide)
+- **Hourglass**: Molten gold sand suspends itself into an hourglass, grain by grain, in a frame that never quite lets it fall … [look](https://www.scrolltide.co/templates/hourglass)

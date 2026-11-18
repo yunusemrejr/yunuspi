@@ -1,0 +1,21 @@
+# Materials, 3D & splats
+
+Glass that refracts, surfaces that wobble, gaussian-splat captures and sequenced 3D scenes. The libraries behind the shiny product pages.
+
+15 libraries, from Uncommon Web (webdev.teknium.io, field guide vol. 1, October 2026). Versions are the ones shown there: check the current release before installing.
+
+- **drei materials**: Ready-made R3F helpers, including physically based glass and distortion materials `npm i @react-three/drei @react-three/fiber three` · MIT v10.7.9 · [source](https://github.com/pmndrs/drei) · [demo](https://webdev.teknium.io/d/scene/demos/drei-transmission-glass/)
+- **Spark**: World Labs' gaussian splat renderer for three.js `npm i @sparkjsdev/spark three` · MIT v2.4.0 · [source](https://github.com/sparkjsdev/spark) · [demo](https://webdev.teknium.io/d/scene/demos/spark-gaussian-splat/)
+- **<model-viewer>**: Google's web component for interactive glTF product models `npm i @google/model-viewer` · Apache-2.0 v4.4.0 · [source](https://github.com/google/model-viewer) · [demo](https://webdev.teknium.io/d/scene/demos/model-viewer-sheen-chair/)
+- **react-three-rapier**: Rapier's Rust/WASM physics engine as React Three Fiber components `npm i @react-three/rapier @react-three/fiber three` · MIT (Rapier engine: Apache-2.0) v2.2.0 · [source](https://github.com/pmndrs/react-three-rapier) · [demo](https://webdev.teknium.io/d/scene/demos/rapier-candy-physics/)
+- **three.js WebGPU + TSL**: three.js shading language: node materials written in JavaScript `npm i three` · MIT v0.186.1 · [source](https://github.com/mrdoob/three.js) · [demo](https://webdev.teknium.io/d/scene/demos/three-tsl-node-material/)
+- **Theatre.js**: Motion-design keyframe sequencer for the web and three.js `npm i @theatre/core` · Apache-2.0 v0.7.2 · [source](https://github.com/theatre-js/theatre) · [demo](https://webdev.teknium.io/d/scene/demos/theatre-camera-sequence/)
+- **CustomShaderMaterial**: Extend three.js built-in materials with your own shader code `npm i three-custom-shader-material three` · MIT v6.4.0 · [source](https://github.com/FarazzShaikh/THREE-CustomShaderMaterial) · [demo](https://webdev.teknium.io/d/scene/demos/custom-shader-material-blob/)
+- **Neat**: Animated 3D WebGL mesh gradients from a single config object `npm i @firecms/neat` · MIT + Commons Clause v1.1.0 · [source](https://github.com/FireCMSco/neat) · [demo](https://webdev.teknium.io/d/scene2/demos/neat-gradient-presets/)
+- **Takram three-geospatial**: Physically based sky, aerial perspective and volumetric clouds for three.js `npm i @takram/three-atmosphere @takram/three-clouds @takram/three-geospatial postprocessing three` · MIT v0.19.1 · [source](https://github.com/takram-design-engineering/three-geospatial) · [demo](https://webdev.teknium.io/d/scene2/demos/takram-atmosphere-sky/)
+- **TSL Textures**: Fifty-plus procedural three.js textures written in TSL node code `npm i tsl-textures three` · MIT v3.0.5 · [source](https://github.com/boytchev/tsl-textures) · [demo](https://webdev.teknium.io/d/scene2/demos/tsl-textures-swatch-wall/)
+- **PlayCanvas Web Components**: PlayCanvas 3D scenes as custom HTML elements `npm i @playcanvas/web-components playcanvas` · MIT v0.28.0 · [source](https://github.com/playcanvas/web-components) · [demo](https://webdev.teknium.io/d/scene2/demos/playcanvas-html-splats/)
+- **Threlte**: Declarative three.js scenes written as Svelte components `npm i @threlte/core @threlte/extras three` · MIT v@threlte/core 8.6.1 · @threlte/extras 9.22.3 · [source](https://github.com/threlte/threlte) · [demo](https://webdev.teknium.io/d/scene2/demos/threlte-crystal-garden/)
+- **TresJS**: Declarative three.js scenes written as Vue components `npm i @tresjs/core @tresjs/cientos three` · MIT v5.10.0 · [source](https://github.com/Tresjs/tres) · [demo](https://webdev.teknium.io/d/scene2/demos/tresjs-wobble-blobs/)
+- **svader**: GPU-rendered Svelte components from GLSL or WGSL fragment shaders `npm i -D svader` · MIT v1.0.0 · [source](https://github.com/sockmaster27/svader) · [demo](https://webdev.teknium.io/d/scene2/demos/svader-shader-tiles/)
+- **EZ-Tree**: Procedural three.js tree generator with presets and wind sway `npm i @dgreenheck/ez-tree three` · MIT v1.1.0 · [source](https://github.com/dgreenheck/ez-tree) · [demo](https://webdev.teknium.io/d/scene2/demos/ez-tree-grove/)

@@ -1,0 +1,25 @@
+# Generative art & plotters
+
+Ink landscapes, voxel sculptures as SVG, pen-plotter renderers, pigment mixing and procedural botany. Code that makes pictures.
+
+19 libraries, from Uncommon Web (webdev.teknium.io, field guide vol. 1, October 2026). Versions are the ones shown there: check the current release before installing.
+
+- **gpu-io**: GPGPU toolkit for WebGL physics and simulations `npm i gpu-io` · MIT v0.2.7 · [source](https://github.com/amandaghassaei/gpu-io) · [demo](https://webdev.teknium.io/d/gen2/demos/gpu-io-physarum/)
+- **three-plotter-renderer**: three.js SVG renderer with hidden-line removal and hatching `npm i three-plotter-renderer three` · MIT v1.1.1 · [source](https://github.com/neurofuzzy/three-plotter-renderer) · [demo](https://webdev.teknium.io/d/gen2/demos/three-plotter-hatched-scene/)
+- **Heerich**: Tiny engine for voxel scenes rendered as crisp SVG `npm i heerich` · MIT v0.16.0 · [source](https://github.com/meodai/heerich) · [demo](https://webdev.teknium.io/d/gen2/demos/heerich-voxel-sculpture/)
+- **Leon Sans**: A geometric sans typeface made entirely of code `download dist/leon.js from github.com/cmiscm/leonsans` · MIT v1.6.5 (f8c03c9) · [source](https://github.com/cmiscm/leonsans) · [demo](https://webdev.teknium.io/d/gen2/demos/leonsans-kinetic-type/)
+- **bouffont**: Generative puffy lettering grown from any font, as SVG `npm i bouffont` · MIT v0.1.0 · [source](https://github.com/meodai/bouffont) · [demo](https://webdev.teknium.io/d/gen2/demos/bouffont-puffy-lettering/)
+- **Heptapod Ink**: Arrival-style circular ink logograms from text, and back again `npm i heptapod-ink` · MIT v0.1.3 · [source](https://tangled.org/did:plc:h7e4sqbb5nq5nnsbgib7csll) · [demo](https://webdev.teknium.io/d/gen2/demos/heptapod-ink-logograms/)
+- **Two.js**: Renderer-agnostic 2D drawing API for SVG, Canvas and WebGL `npm i two.js` · MIT v0.8.24 · [source](https://github.com/jonobr1/two.js) · [demo](https://webdev.teknium.io/d/gen2/demos/twojs-bauhaus-poster/)
+- **canvas-sketch**: Matt DesLauriers' framework for print-sized generative art `npm i canvas-sketch canvas-sketch-util` · MIT v0.7.8 · [source](https://github.com/mattdesl/canvas-sketch) · [demo](https://webdev.teknium.io/d/gen2/demos/canvas-sketch-flow-print/)
+- **@thi.ng/geom-fuzz**: Fuzzy, hand-drawn lines and polygons with composable hatch fills `npm i @thi.ng/geom-fuzz @thi.ng/geom @thi.ng/hiccup-canvas` · Apache-2.0 v3.0.118 · [source](https://codeberg.org/thi.ng/umbrella) · [demo](https://webdev.teknium.io/d/gen2/demos/geom-fuzz-isometric-sketch/)
+- **svg2roughjs**: Converts any existing SVG into a hand-drawn Rough.js sketch `npm i svg2roughjs` · MIT v3.2.3 · [source](https://github.com/fskpf/svg2roughjs) · [demo](https://webdev.teknium.io/d/gen2/demos/svg2roughjs-sketchy-chart/)
+- **Shan Shui (shan-shui-inf)**: Procedural Chinese ink landscapes, generated forever as SVG `git clone https://github.com/LingDong-/shan-shui-inf (not on npm; vendor the inline scripts)` · MIT v9f754d2 · [source](https://github.com/LingDong-/shan-shui-inf) · [demo](https://webdev.teknium.io/d/gen3/demos/shan-shui-infinite-handscroll/)
+- **Penrose**: Type math notation, get a diagram laid out by optimization `npm i @penrose/core` · MIT v3.3.1 · [source](https://github.com/penrose/penrose) · [demo](https://webdev.teknium.io/d/gen3/demos/penrose-euler-sets/)
+- **MarkovJunior Web**: TypeScript port of the MarkovJunior probabilistic rewrite-rule language `git clone https://github.com/Yuu6883/MarkovJuniorWeb && cp -r MarkovJuniorWeb/src vendor/markovjunior-web/` · MIT va0491d5 (GitHub HEAD) · [source](https://github.com/Yuu6883/MarkovJuniorWeb) · [demo](https://webdev.teknium.io/d/gen3/demos/markovjunior-rewrite-worlds/)
+- **Krbn**: Pencil-style 3-D to SVG renderer with exact silhouettes `git clone https://github.com/vpalos/Krbn (not on npm)` · MIT v09d96d3 · [source](https://github.com/vpalos/Krbn) · [demo](https://webdev.teknium.io/d/gen3/demos/krbn-graphite-orbit/)
+- **Spectral.js**: Kubelka-Munk pigment mixing for the web `npm i spectral.js` · MIT v3.0.0 · [source](https://github.com/rvanwijnen/spectral.js) · [demo](https://webdev.teknium.io/d/gen3/demos/spectral-wet-paint/)
+- **p5.grain**: Film grain, paper textures and pixel tinkering for p5.js sketches `npm i p5.grain p5` · MIT v0.8.0 · [source](https://github.com/josephmiclaus/p5.grain) · [demo](https://webdev.teknium.io/d/gen3/demos/p5-grain-riso-print/)
+- **Poline**: Palettes interpolated between anchor colours along polar HSL paths `npm i poline` · MIT v0.13.1 · [source](https://github.com/meodai/poline) · [demo](https://webdev.teknium.io/d/gen3/demos/poline-polar-palette/)
+- **Sketchy Plants**: Procedural house plants drawn as SVG in fineliner and watercolour `npm i @orta/sketchy-plants` · MIT v0.1.3 · [source](https://github.com/orta/plants) · [demo](https://webdev.teknium.io/d/gen3/demos/sketchy-plants-shelf/)
+- **hairline**: Thirty-three isometric line figures that answer the pointer `npm i @lucasmarkes/hairline` · MIT v0.5.1 · [source](https://github.com/lucasmarkes/hairline) · [demo](https://webdev.teknium.io/d/gen3/demos/hairline-specimen-sheet/)

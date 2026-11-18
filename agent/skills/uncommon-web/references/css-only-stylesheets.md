@@ -1,0 +1,21 @@
+# CSS-only & stylesheets
+
+Effects that are just CSS: Houdini paint worklets, pattern fills, holographic foils, single-light-source shading, typographic stylesheets. No JavaScript required, mostly.
+
+15 libraries, from Uncommon Web (webdev.teknium.io, field guide vol. 1, October 2026). Versions are the ones shown there: check the current release before installing.
+
+- **LCARS CSS**: Pure-CSS framework for sci-fi elbow-and-pill control panels `curl -LO https://raw.githubusercontent.com/joernweissenborn/lcars/2885f10/lcars/css/lcars.css` · MIT vgit 2885f10 · [source](https://github.com/joernweissenborn/lcars) · [demo](https://webdev.teknium.io/d/css2/demos/lcars-ops-console/)
+- **Arwes**: Futuristic sci-fi UI framework for React: frames, text, bleeps `npm i @arwes/react` · MIT v1.0.0-next.25020502 · [source](https://github.com/arwes/arwes) · [demo](https://webdev.teknium.io/d/css2/demos/arwes-hud-console/)
+- **cyberpunk-css**: Pure-CSS neon dystopia kit: clipped buttons, tiles, glitches, razors `curl -O https://raw.githubusercontent.com/alddesign/cyberpunk-css/main/cyberpunk.css` · MIT vgit c6a77b4 · [source](https://github.com/alddesign/cyberpunk-css) · [demo](https://webdev.teknium.io/d/css2/demos/cyberpunk-css-netrunner/)
+- **CYBERCORE CSS**: Pure-CSS neon cyan/magenta HUD design system with 153 icons `npm i cybercore-css` · MIT v0.3.0 · [source](https://github.com/sebyx07/cybercore-css) · [demo](https://webdev.teknium.io/d/css2/demos/cybercore-css-hud/)
+- **Frontpanel**: Early-2000s hardware skin in plain CSS: chrome, gel, LCD, LEDs `npm i @frontpanel/css` · MIT v0.2.0 · [source](https://github.com/DulanDev/frontpanel) · [demo](https://webdev.teknium.io/d/css2/demos/frontpanel-minidisc-deck/)
+- **PaperCSS**: The less formal CSS framework: wobbly, hand-drawn components `npm i papercss` · ISC v1.9.2 · [source](https://github.com/papercss/papercss) · [demo](https://webdev.teknium.io/d/css2/demos/papercss-sketchbook/)
+- **Doodle CSS**: A hand-drawn HTML/CSS theme built from doodled SVG borders `npm i doodle.css` · MIT v0.0.2 · [source](https://github.com/chr15m/DoodleCSS) · [demo](https://webdev.teknium.io/d/css2/demos/doodle-css-scribble/)
+- **React Pixel UI**: Wrap any React element to render its CSS as pixel art `npm i @react-pixel-ui/react` · MIT v2.2.1 · [source](https://github.com/Todari/react-pixel-ui) · [demo](https://webdev.teknium.io/d/css2/demos/react-pixel-ui-forge/)
+- **CSS Houdini Ring Particles**: Paint worklet drawing animated rings of particles as a CSS background `npm i css-houdini-ringparticles` · MIT v1.1.0 · [source](https://github.com/bramus/css-houdini-ringparticles) · [demo](https://webdev.teknium.io/d/css3/demos/houdini-ring-particles/)
+- **Houdini Doom Fire**: The PSX Doom fire algorithm as a CSS Paint Worklet `npm i houdini-doom-fire houdini-sunset` · Apache-2.0 v0.1.0 · [demo](https://webdev.teknium.io/d/css3/demos/houdini-doom-fire-sunset/)
+- **CSS Houdini Voronoi**: A CSS Paint Worklet that draws seeded Voronoi diagrams `npm i css-houdini-voronoi css-houdini-circles` · MIT v1.1.5 · [source](https://github.com/bramus/css-houdini-voronoi) · [demo](https://webdev.teknium.io/d/css3/demos/houdini-voronoi-microscope/)
+- **CSS Houdini Fractals**: Paint worklet that draws recursive fractal trees as a CSS background `npm i css-houdini-fractals` · CC0-1.0 v1.1.0 · [source](https://github.com/ConradSollitt/css-houdini-fractals) · [demo](https://webdev.teknium.io/d/css3/demos/houdini-fractal-trees/)
+- **Houdini Cosmic Starfield**: CSS Paint worklet painting a seeded starfield with nebula clouds `npm i houdini-cosmic-starfield` · ISC (declared in package.json) v0.1.1 · [source](https://github.com/5t3ph/houdini-cosmic-starfield) · [demo](https://webdev.teknium.io/d/css3/demos/houdini-cosmic-starfield/)
+- **Houdini Tesla & Noise**: Jhey Tompkins' CSS Paint worklets for electric arcs and pixel noise `npm i houdini-tesla houdini-noise` · MIT (declared in README) v0.0.2 · [source](https://github.com/jh3y/houdini-tesla) · [demo](https://webdev.teknium.io/d/css3/demos/houdini-tesla-noise/)
+- **Extra.css**: Una Kravets' Houdini paint worklets for confetti, sparkles and scribbles `npm i extra.css` · ISC (declared in package.json) v1.2.0 · [source](https://github.com/una/extra.css) · [demo](https://webdev.teknium.io/d/css3/demos/extra-css-party-invite/)
