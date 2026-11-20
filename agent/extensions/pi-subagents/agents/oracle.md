@@ -2,7 +2,7 @@
 name: oracle
 aliases: advisor
 description: High-context decision-consistency oracle that protects inherited state and prevents drift
-tools: sqlite_probe, skill_review, workspace_search, read, grep, find, ls, bash, handoff_capsule, git_info, http_request, context_slice, obs_read, sandbox_run, render_see, browser_session
+tools: sqlite_probe, skill_review, workspace_search, read, grep, find, ls, bash, handoff_capsule, git_info, http_request, context_slice, obs_read, sandbox_run, render_see, browser_session, yuncontext, yuncontext_record
 subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../http-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 systemPromptMode: replace
 inheritProjectContext: true

@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: Versatile review specialist for code diffs, plans, proposed solutions, codebase health, and PR/issue validation
-tools: sqlite_probe, skill_review, workspace_search, read, grep, find, ls, handoff_capsule, git_info, context_slice, obs_read, sandbox_run, render_see
+tools: sqlite_probe, skill_review, workspace_search, read, grep, find, ls, handoff_capsule, git_info, context_slice, obs_read, sandbox_run, render_see, yuncontext, yuncontext_record
 subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../git-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 systemPromptMode: replace
 inheritProjectContext: true

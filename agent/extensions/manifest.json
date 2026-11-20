@@ -43,7 +43,8 @@
     "goal.ts",
     "adaptive-workflows.ts",
     "blender-studio.ts",
-    "session-facts.ts"
+    "session-facts.ts",
+    "yuncontext.ts"
   ],
   "lib": [
     "activity-indicators.ts",

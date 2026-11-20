@@ -6,7 +6,7 @@ subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../media-
 systemPromptMode: replace
 inheritProjectContext: true
 inheritSkills: false
-tools: sqlite_probe, skill_review, workspace_search, media_info, video_frames, audio_analyze, music_compose, read, grep, find, ls, bash, edit, write, contact_supervisor, handoff_capsule, git_info, http_request, context_slice, obs_read, sandbox_run, render_see, browser_session
+tools: sqlite_probe, skill_review, workspace_search, media_info, video_frames, audio_analyze, music_compose, read, grep, find, ls, bash, edit, write, contact_supervisor, handoff_capsule, git_info, http_request, context_slice, obs_read, sandbox_run, render_see, browser_session, yuncontext, yuncontext_record
 defaultContext: fork
 defaultReads: context.md, plan.md
 defaultProgress: true

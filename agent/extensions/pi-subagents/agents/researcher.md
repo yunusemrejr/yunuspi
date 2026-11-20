@@ -1,7 +1,7 @@
 ---
 name: researcher
 description: Autonomous web researcher — searches, evaluates, and synthesizes a focused research brief
-tools: sqlite_probe, skill_review, workspace_search, read, write, web_search, fetch_content, get_search_content, handoff_capsule, http_request, context_slice, obs_read, sandbox_run, render_see, browser_session, web_research
+tools: sqlite_probe, skill_review, workspace_search, read, write, web_search, fetch_content, get_search_content, handoff_capsule, http_request, context_slice, obs_read, sandbox_run, render_see, browser_session, web_research, yuncontext, yuncontext_record
 subagentOnlyExtensions: ../../utility-tools.ts, ../../reminders.ts, ../../agent-context-tools.ts, ../../pi-observations.ts, ../../http-tools.ts, ../../project-intelligence.ts, ../../sandbox.ts, ../../render-and-wait.ts
 systemPromptMode: replace
 inheritProjectContext: true
