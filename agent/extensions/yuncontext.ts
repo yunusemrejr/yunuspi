@@ -59,14 +59,32 @@ async function callYuncontext(name: string, args: Record<string, unknown>, signa
   return { content: [{ type: "text", text }], isError: reply.result.isError === true };
 }
 
+// One constant line at the end of the system prompt (stable, so the prompt cache keeps it); it names the
+// tool and when to use it, and carries no history itself.
+const NUDGE =
+  "Project memory: call yuncontext (no q) before answering about this project's past or starting work in it; " +
+  "it holds what earlier sessions of every harness did here.";
+
 export default function registerYuncontext(pi: any) {
+  pi.on?.("before_agent_start", (event: any) => {
+    const prompt = String(event?.systemPrompt ?? "");
+    if (prompt.includes(NUDGE)) return;
+    return { systemPrompt: `${prompt}\n${NUDGE}` };
+  });
   pi.registerTool({
     name: "yuncontext",
     label: "Yuncontext",
     description:
-      "Past work in this project from all agent harnesses on this machine. No q: project brief (use at " +
-      "task start). q: exact error text, path, symbol or task words (use on any error or before non-trivial " +
-      "work). ref: details of one result. Returns ≤3 dated, sourced clues or nothing; the current request wins.",
+      "What past sessions of every agent harness on this machine did in this project: changes, fixes that " +
+      "worked, errors, owner corrections. Call it first when you start work in a project or are asked " +
+      "about its past (no q: brief), and with q = exact error, path, symbol or task words on any error or " +
+      "before non-trivial work. ref: one result in detail. Returns ≤3 dated, sourced clues or nothing; " +
+      "the current request wins.",
+    promptSnippet: "What past sessions of every harness did in this project",
+    promptGuidelines: [
+      "Call yuncontext (no q) first when you start work in a project or are asked about its past, and with q = the exact error, path or task words when something fails.",
+      "After a verified fix, a found cause or an owner correction, call yuncontext_record (supersedes = the outdated ref).",
+    ],
     parameters: Type.Object({
       cwd: Type.Optional(Type.String({ description: "Absolute path of your current working directory. Defaults to this session's." })),
       q: Type.Optional(Type.String({ maxLength: 2000 })),

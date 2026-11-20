@@ -99,6 +99,9 @@ export function restoredToolNames(entries: any[], allowed: Set<string>): Set<str
 const GOAL_KICKOFF = '[goal-tracked ';
 export const CORE_TOOLS = new Set([
   'read','read_many','bash','edit','write','grep','find','ls','tool_search',
+  // Project memory is read at the start of work and written after a verified fix, in every
+  // session; a tool the model must first discover is a tool it does not call.
+  'yuncontext','yuncontext_record',
   'session_self','subagent','bg_wait','quality_review','skill_review',
   // Registered only when the user set team.advisor; then it is meant to be asked, not discovered.
   'ask_advisor',
@@ -115,6 +118,7 @@ export const CORE_TOOLS = new Set([
  * All other capabilities remain discoverable under the same host ceiling. */
 export const DIRECT_CORE_TOOLS = new Set([
   'read','read_many','bash','edit','write','grep','find','ls','tool_search',
+  'yuncontext','yuncontext_record',
   // Planning is an established prompt dependency even for short tasks. Hiding
   // it caused a guaranteed failed first call before discovery could recover.
   'todo','quality_review','project_tests','checkpoint_read','skill_review',

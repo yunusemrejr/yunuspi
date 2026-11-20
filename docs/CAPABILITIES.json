@@ -3506,7 +3506,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 555,
+        "line": 559,
         "kind": "literal"
       },
       {
@@ -3579,13 +3579,13 @@
       {
         "name": "yuncontext",
         "source": "agent/extensions/yuncontext.ts",
-        "line": 63,
+        "line": 74,
         "kind": "literal"
       },
       {
         "name": "yuncontext_record",
         "source": "agent/extensions/yuncontext.ts",
-        "line": 80,
+        "line": 98,
         "kind": "literal"
       }
     ],
@@ -3815,7 +3815,7 @@
       {
         "name": "tool_search",
         "source": "agent/extensions/lib/tool-discovery.ts",
-        "line": 555,
+        "line": 559,
         "kind": "literal"
       },
       {
@@ -3833,13 +3833,13 @@
       {
         "name": "yuncontext",
         "source": "agent/extensions/yuncontext.ts",
-        "line": 63,
+        "line": 74,
         "kind": "literal"
       },
       {
         "name": "yuncontext_record",
         "source": "agent/extensions/yuncontext.ts",
-        "line": 80,
+        "line": 98,
         "kind": "literal"
       }
     ],

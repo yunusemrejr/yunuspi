@@ -1149,7 +1149,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `task_pipeline` — [`agent/extensions/lib/adaptive-workflows-impl.ts`](../agent/extensions/lib/adaptive-workflows-impl.ts) (line 550; literal)
 - `task_state` — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 156; literal)
 - `todo` — [`agent/extensions/rpiv-todo/tool/types.ts`](../agent/extensions/rpiv-todo/tool/types.ts) (line 12; constant)
-- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 555; literal)
+- `tool_search` — [`agent/extensions/lib/tool-discovery.ts`](../agent/extensions/lib/tool-discovery.ts) (line 559; literal)
 - `ui_explore` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 529; factory)
 - `video_browser` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 109; factory)
 - `video_frames` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 160; factory)
@@ -1161,8 +1161,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 74; literal)
 - `web_search` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
 - `workspace_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
-- `yuncontext` — [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts) (line 63; literal)
-- `yuncontext_record` — [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts) (line 80; literal)
+- `yuncontext` — [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts) (line 74; literal)
+- `yuncontext_record` — [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts) (line 98; literal)
 
 ### Dynamic tool owners
 
