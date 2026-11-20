@@ -277,6 +277,22 @@ function harness(dispatch) {
   return{...time,ctx,emit,input,sent,receipts,packets,publish:(name,payload)=>listeners.get(name)?.(payload),newManager,setBranch:value=>{branch=value;},setIdle:value=>{idle=value;},close:()=>emit('session_shutdown')};
 }
 
+test('observer reviews wait for the main assistant to start responding', async t => {
+  const h = harness();
+  t.after(h.close);
+  const { message } = h.input('Fix parser validation.', { accept: false });
+  h.emit('before_agent_start');
+  h.emit('agent_start');
+  h.setBranch([{ type: 'message', message }]);
+  h.emit('message_start', { message });
+  h.emit('message_end', { message: { role: 'custom', customType: 'prompt-analysis', content: 'Inspect parser validation.' } });
+  await h.advance(60000);
+  assert.equal(h.packets.length, 0, 'preparation alone cannot trigger a review');
+  h.emit('message_start', { message: { role: 'assistant', content: [] } });
+  await h.advance(30000);
+  assert.equal(h.packets.length, 1, 'the next review opportunity can use main-agent work');
+});
+
 test('native accepted input lifecycle observes exposed streaming evidence and injects only the latest optional capsule', async () => {
   const h=harness();
   h.input('Fix parser validation.');

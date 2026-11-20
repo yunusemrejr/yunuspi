@@ -16,6 +16,8 @@ test('a harness-triggered turn keeps the system prompt extensions built, so the 
 	const saved = { ...process.env };
 	const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-system-carry-'));
 	process.env.PI_CODING_AGENT_DIR = cwd;
+	delete process.env.PI_WORKING_NOTES;
+	delete process.env.PI_SUBAGENT_CHILD;
 	t.after(() => {
 		for (const key of Object.keys(process.env)) if (!(key in saved)) delete process.env[key];
 		Object.assign(process.env, saved);
@@ -58,6 +60,8 @@ test('a harness-triggered turn keeps the system prompt extensions built, so the 
 	await session.bindExtensions({});
 	await session.prompt('Summarize the project.', { source: 'rpc' });
 	await new Promise((resolve) => setImmediate(resolve));
+	assert.match(systems[0], /On the first user prompt of each session, plan before acting/);
+	assert.equal(calls, 1, 'the main model receives the planning instruction in its first ordinary request');
 	assert.match(systems[0], /Extension addition: frozen date anchor\.$/);
 	await api.sendMessage({ customType: 'project-test-followup', content: 'Run the planned check.', display: true }, { triggerTurn: true });
 	assert.equal(calls, 3, 'the follow-up ran a tool turn and a final turn');
