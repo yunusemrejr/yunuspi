@@ -1161,6 +1161,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 74; literal)
 - `web_search` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
 - `workspace_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
+- `yuncontext` — [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts) (line 63; literal)
+- `yuncontext_record` — [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts) (line 80; literal)
 
 ### Dynamic tool owners
 
@@ -1312,6 +1314,7 @@ This section reports source owners with explicit MCP or wrapper/adapter/client e
 - [`agent/extensions/pi-web-access/web-probe.ts`](../agent/extensions/pi-web-access/web-probe.ts) — `wrapper/adapter`
 - [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) — `wrapper/adapter`
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts) — `MCP`, `wrapper/adapter`
+- [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts) — `MCP`, `wrapper/adapter`
 
 ## Extension source inventory
 
@@ -1362,6 +1365,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/thinking.ts`](../agent/extensions/thinking.ts)
 - [`agent/extensions/utility-tools.ts`](../agent/extensions/utility-tools.ts)
 - [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts)
+- [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts)
 
 ### Libraries
 
