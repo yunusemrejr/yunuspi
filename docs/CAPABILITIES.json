@@ -3575,6 +3575,18 @@
         "source": "agent/extensions/lib/utility-mcp/catalog.mjs",
         "line": 12,
         "kind": "catalog"
+      },
+      {
+        "name": "yuncontext",
+        "source": "agent/extensions/yuncontext.ts",
+        "line": 63,
+        "kind": "literal"
+      },
+      {
+        "name": "yuncontext_record",
+        "source": "agent/extensions/yuncontext.ts",
+        "line": 80,
+        "kind": "literal"
       }
     ],
     "literalRegistrations": [
@@ -3817,6 +3829,18 @@
         "source": "agent/extensions/pi-web-access/research-jobs.ts",
         "line": 74,
         "kind": "literal"
+      },
+      {
+        "name": "yuncontext",
+        "source": "agent/extensions/yuncontext.ts",
+        "line": 63,
+        "kind": "literal"
+      },
+      {
+        "name": "yuncontext_record",
+        "source": "agent/extensions/yuncontext.ts",
+        "line": 80,
+        "kind": "literal"
       }
     ],
     "dynamicOwners": [
@@ -4036,11 +4060,11 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 664,
-      "registrationSites": 60,
+      "sourceFiles": 665,
+      "registrationSites": 62,
       "indirectRegistrationSites": 20,
-      "stableRegistrationRows": 77,
-      "uniqueStableTools": 76,
+      "stableRegistrationRows": 79,
+      "uniqueStableTools": 78,
       "dynamicOwnerCount": 16,
       "excludedGeneratedDirectories": [
         "dist",
@@ -4221,6 +4245,10 @@
       },
       {
         "path": "agent/extensions/video-studio.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/yuncontext.ts",
         "exists": true
       }
     ],
@@ -6524,6 +6552,13 @@
       },
       {
         "source": "agent/extensions/utility-tools.ts",
+        "signals": [
+          "MCP",
+          "wrapper/adapter"
+        ]
+      },
+      {
+        "source": "agent/extensions/yuncontext.ts",
         "signals": [
           "MCP",
           "wrapper/adapter"
