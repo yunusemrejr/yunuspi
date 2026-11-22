@@ -63,7 +63,8 @@ async function callYuncontext(name: string, args: Record<string, unknown>, signa
 // tool and when to use it, and carries no history itself.
 const NUDGE =
   "Project memory: call yuncontext (no q) before answering about this project's past or starting work in it; " +
-  "it holds what earlier sessions of every harness did here.";
+  "it holds what earlier sessions of every harness did here. After a verified fix, a found cause or an owner " +
+  "correction, save it with yuncontext_record.";
 
 export default function registerYuncontext(pi: any) {
   pi.on?.("before_agent_start", (event: any) => {
