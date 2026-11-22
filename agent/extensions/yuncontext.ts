@@ -77,17 +77,18 @@ export default function registerYuncontext(pi: any) {
     description:
       "What past sessions of every agent harness on this machine did in this project: changes, fixes that " +
       "worked, errors, owner corrections. Call it first when you start work in a project or are asked " +
-      "about its past (no q: brief), and with q = exact error, path, symbol or task words on any error or " +
-      "before non-trivial work. ref: one result in detail. Returns ≤3 dated, sourced clues or nothing; " +
+      "about its past (no q: brief). q: one subject per call: an exact error line, a file path or symbol, " +
+      "or a short how-to phrase ('cloudflare purge cache', 'deploy to prod'); not a list of everything the " +
+      "task touches. ref: one result in detail. Returns ≤3 dated, sourced clues or nothing; " +
       "the current request wins.",
     promptSnippet: "What past sessions of every harness did in this project",
     promptGuidelines: [
-      "Call yuncontext (no q) first when you start work in a project or are asked about its past, and with q = the exact error, path or task words when something fails.",
+      "Call yuncontext (no q) first when you start work in a project or are asked about its past, and with q = one exact error, path, symbol or short how-to phrase when something fails or before non-trivial work.",
       "After a verified fix, a found cause or an owner correction, call yuncontext_record (supersedes = the outdated ref).",
     ],
     parameters: Type.Object({
       cwd: Type.Optional(Type.String({ description: "Absolute path of your current working directory. Defaults to this session's." })),
-      q: Type.Optional(Type.String({ maxLength: 2000 })),
+      q: Type.Optional(Type.String({ maxLength: 2000, description: "One subject: exact error line, path, symbol, or a short how-to phrase." })),
       ref: Type.Optional(Type.String({ pattern: "^y[0-9a-z]{1,10}$" })),
     }),
     async execute(_id: string, args: any, signal?: AbortSignal, _update?: unknown, ctx?: any) {
@@ -104,8 +105,8 @@ export default function registerYuncontext(pi: any) {
       "(supersedes = its ref). Skip routine steps; never include secrets. Append-only; duplicates are ignored.",
     parameters: Type.Object({
       cwd: Type.Optional(Type.String({ description: "Absolute path of your current working directory. Defaults to this session's." })),
-      what: Type.String({ minLength: 10, maxLength: 400, description: "The lesson or fact, self-contained." }),
-      how: Type.Optional(Type.String({ maxLength: 600, description: "What worked / how to apply it." })),
+      what: Type.String({ minLength: 10, maxLength: 1000, description: "The lesson or fact, self-contained; the first ~400 chars are the lesson, the rest is moved to how." }),
+      how: Type.Optional(Type.String({ maxLength: 1200, description: "What worked / how to apply it." })),
       outcome: choices(["worked", "failed", "partial", "info"]),
       error: Type.Optional(Type.String({ maxLength: 300, description: "Exact error text, if any." })),
       files: Type.Optional(Type.Array(Type.String(), { maxItems: 10 })),
