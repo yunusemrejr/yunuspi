@@ -1161,8 +1161,8 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `web_research` — [`agent/extensions/pi-web-access/research-jobs.ts`](../agent/extensions/pi-web-access/research-jobs.ts) (line 74; literal)
 - `web_search` — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 195; configured-default)
 - `workspace_search` — [`agent/extensions/lib/utility-mcp/catalog.mjs`](../agent/extensions/lib/utility-mcp/catalog.mjs) (line 12; catalog)
-- `yuncontext` — [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts) (line 75; literal)
-- `yuncontext_record` — [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts) (line 100; literal)
+- `yuncontext` — [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts) (line 120; literal)
+- `yuncontext_record` — [`agent/extensions/yuncontext.ts`](../agent/extensions/yuncontext.ts) (line 145; literal)
 
 ### Dynamic tool owners
 
