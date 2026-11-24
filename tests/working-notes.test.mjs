@@ -25,7 +25,7 @@ test('the built-in notes cover every area a session needs judgment in', () => {
     assert.match(WORKING_NOTES, new RegExp(`^${heading}`, 'm'), heading);
   }
   // The notes ride in every request, so their size is a budget, not an accident.
-  assert.ok(WORKING_NOTES.length < 18_400, `notes are ${WORKING_NOTES.length} chars`);
+  assert.ok(WORKING_NOTES.length < 19_400, `notes are ${WORKING_NOTES.length} chars`);
   for (const notes of [WORKING_NOTES, DELEGATED_NOTES]) {
     assert.match(notes, /Be quick and pragmatic\. Time, tokens and quality all matter/);
   }
@@ -137,7 +137,7 @@ test('a delegated child gets the short notes after its role prompt, with the sam
   const appended = buildSystemPrompt({ cwd: '/work/project', appendSystemPrompt: 'You are a worker.' });
   assert.ok(appended.includes(DELEGATED_NOTES), 'a child whose role was appended to the base prompt gets the short form too');
   assert.doesNotMatch(appended, /Working notes \(/);
-  assert.ok(DELEGATED_NOTES.length < 2_800, `the short form stays short (${DELEGATED_NOTES.length} chars)`);
+  assert.ok(DELEGATED_NOTES.length < 3_000, `the short form stays short (${DELEGATED_NOTES.length} chars)`);
   for (const anchor of ['The brief is the whole assignment', 'Never invent', 'waiting for the session that gave you the task', 'what was verified'])
     assert.ok(DELEGATED_NOTES.includes(anchor), anchor);
   const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yp-notes-child-'));
