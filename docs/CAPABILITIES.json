@@ -6599,6 +6599,10 @@
         "path": "agent/skills/cinetic/SKILL.md"
       },
       {
+        "name": "copywriting",
+        "path": "agent/skills/copywriting/SKILL.md"
+      },
+      {
         "name": "create",
         "path": "agent/skills/create/SKILL.md"
       },

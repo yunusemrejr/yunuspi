@@ -1689,7 +1689,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 
 ## Skills
 
-The exporter includes 31 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
+The exporter includes 32 public skill directories. This list is a path inventory; skill contents remain in their linked `SKILL.md` files.
 
 - `3d-cad` — [`agent/skills/3d-cad/SKILL.md`](../agent/skills/3d-cad/SKILL.md)
 - `anatomy` — [`agent/skills/anatomy/SKILL.md`](../agent/skills/anatomy/SKILL.md)
@@ -1699,6 +1699,7 @@ The exporter includes 31 public skill directories. This list is a path inventory
 - `browser` — [`agent/skills/browser/SKILL.md`](../agent/skills/browser/SKILL.md)
 - `build` — [`agent/skills/build/SKILL.md`](../agent/skills/build/SKILL.md)
 - `cinetic` — [`agent/skills/cinetic/SKILL.md`](../agent/skills/cinetic/SKILL.md)
+- `copywriting` — [`agent/skills/copywriting/SKILL.md`](../agent/skills/copywriting/SKILL.md)
 - `create` — [`agent/skills/create/SKILL.md`](../agent/skills/create/SKILL.md)
 - `data-science` — [`agent/skills/data-science/SKILL.md`](../agent/skills/data-science/SKILL.md)
 - `engineering` — [`agent/skills/engineering/SKILL.md`](../agent/skills/engineering/SKILL.md)

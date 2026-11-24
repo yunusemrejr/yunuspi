@@ -19,13 +19,17 @@ An existing design that is good, that the user is happy with, and that comes wit
 
 ## Working order
 
-1. Inventory the project: brand files, tokens, the best and the worst existing screen (screenshots at 360 px and desktop).
-2. Write the verdict per part: keep, improve or redesign, each with a reason.
-3. Pick sources from different sections below and open at least three live examples, beyond the first or most familiar one. From each write down what you take: layout skeleton and reading order, type, color logic, spacing rhythm, the one signature move, the states.
-4. Choose one direction that would not fit an unrelated product. Say which idea came from which example.
-5. Build, screenshot at phone and desktop width, criticise, rebuild. At least twice.
-6. Check the screenshots against the tells in `ui-design` and fix every one found.
-7. Report the examples and libraries used and what was taken from each.
+1. **Inventory.** List every surface the request covers, from the code and the running product: each page, template and screen, the shared parts (header, footer, navigation, forms, empty and error states, admin), and every place the logo, icons, illustrations and video appear. Screenshot the best and the worst at 360 px and desktop. The work is finished against this list, so keep it in a file that outlives a long session.
+2. **Verdict per part:** keep, improve or redesign, each with a reason.
+3. **Read the brand and the field.** What the product is, who uses it, what its name, logo and voice already say. Open two or three products of the same kind that are known for their design: note what all of them do (the convention users expect) and what none of them does (the room to be distinct).
+4. **Study wide, then deep.** Skim a dozen or more examples from at least four different kinds of source below (award sites, scroll and 3D templates, component and pattern galleries, written style systems, library demos and their GitHub repositories), some of them far from the subject. Open the best four to six fully and write down from each: layout skeleton and reading order, type, color logic, spacing rhythm, the signature move, motion, the states, and why it works. When the session has a worker, this study is its job: give it the brand facts, the inventory and this section, and ask for the notes with links.
+5. **Three directions before one.** Write three directions that differ in kind and not in tint (say: type-led editorial; one 3D or scroll-driven object; a tactile, tool-like interface). For each: the idea in one sentence, the layout skeleton, palette and type, the signature move, how the logo and brand marks adapt (lockups, light and dark versions, icon, favicon, app icon, a motion version), which examples it draws on, and what it costs to build and to load. Compare the three against the brand, the audience, the field and the content the product really has.
+6. **Blend and commit.** The result is usually the strongest direction carrying one or two parts of the others, and never the first idea taken alone. State the idea in a sentence that would not fit an unrelated product, and say which part came from which example.
+7. **Design the system before the pages:** tokens (color roles, type scale, spacing, radii, motion), the logo set, the icon and illustration style, the shared parts. Every page, every screen and every worker builds from these, so the product reads as one.
+8. **Plan each section of each surface** on the inventory: what it says, what carries it (picture, 3D, motion, interaction, type), how it behaves at 360 px, as an installed app where that applies, with reduced motion, and when it is empty or fails.
+9. **Build, screenshot every surface at phone and desktop width, criticise, rebuild.** At least twice. A surface nobody looked at is not done, and an old logo, color or pattern left on one page breaks the whole.
+10. Check the screenshots against the tells in `ui-design` and fix every one found.
+11. Report the examples and libraries used and what was taken from each, and name every surface of the inventory that is not finished.
 
 ## Rules
 

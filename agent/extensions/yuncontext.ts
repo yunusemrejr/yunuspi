@@ -62,9 +62,12 @@ async function callYuncontext(name: string, args: Record<string, unknown>, signa
 // One constant line at the end of the system prompt (stable, so the prompt cache keeps it); it names the
 // tool and when to use it, and carries no history itself.
 const NUDGE =
-  "Project memory: call yuncontext (no q) before answering about this project's past or starting work in it; " +
-  "it holds what earlier sessions of every harness did here. After a verified fix, a found cause or an owner " +
-  "correction, save it with yuncontext_record.";
+  "Project memory: ask yuncontext (cwd, no q) when you start in a project; ask again with q = one subject when the " +
+  "work moves to a new part of the project, before non-trivial work, and with the exact error line when something " +
+  "fails. Record with yuncontext_record straight after each of these, not at the end of the session: a fix you " +
+  "verified, a cause you found, a correction the user made (their words and what it applies to), a trap that cost " +
+  "time. One fact per record, self-contained, with the files. A session that learned something and recorded nothing " +
+  "leaves the next one to repeat it.";
 
 export default function registerYuncontext(pi: any) {
   pi.on?.("before_agent_start", (event: any) => {
