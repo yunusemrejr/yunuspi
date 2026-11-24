@@ -22,6 +22,10 @@
  * Child processes (PI_SUBAGENT_CHILD=1) register nothing.
  */
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { basename, join, resolve } from "node:path";
 import { collectSessionCost, collectSessionMetrics } from "@yunuspi/coding-agent/session-accounting";
 import { DEFAULT_TEAM_CONFIG, loadTeamConfig, type RunBudget } from "./lib/team.ts";
 import { resolveTimeZone } from "./lib/session-signals.ts";
@@ -39,6 +43,107 @@ const BUDGET_NOTE_TYPE = "run-budget";
 const HURRY_NOTE_TYPE = "session-hurry";
 /** Events further apart than this are idle time, not run time. */
 const GAP_MS = 10 * 60_000;
+/** All local commands behind the Where line share this budget. */
+const WHERE_LIMIT_MS = 1_000;
+const WHERE_MAX_CHARS = 320;
+
+function gitText(cwd: string, args: string[], left: () => number): string | undefined {
+	const timeout = left();
+	if (timeout <= 0) return undefined;
+	try {
+		return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout }).trim();
+	} catch {
+		return undefined;
+	}
+}
+
+/** `owner/repo` from the usual remote URLs; the last two path parts otherwise. */
+function remoteLabel(url: string | undefined): string | undefined {
+	if (!url) return undefined;
+	const clean = url.trim().replace(/\.git$/, "").replace(/\/$/, "");
+	const scp = /^[^/@]+@[^:]+:(.+)$/.exec(clean);
+	const path = scp ? scp[1] : clean.replace(/^[a-z]+:\/\/[^/]+\//i, "");
+	const parts = path.split("/").filter(Boolean);
+	return parts.length >= 2 ? parts.slice(-2).join("/") : parts[0];
+}
+
+/** What the repository's top level shows that a push or deploy would reach. */
+function liveSigns(root: string, remotes: readonly string[]): string[] {
+	const signs: string[] = remotes.filter((name) => name !== "origin");
+	for (const name of ["deploy.sh", "wrangler.toml", "vercel.json", "netlify.toml", "firebase.json", "fly.toml", "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"]) {
+		if (existsSync(join(root, name))) signs.push(name);
+	}
+	try {
+		const scripts = JSON.parse(readFileSync(join(root, "package.json"), "utf8"))?.scripts ?? {};
+		for (const name of ["deploy", "publish"]) if (scripts[name]) signs.push(`script ${name}`);
+	} catch {
+		/* no package scripts */
+	}
+	if (existsSync(join(root, ".github", "workflows"))) signs.push(".github/workflows");
+	return [...new Set(signs)];
+}
+
+/** Repositories one or two levels below a folder, bounded and sorted. */
+function repositoriesBelow(cwd: string): string[] {
+	const found: string[] = [];
+	const visit = (dir: string, depth: number): void => {
+		if (depth > 2 || found.length >= 50) return;
+		let entries;
+		try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+		for (const entry of entries) {
+			if (!entry.isDirectory() || entry.name === "node_modules" || entry.name === ".git") continue;
+			const child = join(dir, entry.name);
+			if (existsSync(join(child, ".git"))) found.push(entry.name);
+			else if (depth < 2) visit(child, depth + 1);
+		}
+	};
+	visit(cwd, 1);
+	return found.sort();
+}
+
+/** One line saying which folder this session is in and what it is, from the machine. */
+export function whereLine(cwd: string, home = homedir()): string {
+	const folder = resolve(String(cwd || "."));
+	const resolvedHome = resolve(home);
+	const start = Date.now();
+	const left = (): number => Math.max(0, WHERE_LIMIT_MS - (Date.now() - start));
+	const shortFolder = folder === resolvedHome || folder.startsWith(`${resolvedHome}/`) ? `~${folder.slice(resolvedHome.length)}` : folder;
+	let kind: string;
+	let signs: string[] = [];
+	const top = gitText(folder, ["rev-parse", "--show-toplevel"], left);
+	if (top) {
+		const root = resolve(top);
+		let prefix = "";
+		const prefixTimeout = left();
+		if (prefixTimeout > 0) {
+			try {
+				prefix = execFileSync("git", ["-C", folder, "rev-parse", "--show-prefix"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: prefixTimeout }).trim();
+			} catch {
+				/* treat as the root */
+			}
+		}
+		const remotes = (gitText(root, ["remote"], left) ?? "").split("\n").map((name) => name.trim()).filter(Boolean);
+		const remoteName = remotes.includes("origin") ? "origin" : remotes[0];
+		const remote = remoteName ? remoteLabel(gitText(root, ["remote", "get-url", remoteName], left)) ?? "none" : "none";
+		const branch = gitText(root, ["branch", "--show-current"], left) || "detached";
+		const name = basename(root);
+		if (prefix) {
+			kind = `a subfolder of the git repository ${name} (remote ${remote}, branch ${branch})`;
+		} else {
+			const changed = (gitText(root, ["status", "--porcelain"], left) ?? "").split("\n").filter(Boolean).length;
+			kind = `the git repository ${name} (remote ${remote}, branch ${branch}, ${changed} uncommitted files)`;
+		}
+		signs = liveSigns(root, remotes);
+	} else {
+		const repos = repositoriesBelow(folder);
+		if (repos.length) kind = `a folder holding ${repos.length} repositories (${repos.slice(0, 4).join(", ")})`;
+		else if (folder === resolvedHome) kind = "the home folder, no project: a general or system task unless the message names a project";
+		else kind = "a plain folder with no repository";
+	}
+	const live = signs.length ? ` Live system in reach: ${signs.slice(0, 3).join(", ")}; a push or deploy from here changes it.` : "";
+	const line = `Where: ${shortFolder} is ${kind}.${live}`;
+	return line.length <= WHERE_MAX_CHARS ? line : `${line.slice(0, WHERE_MAX_CHARS - 1)}…`;
+}
 
 /** A message asking for speed, in English or Turkish. */
 const HURRY_PATTERNS: RegExp[] = [
@@ -117,6 +222,8 @@ export interface SessionFactsInput {
 	/** Share of prompt tokens served from the provider cache. */
 	cachePercent?: number;
 	lastRun?: { minutes: number; usd?: number };
+	/** The folder this session is in and what it is, computed from the machine. */
+	where?: string;
 	/** Installed guides that match the request; the line is left out when there are none. */
 	guides?: readonly CatalogSkill[];
 	/** The picked example libraries for visual work, as one complete sentence. */
@@ -143,6 +250,7 @@ export function sessionFactsText(input: SessionFactsInput): string {
 		const spend = input.lastRun.usd === undefined ? "" : money(input.lastRun.usd);
 		line += ` Last run: ${input.lastRun.minutes} min${spend ? `, ${spend}` : ""}.`;
 	}
+	if (input.where) line += `\n${input.where}`;
 	const guides = input.guides?.length
 		? `\nGuides that match this request (read the ones that bear on it before choosing the approach): ${input.guides.map(guideText).join("; ")}`
 		: "";
@@ -425,6 +533,12 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	let hurrySent = false;
 	/** The boldest design scale judged in this session; a complaint never lowers it. */
 	const designScale = designScaleMemory();
+	/** The Where line, computed once and recomputed only when the working folder changes. */
+	let where: { cwd: string; line: string } | undefined;
+	const whereFor = (cwd: string): string => {
+		if (!where || where.cwd !== cwd) where = { cwd, line: whereLine(cwd) };
+		return where.line;
+	};
 
 	const entriesOf = (ctx: any): any[] => {
 		try {
@@ -485,6 +599,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		pending = undefined;
 		hurrySent = false;
 		designScale.reset();
+		where = undefined;
 	};
 	pi.on("session_start", reset);
 	pi.on("session_switch", reset);
@@ -565,6 +680,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 				context,
 				cachePercent,
 				lastRun,
+				where: whereFor(ctx?.cwd ?? process.cwd()),
 				guides: matchingGuidesFor(event),
 				examples,
 			});

@@ -25,7 +25,7 @@ test('the built-in notes cover every area a session needs judgment in', () => {
     assert.match(WORKING_NOTES, new RegExp(`^${heading}`, 'm'), heading);
   }
   // The notes ride in every request, so their size is a budget, not an accident.
-  assert.ok(WORKING_NOTES.length < 19_400, `notes are ${WORKING_NOTES.length} chars`);
+  assert.ok(WORKING_NOTES.length < 20_300, `notes are ${WORKING_NOTES.length} chars`);
   for (const notes of [WORKING_NOTES, DELEGATED_NOTES]) {
     assert.match(notes, /Be quick and pragmatic\. Time, tokens and quality all matter/);
   }

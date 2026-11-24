@@ -169,7 +169,8 @@ test('unknown figures are left out: no price, no cache data, no context usage', 
 	bare.ctx.model = { provider: 'fixture', id: 'fixture-model' };
 	registerSessionFacts(bare.pi);
 	const [plain] = await bare.humanMessage('Say hello.');
-	assert.doesNotMatch(plain.message.content, /Session:|\n/, 'nothing is invented when no figure is known');
+	assert.doesNotMatch(plain.message.content, /Session:|Last run|Guides that match/, 'nothing is invented when no figure is known');
+	assert.match(plain.message.content, /\nWhere: .+ is a plain folder with no repository\.$/);
 
 	const unpricedRun = fixture(t, { entries: [assistantEntry({ total: null })] });
 	registerSessionFacts(unpricedRun.pi);
@@ -520,7 +521,8 @@ test('a request that names a subject gets the installed guides that match it, on
 	};
 	const withLine = await ask('Make a motion graphics video with kinetic typography and captions for the launch.');
 	const lines = withLine.split('\n');
-	assert.equal(lines[1], 'Guides that match this request (read the ones that bear on it before choosing the approach): motion-graphics-production: Produce timed motion graphics for video, including title sequences, kinetic typography, lower thirds,… (/fixture/skills/motion-graphics-production/SKILL.md); video-captions: Burn captions into video and check their timing. (/fixture/skills/video-captions/SKILL.md)', 'a long description is clipped at a word, a short one kept whole');
+	assert.match(lines[1], /^Where: /, 'the Where line follows the time');
+	assert.equal(lines[2], 'Guides that match this request (read the ones that bear on it before choosing the approach): motion-graphics-production: Produce timed motion graphics for video, including title sequences, kinetic typography, lower thirds,… (/fixture/skills/motion-graphics-production/SKILL.md); video-captions: Burn captions into video and check their timing. (/fixture/skills/video-captions/SKILL.md)', 'a long description is clipped at a word, a short one kept whole');
 	assert.doesNotMatch(withLine, /database-migration|git-github/, 'only skills that bear on the request');
 
 	for (const plain of ['be quick', 'commit and push', 'why did that test fail?', 'thanks', 'continue']) {
