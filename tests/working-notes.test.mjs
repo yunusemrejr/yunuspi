@@ -25,10 +25,32 @@ test('the built-in notes cover every area a session needs judgment in', () => {
     assert.match(WORKING_NOTES, new RegExp(`^${heading}`, 'm'), heading);
   }
   // The notes ride in every request, so their size is a budget, not an accident.
-  assert.ok(WORKING_NOTES.length < 13_600, `notes are ${WORKING_NOTES.length} chars`);
+  assert.ok(WORKING_NOTES.length < 15_200, `notes are ${WORKING_NOTES.length} chars`);
   for (const notes of [WORKING_NOTES, DELEGATED_NOTES]) {
     assert.match(notes, /Be quick and pragmatic\. Time, tokens and quality all matter/);
   }
+});
+
+test('a big improvement is the boldest scale and is worked with the bold guide', () => {
+  // Scale: big improvement joins redesign and a build from scratch; parts are judged on merit; a good design the user likes stays.
+  assert.match(WORKING_NOTES, /"improve" or "better design" brings gains seen at once and may change colours; "big improvement", "completely" or "tremendously improve", "redesign", "amazing" and a UI built from scratch are the boldest scale/);
+  assert.match(WORKING_NOTES, /the default is big, good, bold changes, and layout, structure and flow may change/);
+  assert.match(WORKING_NOTES, /improve what is good, redesign what is weak, keep nothing only because it is there; the name, the logo and what the product says stay/);
+  assert.match(WORKING_NOTES, /A good design the user is happy with stays when no big change was asked for\./);
+  assert.doesNotMatch(WORKING_NOTES, /"redesign" may change layout and flow;/);
+  // The way to work: the guide, three live examples from different sources, three.js and friends, one idea, two iterations.
+  assert.match(WORKING_NOTES, /the safe, familiar page is the failure\. Read bold-redesign\.md in the ui-design guide's references first/);
+  assert.match(WORKING_NOTES, /Open at least three live examples from different sources in the browser, past the first and most familiar ones; reading an index is not looking/);
+  assert.match(WORKING_NOTES, /three\.js and 3D, scroll motion, a shader, kinetic type, a tactile part/);
+  assert.match(WORKING_NOTES, /commit to one strong idea that suits the brand/);
+  assert.match(WORKING_NOTES, /Iterate on the screenshot at least twice: what looks nice at first is usually the median/);
+  // Current AI-slop patterns are searched for and avoided, including the three the owner named.
+  assert.match(WORKING_NOTES, /Search the web for the current AI-slop design patterns and avoid them/);
+  assert.match(WORKING_NOTES, /blinking or glowing dots, a button with a thick darker bottom edge or a bold curved accent under it, common pastels with the usual "aesthetic" fonts/);
+  // Dashboards and daily tools keep a stable layout.
+  assert.match(WORKING_NOTES, /A tool people work in daily keeps a stable layout: there the boldness goes into craft, colour, type and states/);
+  // A delegated task gets the short form.
+  assert.match(DELEGATED_NOTES, /safe, familiar page is the failure: judge what exists part by part .* at least three live examples from different sources, commit to one strong idea .* at least twice\. A good design the user is happy with stays/);
 });
 
 test('a session with no personal notes gets the built-in ones', t => {
@@ -115,7 +137,7 @@ test('a delegated child gets the short notes after its role prompt, with the sam
   const appended = buildSystemPrompt({ cwd: '/work/project', appendSystemPrompt: 'You are a worker.' });
   assert.ok(appended.includes(DELEGATED_NOTES), 'a child whose role was appended to the base prompt gets the short form too');
   assert.doesNotMatch(appended, /Working notes \(/);
-  assert.ok(DELEGATED_NOTES.length < 1_800, `the short form stays short (${DELEGATED_NOTES.length} chars)`);
+  assert.ok(DELEGATED_NOTES.length < 2_200, `the short form stays short (${DELEGATED_NOTES.length} chars)`);
   for (const anchor of ['The brief is the whole assignment', 'Never invent', 'waiting for the session that gave you the task', 'what was verified'])
     assert.ok(DELEGATED_NOTES.includes(anchor), anchor);
   const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yp-notes-child-'));

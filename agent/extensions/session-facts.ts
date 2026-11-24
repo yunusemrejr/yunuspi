@@ -29,7 +29,7 @@ import { goalUserWords } from "./lib/goal-state.ts";
 import { goalAssignment } from "./lib/presets.ts";
 import { catalogSkills, matchingGuides, type CatalogSkill } from "./lib/skill-review.ts";
 import { askJev } from "./lib/jev-client.ts";
-import { askTypedDecision, EXAMPLE_SCALE_DESCRIPTIONS, type ExampleScale } from "./lib/micro-intelligence/jev-decisions.ts";
+import { askTypedDecision, BOLD_EXAMPLE_SCALES, EXAMPLE_SCALE_DESCRIPTIONS, MAX_BOLD_PICKS, type ExampleScale } from "./lib/micro-intelligence/jev-decisions.ts";
 import type { JudgeFn } from "./lib/micro-intelligence/review.ts";
 import { uiPromptCue } from "./lib/ui-doctrine.ts";
 
@@ -293,18 +293,31 @@ export async function pickExampleLine(
 		const second = typeof judged.verdict?.second === "string" ? judged.verdict.second : "";
 		const judgedScale = judged.verdict?.scale;
 		if (typeof judgedScale === "string" && Object.hasOwn(EXAMPLE_SCALE_DESCRIPTIONS, judgedScale)) scale = judgedScale as ExampleScale;
-		if (best) picked.push(best);
-		if (second && second !== best) picked.push(second);
+		const rawPicks = judged.verdict?.picks;
+		const wide = Array.isArray(rawPicks) ? rawPicks.filter((id): id is string => typeof id === "string") : [];
+		// A bold scale names up to four, already ranked, with one index that has a point of view among them.
+		if (scale && BOLD_EXAMPLE_SCALES.has(scale) && wide.length) picked.push(...wide);
+		else {
+			if (best) picked.push(best);
+			if (second && second !== best) picked.push(second);
+		}
 	}
-	let ids = picked.filter((id) => byId.has(id)).slice(0, 2);
+	const bold = scale !== undefined && BOLD_EXAMPLE_SCALES.has(scale);
+	let ids = [...new Set(picked)].filter((id) => byId.has(id)).slice(0, bold ? MAX_BOLD_PICKS : 2);
 	if (!ids.length) ids = STATIC_EXAMPLE_IDS.filter((id) => byId.has(id));
 	if (!ids.length) return undefined;
 	const paths = ids.map((id) => byId.get(id)!.path);
+	const galleries = byId.get("ui-design:galleries")?.path;
+	const guide = galleries ? `Read ${galleries.replace(/patterns\.md$/, "bold-redesign.md")} first: it says how this kind of request is worked and lists every gallery, example and library. ` : "";
 	const tail = scale === "keep-design"
 		? "Keep the existing design; use the examples only for the detail being fixed."
-		: "Open several, take the parts that fit, adapt them to this project, iterate on screenshots.";
+		: bold
+			? `${guide}The safe, familiar page is the failure here. Open at least three of them live in the browser, from different sources and past the first familiar one (read the index, then the pages). Commit to one strong idea that suits this brand (3D, scroll motion, a shader, kinetic type or a tactile part where it serves; a tool people work in daily keeps a stable layout), build, then iterate on the screenshot at least twice: a first pass that looks nice is usually the median, so name what is generic and replace it. Name what you took from each.`
+			: "Open several, take the parts that fit, adapt them to this project, iterate on screenshots.";
 	let line = `Examples for this request: ${paths.join(", ")}. ${tail}`;
-	if (scale) line += ` Change scale the request implies: ${scale} (${EXAMPLE_SCALE_DESCRIPTIONS[scale]}); the logo stays unless asked, and colors and layout stay unless the scale or the user says otherwise.`;
+	if (scale) line += ` Change scale the request implies: ${scale} (${EXAMPLE_SCALE_DESCRIPTIONS[scale]}); ${bold
+		? "the name, the logo and what the product says stay unless asked; nothing else is kept only because it is there."
+		: "the logo stays unless asked, and colors and layout stay unless the scale or the user says otherwise."}`;
 	return line;
 }
 

@@ -1,3 +1,10 @@
+## 0.56.33 — Bold design by default for a new or much improved UI
+
+- A big improvement, a complete or tremendous one, a redesign and a UI built from scratch are the boldest change scale: the default is big, good, bold changes. An existing design is judged part by part (improve what is good, redesign what is weak, keep nothing only because it is there); the name, the logo and what the product says stay, and a good design the user is happy with stays when no big change was asked for.
+- A new `ui-design/references/bold-redesign.md` holds the way to work and one index of every gallery, example and library. Bold work opens at least three live examples from different sources, considers 3D, scroll motion, shaders and kinetic type, commits to one strong idea and iterates on the screenshot at least twice. The working notes, the delegated notes, the ui-design, scrolltide and uncommon-web guides and the example line carry it. Dashboards and daily tools keep a stable layout.
+- At the two boldest scales the example decision names up to four examples (any other with at least 4 percent of the probability), and one index with a point of view (scrolltide or uncommon-web) is always among them when it has any probability. The decision prefers such an index when the request asks for something new, bold or much better.
+- The listed AI-slop tells now include a button with a thick darker bottom edge or a bold curved accent under it, blinking or pulsing dot indicators and common pastels with the usual "aesthetic" fonts. A new advisory source check, `ui-button-lip`, flags the button edge in CSS and Tailwind classes.
+
 ## 0.56.32 — Example libraries and the scale of a visual change
 
 - Ship the scrolltide and uncommon-web guides with their reference files, the navigation, footer and call-to-action galleries under ui-design, and a link to Refero's written style systems. The guide index points visual work at both libraries.

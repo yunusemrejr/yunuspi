@@ -34,7 +34,7 @@ export interface DesignBrief {
 const VISUAL_SUBJECT = /\b(?:web ?sites?|landing ?pages?|home ?pages?|web ?apps?|front[- ]?end|user interfaces?|ui|ux|interfaces?|dashboards?|screens?|layouts?|themes?|logos?|brand(?:ing)?|visual identity|posters?|banners?|mockups?|illustrations?|animations?|motion graphics|slides?|decks?|icons?|typography|color palettes?|design systems?|portfolio|storefront|blog|gui|(?:mobile|desktop|native) apps?|games?|look and feel|visuals?)\b/i;
 /** New work leaves the direction open; refinement keeps the existing language. */
 const NEW_WORK = /\b(?:create|build|make|design|redesign|restyle|develop|craft|produce|generate|launch|set up|new|revamp|from scratch)\b/i;
-const REFINEMENT = /\b(?:polish|improve|refresh|fix|tweak|adjust|clean up|tidy)\b/i;
+const REFINEMENT = /\b(?:polish|improve|improvements?|modernize|overhaul|upgrade|refresh|fix|tweak|adjust|clean up|tidy)\b/i;
 /** Only explicit look/style comparisons create style references. */
 const STYLE_REFERENCE = /\b(?:(?:look|feel|style|design|theme)s?\s+(?:like|similar to)|(?:same|similar)\s+(?:style|look|design|theme|feel|aesthetic)\s+(?:as|to)|inspired by|in the style of|match(?:ing)?\s+(?:the\s+)?(?:style|look|design|theme)\s+of|based on the design of)\s+([^\s,;!?)]+)/gi;
 /** Concrete style specifics mean the user already decided the direction. */

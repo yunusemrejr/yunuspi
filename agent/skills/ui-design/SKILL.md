@@ -21,6 +21,8 @@ Any one of these can be a real choice. The tell is several together with no argu
 
 If the user's own words ask for one of the looks above, build exactly that. Their instruction outranks this guide.
 
+For a UI built from scratch or a big improvement of an existing one ("big improvement", "completely improve", "tremendously improve", "redesign", "amazing"), read [bold-redesign.md](references/bold-redesign.md) first and work that way. In short: judge what exists part by part (improve the good, redesign the weak, keep nothing only because it is there), open at least three live examples from different sources, commit to one bold idea that suits the brand, and iterate on the screenshot at least twice, because a first pass that looks nice is usually the median. The same file is the one index of every gallery, example and library the guides point to. When the existing design is good, the user is happy with it and no big change was asked for, it stays as it is.
+
 For a filterable inventory, search results, or a confirmation step, open [Equipment checkout](examples/equipment-checkout.html). It combines labeled native filters, a responsive result list with an empty state, and a dialog with keyboard focus restoration. Adapt the component behavior to the existing design system. The page runs directly in a browser with sample data and no dependencies.
 
 For navigation, footer and call-to-action references, open [pattern galleries](references/patterns.md). For how real products write out a complete system of colour, type, spacing and radius, read the style systems at [Refero](https://styles.refero.design/).
@@ -29,7 +31,7 @@ For navigation, footer and call-to-action references, open [pattern galleries](r
 
 - **Real content only.** No invented numbers, logos, testimonials or status. A figure with no source is a labelled placeholder or it is not there.
 - **Every repeated element earns its place.** A badge, tag, numbered step or coloured border has to carry information. If removing it loses none, remove it. Numbered steps are for things that are actually sequential.
-- **Ornament must mean something.** A pulsing dot needs a live status behind it. A glow behind a headline has no such excuse.
+- **Ornament must mean something.** A pulsing or blinking dot needs a live status behind it. A glow behind a headline has no such excuse. A button with a thick darker bottom edge or a bold curved accent under it, and common pastels set in the usual "aesthetic" fonts, are tells of generated design: use one even border, a fill change or a real pressed state.
 - **Less text, more picture.** Cut each screen to the few things its user comes for; move or delete the rest. One good figure beats a wall of labels.
 - **Colour carries meaning:** the strongest colour goes to what matters most. Body text holds at least 4.5:1 contrast in every theme you ship.
 - **Design the states a user can reach:** empty, loading, error, long text, many items, keyboard focus. Hover and focus must not shift the layout.

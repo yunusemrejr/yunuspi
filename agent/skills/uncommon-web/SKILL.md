@@ -13,7 +13,7 @@ The first library that comes to mind is the one every other page uses. This inde
 
 1. Say in one sentence what the page or part is about and what it should feel like. The technique comes from that, not from the list.
 2. Pick one or two families from the table and read only those files in `references/`.
-3. Shortlist two or three libraries and open their demos in the browser. Choose from what you saw, not from the name.
+3. Shortlist two or three libraries and open their demos in the browser. Choose from what you saw, not from the name. For a page built from scratch or a big improvement, pass over the library you would reach for by habit and look at two you have not used: the whole list on one page is in `../ui-design/references/bold-redesign.md`.
 4. Check the licence on the line (some are free only for non-commercial use, GSAP has its own terms) and the current version of the package before installing: the versions here are from October 2026.
 5. Build it with the real content, then look at it at phone and desktop width.
 

@@ -1095,6 +1095,18 @@ Fix unclear terminology first.
 
 Do not sacrifice discoverability to minimalism.
 
+## 201. No fake 3D button lip
+
+Do not give a button a thick darker bottom edge or a bold curved accent under
+it (a bottom border of 3 px or more, or a hard shadow straight down with no
+blur). Use one even border, a fill change or a real pressed state. Tabs and
+nav items keep their underline.
+
+## 202. No common pastels with the usual "aesthetic" fonts
+
+A pastel ground set in the fonts everyone reaches for is a mood copied, not a
+choice. Take the palette and the type from the subject, and be able to say why.
+
 ## Agent decision test
 
 Before adding any UI element, section, animation, visual effect, copy

@@ -9,7 +9,7 @@ description: "Take influence from the scroll-driven sites, heroes, components, s
 
 ## When to open it
 
-Before you settle the concept of a landing page, hero, product reveal, portfolio or storefront. Read one or two of the files in `references/`, pick two or three entries close to the subject, and open their pages in the browser to watch the preview film. Then say in one line which move you are taking and why it fits this product.
+Before you settle the concept of a landing page, hero, product reveal, portfolio or storefront. Read one or two of the files in `references/`, pick two or three entries close to the subject, and open their pages in the browser to watch the preview film. Then say in one line which move you are taking and why it fits this product. For a page built from scratch or a big improvement, this step is required, and the entries to open are not the first or most familiar ones: see `../ui-design/references/bold-redesign.md`.
 
 | For | Read |
 |---|---|

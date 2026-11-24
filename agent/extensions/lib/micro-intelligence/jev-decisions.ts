@@ -102,11 +102,35 @@ export const EXAMPLE_SCALE_DESCRIPTIONS: Record<ExampleScale, string> = {
   "keep-design": "a small fix inside an existing design",
   polish: "spacing, type, contrast and states; layout and palette stay",
   improve: "visible gains; structure recognizable; colors may change",
-  redesign: "layout and flow may change",
+  redesign: "a big, complete or tremendous improvement of the UI/UX, design or aesthetic: bold changes are the default, layout and flow may change, and each existing part stays only if it is good",
   "fresh-build": "new, no existing design",
 };
 /** A scale enters the facts line only as a majority, never as a coin flip. */
 const EXAMPLE_SCALE_MIN = 0.5;
+/** The two scales where a safe result is the failure: more examples are named, and one of them always has a point of view. */
+export const BOLD_EXAMPLE_SCALES: ReadonlySet<string> = new Set(["redesign", "fresh-build"]);
+/** At a bold scale an alternative joins the pick with this share of the probability. */
+const BOLD_PICK_MIN = 0.04;
+export const MAX_BOLD_PICKS = 4;
+/** The indexes of whole pages, 3D, scroll, shaders and distinctive kits, as opposed to the galleries of common parts. */
+const withAView = (id: string): boolean => id.startsWith("scrolltide:") || id.startsWith("uncommon:");
+
+/**
+ * The best example first, then any other with a real share of the probability; at most four.
+ * When none of them is an index with a point of view, the likeliest of those takes the last place.
+ */
+export function boldExamplePicks(best: string, candidates: readonly string[], probabilities: Record<string, number> | undefined): string[] {
+  const others = candidates
+    .filter((name) => name !== best)
+    .map((name) => ({ name, probability: probabilities?.[name] ?? 0 }))
+    .sort((a, b) => b.probability - a.probability);
+  const picks = [best, ...others.filter((entry) => entry.probability >= BOLD_PICK_MIN).map((entry) => entry.name)].slice(0, MAX_BOLD_PICKS);
+  if (!picks.some(withAView)) {
+    const own = others.find((entry) => withAView(entry.name) && entry.probability > 0);
+    if (own) picks.splice(Math.min(picks.length, MAX_BOLD_PICKS - 1), 1, own.name);
+  }
+  return picks;
+}
 
 const NOUL_PAIR = (yes: string, no: string) => ({
   acceptHigh: (score: number): TypedVerdict => ({ ok: true, verdict: { supported: true, label: yes }, confidence: score }),
@@ -301,10 +325,10 @@ export const TYPED_DECISIONS: Record<TypedDecisionId, DecisionSpec> = {
       const candidates = (ctx.candidates ?? []).filter((name) => typeof name === "string" && name && name.length <= 80).slice(0, 12);
       if (candidates.length < 2) return { reject: "trivial" };
       return {
-        best: choice("Which installed example library or reference file best matches the content, medium and motion this visual request needs? Judge the examples named in state, not a shared word.", candidates),
+        best: choice("Which installed example library or reference file best matches the content, medium and motion this visual request needs? Judge the examples named in state, not a shared word. When the request asks for something new, bold or much better, prefer an index with a point of view (whole pages, 3D, scroll, shaders, distinctive kits) over a generic component library.", candidates),
         scale: {
           type: "choice",
-          instructions: "How much visual change does this request ask for or imply? A fix or polish is surgical; sleek, modern, superior, awesome or amazing licenses a bold change. Judge the user's words and the existing design, not the requested subject.",
+          instructions: "How much visual change does this request ask for or imply? A fix or polish is surgical; sleek, modern, superior, awesome or amazing licenses a bold change, and a big, complete or tremendous improvement of the UI/UX, design or aesthetic, or a UI built from scratch, is the boldest. Judge the user's words and the existing design, not the requested subject.",
           criteria: Object.fromEntries(EXAMPLE_SCALE_CHOICES.map((id) => [id, EXAMPLE_SCALE_DESCRIPTIONS[id]])),
         },
       };
@@ -322,9 +346,10 @@ export const TYPED_DECISIONS: Record<TypedDecisionId, DecisionSpec> = {
         .sort((a, b) => b.probability - a.probability)[0];
       const scaleRead = readJevChoice(answers.scale, EXAMPLE_SCALE_CHOICES);
       const scale = scaleRead && scaleRead.probability >= EXAMPLE_SCALE_MIN ? scaleRead.choice : undefined;
+      const picks = scale && BOLD_EXAMPLE_SCALES.has(scale) ? boldExamplePicks(read.choice, candidates, read.probabilities) : undefined;
       return {
         ok: true,
-        verdict: { best: read.choice, ...(second && second.probability >= SECOND_PICK_MIN ? { second: second.name } : {}), ...(scale ? { scale } : {}) },
+        verdict: { best: read.choice, ...(second && second.probability >= SECOND_PICK_MIN ? { second: second.name } : {}), ...(scale ? { scale } : {}), ...(picks ? { picks } : {}) },
         confidence: read.probability,
         probabilities: read.probabilities,
         margin: read.margin,

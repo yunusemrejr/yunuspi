@@ -265,6 +265,16 @@ test('ported status-ornament cues fire on glow dots, eyebrow pills and invented 
   assert.ok(keys('a.tsx', '<span>🟢 Online</span>').includes('ui-glow-dot'));
   assert.ok(!keys('a.tsx', '<span className="h-2 w-2 rounded-full bg-emerald-500"/>').includes('ui-glow-dot'), 'a static dot stays ui-dot-marker');
   assert.ok(!keys('a.tsx', '<span>Options ● more</span>').includes('ui-glow-dot'));
+  // Button lip: a thick darker bottom edge or a hard shadow straight down under a button.
+  assert.ok(keys('a.css', '.btn{background:#c33;border-bottom:4px solid #811}').includes('ui-button-lip'));
+  assert.ok(keys('a.css', 'button.primary{box-shadow:0 4px 0 #811}').includes('ui-button-lip'));
+  assert.ok(keys('a.tsx', '<button className="bg-sky-500 border-b-4 border-sky-700">Go</button>').includes('ui-button-lip'));
+  assert.ok(keys('a.tsx', '<button className="bg-sky-500 shadow-[0_4px_0_#0369a1]">Go</button>').includes('ui-button-lip'));
+  assert.ok(!keys('a.css', '.btn{border-bottom:1px solid #ccc}').includes('ui-button-lip'), 'a hairline is not a lip');
+  assert.ok(!keys('a.css', '.btn{box-shadow:0 4px 12px rgba(0,0,0,.2)}').includes('ui-button-lip'), 'a soft shadow is not a lip');
+  assert.ok(!keys('a.css', '.tab-button{border-bottom:3px solid #c33}').includes('ui-button-lip'), 'a tab underline is not a lip');
+  assert.ok(!keys('a.tsx', '<a className="border-b-4 border-red-500" href="/x">Docs</a>').includes('ui-button-lip'), 'a plain link is not a button');
+  assert.ok(!keys('a.tsx', '<button className="border-4 border-b-4">Go</button>').includes('ui-button-lip'), 'an even border is not a lip');
   // Eyebrow pills: kicker above a heading, emoji introductions, pill clusters.
   assert.ok(keys('a.tsx', '<span className="badge">Q3 Update</span><h1>Report</h1>').includes('ui-eyebrow-pill'));
   assert.ok(keys('a.tsx', '<p>✨ Introducing Acme</p><h1>Acme</h1>').includes('ui-eyebrow-pill'));

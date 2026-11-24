@@ -4,7 +4,7 @@ import { proseReport, metricHasBasis } from './code-quality.ts';
 
 const UI_FILE = /\.(?:html?|css|scss|sass|less|jsx|tsx|vue|svelte|php)$/i;
 export const UI_POLICY_KEYS = new Set(['ui-dot-marker', 'ui-icon-tile', 'ui-accent-rail', 'ui-bulb-brand', 'ui-stock-warm-palette', 'ui-stock-palette', 'ui-stock-editorial', 'ui-live-pill', 'ui-eyebrow-pill', 'ui-glow-dot', 'ui-fake-status-label']);
-export const UI_DESIGN_POLICY = 'Existing UI constraints apply even when the prompt does not repeat them: no decorative colored dots before labels, glowing/pulsing/blinking status dots, animated LIVE-style pills, eyebrow pills or badge clusters above headings, invented status labels (BETA/NEW/LIVE/AI ACTIVE without backing state), boxed icon badges, ornamental accent rails, generic lightbulb branding, or muddy orange/brass/brown default palettes. Necessary state indicators, real subject matter and explicitly requested branding are contextual exceptions requiring evidence, not blanket exemptions. Preserve or improve existing visual identity, illustration/3D craft and motion; a replacement or a successful screenshot alone is not evidence of improvement. For visual upgrades compare baseline and final captures at the same viewport and relevant animation states. Treat violations of these constraints as blocking, not optional taste polish.';
+export const UI_DESIGN_POLICY = 'Existing UI constraints apply even when the prompt does not repeat them: no decorative colored dots before labels, glowing/pulsing/blinking status dots, a button with a thick darker bottom edge or a bold curved accent under it, common pastels with the usual "aesthetic" fonts, animated LIVE-style pills, eyebrow pills or badge clusters above headings, invented status labels (BETA/NEW/LIVE/AI ACTIVE without backing state), boxed icon badges, ornamental accent rails, generic lightbulb branding, or muddy orange/brass/brown default palettes. Necessary state indicators, real subject matter and explicitly requested branding are contextual exceptions requiring evidence, not blanket exemptions. Preserve or improve existing visual identity, illustration/3D craft and motion; a replacement or a successful screenshot alone is not evidence of improvement. For visual upgrades compare baseline and final captures at the same viewport and relevant animation states. Treat violations of these constraints as blocking, not optional taste polish.';
 const EXCLUDED = /(?:^|\/)(?:node_modules|vendor|dist|build|fixtures?|__fixtures__|skills|references)\/|\.(?:min|generated|test|spec)\.|(?:^|\/)SKILL\.md$/i;
 /** Docs-shaped paths document internals legitimately; leakage cues skip them. */
 const DOCS_PATH = /(?:^|\/)(?:docs?|documentation|api-reference|reference|changelog|architecture|adr|design-docs|specs?|guides?)\//i;
@@ -50,6 +50,21 @@ function allowsStockStyle(key: string, direction: string): boolean {
     return key === 'ui-stock-palette' && /\b(?:purple|violet|indigo|pink)\b/i.test(sentence) && /gradient/i.test(sentence)
       || key === 'ui-stock-editorial' && /\b(?:cream|ivory|linen)\b/i.test(sentence) && /\b(?:cursive|script|handwritten|handwriting)\b/i.test(sentence);
   });
+}
+/** A button with a thick darker bottom edge, the fake 3D lip: a bottom border of 3 px or more, or a hard shadow with no blur 3 to 8 px straight down. Tabs, nav items and links carry an underline on purpose. */
+const BUTTON_RULE = /([^{}]*(?:\bbutton\b|\.btn\b|btn-|\.cta\b|\[type=["']?submit["']?\])[^{}]*)\{([^{}]*)\}/gi;
+const TAB_LIKE = /tabs?\b|nav|link|menu|underline|:active|\.active|aria-(?:selected|current)/i;
+const CSS_LIP = /border-bottom(?:-width)?\s*:\s*(?:[3-9]|1\d)(?:\.\d+)?px|box-shadow\s*:\s*0(?:px)?\s+[3-8](?:\.\d+)?px\s+0(?:px)?(?=[\s,;#]|rgba?\(|hsla?\(|$)/i;
+function hasButtonLip(text: string): boolean {
+  for (const [, selector, body] of text.matchAll(BUTTON_RULE)) {
+    if (!TAB_LIKE.test(selector) && CSS_LIP.test(body) && !/(?:^|[;\s])border(?:-width)?\s*:\s*(?:[3-9]|1\d)(?:\.\d+)?px/i.test(body)) return true;
+  }
+  for (const [tag] of text.matchAll(/<(?:button|a)\b[^>]{0,500}>/gi)) {
+    const cls = /class(?:Name)?\s*=\s*["'`{]([^"'`}]*)/i.exec(tag)?.[1] ?? '';
+    if (TAB_LIKE.test(cls) || (/^<a\b/i.test(tag) && !/(?:^|\s)bg-/.test(cls))) continue;
+    if (/(?:^|\s)border-b-[48](?:\s|$)/.test(cls) && !/(?:^|\s)border-[48](?:\s|$)/.test(cls) || /(?:^|\s)shadow-\[0_[3-8]px_0(?:px)?_/.test(cls)) return true;
+  }
+  return false;
 }
 /** Section families of the stock landing template, in its usual order. */
 const TEMPLATE_SECTIONS = [/trusted by|used by|loved by|as seen (?:in|on)|our (?:clients|partners)/i, /\bfeatures?\b|why (?:choose|us)|what we offer|benefits/i, /how it works|in (?:three|3) (?:simple )?steps|get started in/i, /testimonials?|what (?:our )?(?:customers|clients|users) say|reviews/i, /pricing|plans?\b/i, /\bfaq\b|frequently asked/i, /ready to (?:get started|begin|join)|get started today|join (?:thousands|us)|start your (?:free )?trial/i];
@@ -157,6 +172,8 @@ export function slopGuidanceSignals(file: string, value: unknown, limit = 3): Co
     }
     if (/<(?:div|span)\b[^>]{0,800}\b(?:onClick|onclick|@click)\s*=/i.test(text))
       add('ui-clickable-container', 'A div/span has a click handler. Check its complete semantics and keyboard behavior; prefer a native button for actions or a real link for navigation. Verify accessible name, focus and Enter/Space behavior before delivery.');
+    if (hasButtonLip(text))
+      add('ui-button-lip', 'A button has a thick darker bottom edge (a bottom border of 3 px or more, or a hard shadow straight down), the stock fake 3D lip. Use one even border, a fill change or a real pressed state.');
     if (/<a\b[^>]{0,800}\bhref\s*=\s*["'](?:#|javascript:void\(0\))["']/i.test(text))
       add('ui-placeholder-navigation', 'A link has a placeholder destination. Connect navigation to the actual destination, or use a button for an action. Exercise the intended interaction; a convincing visual state is not working behavior.');
     // Markup-shape structural cues: need real tags, so they stay quiet on
