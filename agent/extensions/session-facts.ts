@@ -267,11 +267,46 @@ export function exampleCandidates(event: any, prompt: string): ExampleCandidate[
  * landing pages, heroes and Refero. The line is advisory and never blocks the
  * turn beyond its 3.5 s deadline.
  */
+const SCALE_ORDER: readonly ExampleScale[] = ["keep-design", "polish", "improve", "redesign", "fresh-build"];
+/** An explicit wish to keep the existing design, in English or Turkish. */
+const KEEP_DESIGN_ASKED: readonly RegExp[] = [
+	/\bkeep (?:the )?(?:design|layout|colou?rs?)(?: as (?:it is|is|they are))?\b/i,
+	/\b(?:don'?t|do not) change (?:the )?(?:design|layout|colou?rs?)\b/i,
+	/\bonly polish\b/i,
+	/\bjust a small fix\b/i,
+	/\b(?:tasar[ıi]m|d[üu]zen|renkler)\s+(?:ayn[ıi] kals[ıi]n|de[ğg]i[şs]mesin)\b/i,
+	/\btasar[ıi]ma dokunma\b/i,
+	/\bsadece k[üu][çc][üu]k bir d[üu]zeltme\b/i,
+];
+
+/**
+ * The boldest design scale this session has judged, held across prompts. A
+ * later complaint never lowers it; only an explicit wish to keep the design
+ * does. Reset where the session's other per-session state is reset.
+ */
+export function designScaleMemory(): {
+	remember: (prompt: string) => (judged?: ExampleScale) => ExampleScale | undefined;
+	get: () => ExampleScale | undefined;
+	reset: () => void;
+} {
+	let held: ExampleScale | undefined;
+	return {
+		remember: (prompt) => (judged) => {
+			if (KEEP_DESIGN_ASKED.some((pattern) => pattern.test(prompt))) held = "keep-design";
+			else if (judged && (!held || SCALE_ORDER.indexOf(judged) > SCALE_ORDER.indexOf(held))) held = judged;
+			return held;
+		},
+		get: () => held,
+		reset: () => { held = undefined; },
+	};
+}
+
 export async function pickExampleLine(
 	candidates: readonly ExampleCandidate[],
 	request: string,
 	judge: JudgeFn | undefined,
 	signal?: AbortSignal,
+	rememberScale?: (judged?: ExampleScale) => ExampleScale | undefined,
 ): Promise<string | undefined> {
 	if (!candidates.length) return undefined;
 	const byId = new Map(candidates.map((candidate) => [candidate.id, candidate]));
@@ -288,34 +323,37 @@ export async function pickExampleLine(
 	);
 	const picked: string[] = [];
 	let scale: ExampleScale | undefined;
+	let effective: ExampleScale | undefined;
 	if (judged.ok) {
 		const best = typeof judged.verdict?.best === "string" ? judged.verdict.best : "";
 		const second = typeof judged.verdict?.second === "string" ? judged.verdict.second : "";
 		const judgedScale = judged.verdict?.scale;
 		if (typeof judgedScale === "string" && Object.hasOwn(EXAMPLE_SCALE_DESCRIPTIONS, judgedScale)) scale = judgedScale as ExampleScale;
+		effective = rememberScale ? rememberScale(scale) : scale;
 		const rawPicks = judged.verdict?.picks;
 		const wide = Array.isArray(rawPicks) ? rawPicks.filter((id): id is string => typeof id === "string") : [];
 		// A bold scale names up to four, already ranked, with one index that has a point of view among them.
-		if (scale && BOLD_EXAMPLE_SCALES.has(scale) && wide.length) picked.push(...wide);
+		if (effective && BOLD_EXAMPLE_SCALES.has(effective) && wide.length) picked.push(...wide);
 		else {
 			if (best) picked.push(best);
 			if (second && second !== best) picked.push(second);
 		}
 	}
-	const bold = scale !== undefined && BOLD_EXAMPLE_SCALES.has(scale);
+	else if (rememberScale) effective = rememberScale(undefined);
+	const bold = effective !== undefined && BOLD_EXAMPLE_SCALES.has(effective);
 	let ids = [...new Set(picked)].filter((id) => byId.has(id)).slice(0, bold ? MAX_BOLD_PICKS : 2);
 	if (!ids.length) ids = STATIC_EXAMPLE_IDS.filter((id) => byId.has(id));
 	if (!ids.length) return undefined;
 	const paths = ids.map((id) => byId.get(id)!.path);
 	const galleries = byId.get("ui-design:galleries")?.path;
 	const guide = galleries ? `Read ${galleries.replace(/patterns\.md$/, "bold-redesign.md")} first: it says how this kind of request is worked and lists every gallery, example and library. ` : "";
-	const tail = scale === "keep-design"
+	const tail = effective === "keep-design"
 		? "Keep the existing design; use the examples only for the detail being fixed."
 		: bold
 			? `${guide}The safe, familiar page is the failure here. Open at least three of them live in the browser, from different sources and past the first familiar one (read the index, then the pages). Commit to one strong idea that suits this brand (3D, scroll motion, a shader, kinetic type or a tactile part where it serves; a tool people work in daily keeps a stable layout), build, then iterate on the screenshot at least twice: a first pass that looks nice is usually the median, so name what is generic and replace it. Name what you took from each.`
 			: "Open several, take the parts that fit, adapt them to this project, iterate on screenshots.";
 	let line = `Examples for this request: ${paths.join(", ")}. ${tail}`;
-	if (scale) line += ` Change scale the request implies: ${scale} (${EXAMPLE_SCALE_DESCRIPTIONS[scale]}); ${bold
+	if (effective) line += ` Change scale the request implies: ${effective} (${EXAMPLE_SCALE_DESCRIPTIONS[effective]}); ${bold
 		? "the name, the logo and what the product says stay unless asked; nothing else is kept only because it is there."
 		: "the logo stays unless asked, and colors and layout stay unless the scale or the user says otherwise."}`;
 	return line;
@@ -326,7 +364,7 @@ export async function pickExampleLine(
  * any other message. Clear visual vocabulary needs no judge to enter; the
  * judge only picks among the installed examples.
  */
-export async function designExamplesLineFor(event: any, judge: JudgeFn | undefined): Promise<string | undefined> {
+export async function designExamplesLineFor(event: any, judge: JudgeFn | undefined, rememberScale?: (judged?: ExampleScale) => ExampleScale | undefined): Promise<string | undefined> {
 	const prompt = typeof event?.prompt === "string" ? event.prompt : "";
 	if (uiPromptCue(prompt).strength !== "strong") return undefined;
 	const candidates = exampleCandidates(event, prompt);
@@ -334,7 +372,7 @@ export async function designExamplesLineFor(event: any, judge: JudgeFn | undefin
 	const deadline = AbortSignal.timeout(DESIGN_EXAMPLES_TIMEOUT_MS);
 	const signal = event?.signal ? AbortSignal.any([event.signal, deadline]) : deadline;
 	try {
-		return await pickExampleLine(candidates, prompt, judge, signal);
+		return await pickExampleLine(candidates, prompt, judge, signal, rememberScale);
 	} catch {
 		return undefined;
 	}
@@ -385,6 +423,8 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	let pending: { signal?: AbortSignal } | undefined;
 	/** True once the speed note reached this run, on either path. */
 	let hurrySent = false;
+	/** The boldest design scale judged in this session; a complaint never lowers it. */
+	const designScale = designScaleMemory();
 
 	const entriesOf = (ctx: any): any[] => {
 		try {
@@ -444,6 +484,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		lastRun = undefined;
 		pending = undefined;
 		hurrySent = false;
+		designScale.reset();
 	};
 	pi.on("session_start", reset);
 	pi.on("session_switch", reset);
@@ -511,8 +552,12 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 			} catch {
 				/* no usable cache data: the figure stays out */
 			}
+			const prompt = typeof event?.prompt === "string" ? event.prompt : "";
+			const rememberScale = designScale.remember(prompt);
 			const examples = await designExamplesLineFor(event, (site, state, questions, options) =>
-				askJev(site, state, questions, { pi, signal: options?.signal, timeoutMs: DESIGN_EXAMPLES_TIMEOUT_MS }));
+				askJev(site, state, questions, { pi, signal: options?.signal, timeoutMs: DESIGN_EXAMPLES_TIMEOUT_MS }), rememberScale);
+			// An explicit wish to keep the design registers even when the prompt is not read as visual work.
+			rememberScale(undefined);
 			const content = sessionFactsText({
 				now: new Date(),
 				zone: resolveTimeZone().zone,

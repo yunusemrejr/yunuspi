@@ -12,6 +12,7 @@ import { DefaultPackageManager } from "./package-manager.js";
 import { loadPromptTemplates } from "./prompt-templates.js";
 import { SettingsManager } from "./settings-manager.js";
 import { loadSkills } from "./skills.js";
+import { slimNotesFile, slimNotesOn } from "./slim-notes.js";
 import { createSourceInfo } from "./source-info.js";
 import { resetTimings } from "./timings.js";
 function resolvePromptInput(input, description) {
@@ -38,7 +39,7 @@ function capContextContent(content, filePath) {
         return content;
     return `${content.slice(0, CONTEXT_FILE_MAX_CHARS)}\n\n[Truncated: ${filePath} is ${content.length} chars; only the first ${CONTEXT_FILE_MAX_CHARS} are inlined. Read the file for the rest.]`;
 }
-function loadContextFileFromDir(dir) {
+function loadContextFileFromDir(dir, slim = false) {
     const candidates = ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD"];
     for (const filename of candidates) {
         const filePath = join(dir, filename);
@@ -47,9 +48,11 @@ function loadContextFileFromDir(dir) {
                 if (!statSync(filePath).isFile()) {
                     continue;
                 }
+                const text = stripBom(readFileSync(filePath, "utf-8"));
+                const shortened = slim && slimNotesOn() ? slimNotesFile(filePath, text) : text;
                 return {
                     path: filePath,
-                    content: capContextContent(stripBom(readFileSync(filePath, "utf-8")), filePath),
+                    content: capContextContent(shortened, filePath),
                 };
             }
             catch (error) {
@@ -102,7 +105,7 @@ export function loadProjectContextFiles(options) {
     const shadowedContextFile = findShadowedContextFile(resolvedCwd);
     let currentDir = resolvedCwd;
     while (true) {
-        const contextFile = loadContextFileFromDir(currentDir);
+        const contextFile = loadContextFileFromDir(currentDir, true);
         const isShadowed = shadowedContextFile !== undefined && canonicalizePath(contextFile?.path ?? "") === shadowedContextFile;
         if (contextFile && !isShadowed && !seenPaths.has(contextFile.path)) {
             ancestorContextFiles.unshift(contextFile);

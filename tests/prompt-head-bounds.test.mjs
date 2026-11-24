@@ -28,12 +28,14 @@ test('context files are capped per file with a truncation notice', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'yp-ctx-'));
   const agentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'yp-agent-'));
   try {
-    fs.writeFileSync(path.join(dir, 'AGENTS.md'), 'x'.repeat(70_000));
+    // Dense short sections: slimming saves nothing, so the per-file cap still applies.
+    const dense = Array.from({ length: 2_000 }, (_, i) => `## Rule ${i}\n\nDo thing ${i} exactly this way.`).join('\n');
+    fs.writeFileSync(path.join(dir, 'AGENTS.md'), dense);
     const files = loadProjectContextFiles({ cwd: dir, agentDir });
     const hit = files.find(f => f.path === path.join(dir, 'AGENTS.md'));
     assert.ok(hit, 'context file discovered');
     assert.ok(hit.content.length < 66_000, `capped, got ${hit.content.length}`);
-    assert.match(hit.content, /\[Truncated: .*70000 chars/);
+    assert.match(hit.content, new RegExp(`\\[Truncated: .*${dense.length} chars`));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(agentDir, { recursive: true, force: true });

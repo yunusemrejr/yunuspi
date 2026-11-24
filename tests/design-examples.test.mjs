@@ -10,7 +10,7 @@ import { pathToFileURL } from 'node:url';
 process.env.PI_JEV = 'off';
 const root = path.resolve(import.meta.dirname, '..');
 const {
-  designExamplesLineFor, exampleCandidates, uncommonReferencesFor, pickExampleLine, DESIGN_EXAMPLES_TIMEOUT_MS,
+  designExamplesLineFor, designScaleMemory, exampleCandidates, uncommonReferencesFor, pickExampleLine, DESIGN_EXAMPLES_TIMEOUT_MS,
 } = await import(pathToFileURL(path.join(root, 'agent/extensions/session-facts.ts')).href);
 
 const skills = (names) => ({
@@ -81,6 +81,24 @@ test('a bold scale reads the bold guide, opens three live examples and iterates 
   }
 });
 
+test('the boldest scale holds for the session: a complaint never lowers it, an explicit keep does', async () => {
+  const memory = designScaleMemory();
+  const bold = await designExamplesLineFor({ ...installed, prompt: VISUAL }, judgeWith('scrolltide:heroes', { 'scrolltide:heroes': 0.6, 'uncommon:shaders-webgl-3d': 0.3 }, 'redesign'), memory.remember(VISUAL));
+  assert.match(bold, /Change scale the request implies: redesign/);
+  assert.ok(bold.includes(CRAFT));
+  const complaint = 'The landing page hero looks off; make it better';
+  const afterComplaint = await designExamplesLineFor({ ...installed, prompt: complaint }, judgeWith('scrolltide:heroes', { 'scrolltide:heroes': 0.8 }, 'polish'), memory.remember(complaint));
+  assert.match(afterComplaint, /Change scale the request implies: redesign/, 'the complaint keeps the bold scale');
+  assert.ok(afterComplaint.includes(CRAFT), 'the bold guide still applies');
+  assert.equal(memory.get(), 'redesign');
+  const keep = 'Keep the design as it is; only polish the landing page hero spacing';
+  const kept = await designExamplesLineFor({ ...installed, prompt: keep }, judgeWith('scrolltide:heroes', { 'scrolltide:heroes': 0.8 }, 'keep-design'), memory.remember(keep));
+  assert.match(kept, /Change scale the request implies: keep-design/);
+  assert.equal(memory.get(), 'keep-design', 'an explicit keep lowers it');
+  memory.reset();
+  assert.equal(memory.get(), undefined);
+});
+
 test('the other scales keep their wording and never name the bold guide', async () => {
   for (const scale of ['polish', 'improve']) {
     const line = await designExamplesLineFor({ ...installed, prompt: VISUAL }, judgeWith('scrolltide:heroes', { 'scrolltide:heroes': 0.6, 'uncommon:shaders-webgl-3d': 0.3 }, scale));
@@ -115,7 +133,7 @@ test('the bold guide ships with the harness and the guides point to it', () => {
   const skillsDir = path.join(root, 'agent/skills');
   const guide = fs.readFileSync(path.join(skillsDir, 'ui-design/references/bold-redesign.md'), 'utf8');
   assert.match(guide, /Existing work is judged part by part/);
-  assert.match(guide, /at least three live examples/);
+  assert.match(guide, /Open the best four to six fully|the best four to six opened in full/);
   assert.match(guide, /Two rounds at least/);
   assert.match(guide, /a bold curved accent or thick darker edge under a button; blinking or pulsing dot indicators; common pastel colors/);
   assert.match(guide, /Dashboards and daily tools\*\* keep a stable, predictable layout/);
