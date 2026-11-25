@@ -44,6 +44,7 @@
     "adaptive-workflows.ts",
     "blender-studio.ts",
     "session-facts.ts",
+    "needed-check.ts",
     "yuncontext.ts"
   ],
   "lib": [
@@ -121,6 +122,7 @@
     "model-facts.ts",
     "model-routing-metrics.ts",
     "music-score.ts",
+    "needed.ts",
     "needle-assets.mjs",
     "needle-embedding-cache.mjs",
     "needle-policy.ts",
@@ -135,6 +137,7 @@
     "office-render.ts",
     "office-zip.ts",
     "output-distiller.ts",
+    "pace.ts",
     "path-safety.ts",
     "popup-theme.ts",
     "pptx-build.ts",

@@ -36,7 +36,7 @@ import { askJev } from "./lib/jev-client.ts";
 import { askTypedDecision, BOLD_EXAMPLE_SCALES, EXAMPLE_SCALE_DESCRIPTIONS, MAX_BOLD_PICKS, type ExampleScale } from "./lib/micro-intelligence/jev-decisions.ts";
 import type { JudgeFn } from "./lib/micro-intelligence/review.ts";
 import { uiPromptCue } from "./lib/ui-doctrine.ts";
-import { Pace, type PaceSubagent } from "./pace.ts";
+import { Pace, type PaceSubagent } from "./lib/pace.ts";
 
 const RUN_STATE = Symbol.for("yunus-pi.run.v1");
 /** The pace note goes to the model only, like the facts line. */

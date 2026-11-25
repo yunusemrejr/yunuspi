@@ -10,6 +10,11 @@ import * as fs from "node:fs";
  * "cannot verify", never as "verified dead".
  */
 export function readProcessStartIdentity(pid: number, readFileSync: typeof fs.readFileSync = fs.readFileSync): string | undefined {
+	return readProcessState(pid, readFileSync)?.startIdentity;
+}
+
+/** The start identity and the scheduler state letter of `pid` (`Z` is a zombie that has exited); undefined when unreadable. */
+export function readProcessState(pid: number, readFileSync: typeof fs.readFileSync = fs.readFileSync): { startIdentity: string; state: string } | undefined {
 	if (process.platform !== "linux") return undefined;
 	try {
 		const stat = readFileSync(`/proc/${pid}/stat`, "utf-8") as string;
@@ -21,7 +26,7 @@ export function readProcessStartIdentity(pid: number, readFileSync: typeof fs.re
 		if (commandEnd === -1) return undefined;
 		const fields = stat.slice(commandEnd + 1).trim().split(/\s+/);
 		const startTicks = fields[19];
-		return startTicks ? `linux:${startTicks}` : undefined;
+		return startTicks && fields[0] ? { startIdentity: `linux:${startTicks}`, state: fields[0] } : undefined;
 	} catch {
 		return undefined;
 	}

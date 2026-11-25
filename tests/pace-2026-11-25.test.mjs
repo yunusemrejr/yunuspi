@@ -12,7 +12,7 @@ import { SessionManager } from '../core/coding-agent/dist/core/session-manager.j
 process.env.PI_JEV = 'off';
 
 const root = path.resolve(import.meta.dirname, '..');
-const { Pace, averageOut, paceNote } = await import(pathToFileURL(path.join(root, 'agent/extensions/pace.ts')).href);
+const { Pace, averageOut, paceNote } = await import(pathToFileURL(path.join(root, 'agent/extensions/lib/pace.ts')).href);
 const { default: registerSessionFacts } = await import(pathToFileURL(path.join(root, 'agent/extensions/session-facts.ts')).href);
 
 const MIN = 60_000;

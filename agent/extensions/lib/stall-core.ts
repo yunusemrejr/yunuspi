@@ -46,7 +46,7 @@ function loopFingerprint(value: unknown): string | undefined {
 const GUARD_PREFIX = "[strategy-change-required]";
 const PASSIVE_TOOLS = new Set(["process", "wait", "wait_agent", "sleep", "clock", "subagent", "bg_wait"]);
 /** Waiting and status polls repeat legitimately while work runs elsewhere. */
-const isPassiveCall = (event: Pick<ToolResultEvent, "toolName" | "input">): boolean => {
+export const isPassiveCall = (event: Pick<ToolResultEvent, "toolName" | "input">): boolean => {
 	const action = event.input?.action;
 	return PASSIVE_TOOLS.has(event.toolName) || action === "status" || action === "wait" || action === "poll";
 };

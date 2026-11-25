@@ -46,6 +46,7 @@ import { createAsyncJobTracker } from "../runs/background/async-job-tracker.ts";
 import { getActiveAsyncCapacitySnapshot, resolveAbandonedSlotReleaseAfterMs, resolveMaxActiveAsyncRunsPerSession } from "../runs/background/active-async-capacity.ts";
 import { cleanupResultIndexes, missionObserverResultCandidateFiles } from "../runs/background/result-files.ts";
 import { ASYNC_RETENTION_DELAY_MS, cleanupAsyncRetention } from "../runs/background/async-retention.ts";
+import { endOrphans, endOwnChildren, signalOwnChildrenAtExit, stillRunningNote } from "../runs/shared/nothing-left-running.ts";
 import { createResultWatcher } from "../runs/background/result-watcher.ts";
 import { createResultDeliveryOwnership } from "../runs/background/result-delivery-ownership.ts";
 import { createScheduledRunManager } from "../runs/background/scheduled-runs.ts";
@@ -432,6 +433,19 @@ export function projectActiveHerdrRuns(state: SubagentState): HerdrStatusRun[] {
 		});
 }
 
+let leavingHooksInstalled = false;
+/** Once per process: a TERM-less exit signals the session's children, and INT (which pi does not handle) ends them before the process leaves. */
+function installLeavingHooks(): void {
+	if (leavingHooksInstalled) return;
+	leavingHooksInstalled = true;
+	process.once("exit", () => signalOwnChildrenAtExit());
+	process.on("SIGINT", () => {
+		// Another handler (a suspended terminal ignoring INT) owns the decision.
+		if (process.listenerCount("SIGINT") > 1) return;
+		void Promise.race([endOwnChildren("session-end"), new Promise<void>((resolve) => setTimeout(resolve, 4_500))]).finally(() => process.exit(130));
+	});
+}
+
 export default function registerSubagentExtension(pi: ExtensionAPI): void {
 	if (process.env[SUBAGENT_CHILD_ENV] === "1") {
 		return;
@@ -544,6 +558,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		: undefined;
 	let executorScheduled: ((id: string, params: SubagentParamsLike, signal: AbortSignal, ctx: ExtensionContext) => Promise<AgentToolResult<Details>>) | undefined;
 	let goalTurnId = 0;
+	/** Workers the still-running note already named: each is told once. */
+	const notedStillRunning = new Set<string>();
 	let parentSessionEnvValue: string | null = null;
 	const scheduledStoreRoot = config.scheduledRuns?.storeRoot === undefined ? undefined : resolveScheduledStoreRoot(config.scheduledRuns.storeRoot);
 	const scheduledRunManager = createScheduledRunManager({
@@ -841,6 +857,16 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 
 	pi.on("agent_end", async (event, ctx) => {
 		if (!ctx.hasUI && !event.aborted) await drainOutstandingWork({ state, events: pi.events, signal: ctx.signal });
+		try {
+			// A stop with workers still out is told once per worker; the completion wake brings the next turn.
+			const out = [...state.asyncJobs.values()].filter((job) => (job.status === "queued" || job.status === "running") && !notedStillRunning.has(job.asyncId));
+			if (out.length > 0) {
+				for (const job of out) notedStillRunning.add(job.asyncId);
+				const now = Date.now();
+				const content = stillRunningNote(out.map((job) => ({ name: job.agents?.[0] ?? "subagent", startedAt: job.startedAt ?? now })), now);
+				pi.sendMessage({ customType: "subagents-still-running", content, display: false }, { deliverAs: "nextTurn" });
+			}
+		} catch { /* the note is advisory */ }
 		const ownerSessionId = state.currentSessionId;
 		if (!ownerSessionId) return;
 		goalTurnId += 1;
@@ -1191,11 +1217,15 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		});
 		rpcBridge.emitReady(ctx);
 		supervisorChannel.start();
-		supervisorChannel.activateTransport();
+		supervisorChannel.activateTransport();		void endOrphans();
 	});
 
-	pi.on("session_shutdown", async () => {
+	installLeavingHooks();
+
+	pi.on("session_shutdown", async (event) => {
 		runtimeEntry.cleanup();
 		await herdrStatusBridge.flush();
+		// A reload or a switch to another session keeps its runs going; leaving does not.
+		if (event.reason === "quit") await endOwnChildren("session-end");
 	});
 }

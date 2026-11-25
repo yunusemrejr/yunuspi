@@ -1,5 +1,6 @@
 import { addUsageCost, addAuxiliaryUsage, snapshotChildUsage, finalizeChildUsage } from "../../shared/cost-accounting.ts";
 import { captureFileVerification, hasFailedFileVerification } from "../shared/file-verification.ts";
+import { recordChild } from "../shared/nothing-left-running.ts";
 import { shadowAssistanceLaunch } from "../shared/assistance-shadow.ts";
 import { createProgressEvidence, observeProgressEvidence } from "../../shared/progress-evidence.ts";
 /**
@@ -706,6 +707,7 @@ async function runSingleAttempt(
 			return;
 		}
 		if (proc.pid) lease.markChild(proc.pid);
+		if (proc.pid) proc.once("close", recordChild({ kind: "foreground", pid: proc.pid, group: false }));
 		proc.once("spawn", () => {
 			try { shared.onLaunch(); options.onProcessStarted?.(); } catch { /* Observability cannot alter child execution. */ }
 		});

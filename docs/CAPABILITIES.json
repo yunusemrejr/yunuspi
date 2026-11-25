@@ -3470,7 +3470,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 787,
+        "line": 803,
         "kind": "definition"
       },
       {
@@ -3957,7 +3957,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          838
+          854
         ],
         "knownNames": [
           "subagent"
@@ -4060,7 +4060,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 666,
+      "sourceFiles": 669,
       "registrationSites": 62,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 79,
@@ -4169,6 +4169,10 @@
       },
       {
         "path": "agent/extensions/model-routing-config.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/needed-check.ts",
         "exists": true
       },
       {
@@ -4618,6 +4622,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/needed.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/needle-assets.mjs",
         "exists": true
       },
@@ -4671,6 +4679,10 @@
       },
       {
         "path": "agent/extensions/lib/output-distiller.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/pace.ts",
         "exists": true
       },
       {

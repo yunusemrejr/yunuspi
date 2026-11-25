@@ -24,6 +24,7 @@ import { resolveInstalledPiPackageRoot, resolvePiPackageRoot } from "../shared/p
 import { preflightLaunchCwd } from "../shared/launch-cwd.ts";
 import { resolveNodeExecutable } from "../../shared/node-executable.ts";
 import { backgroundProcessOptions } from "../shared/background-process-options.ts";
+import { recordChild } from "../shared/nothing-left-running.ts";
 import { buildSkillInjection, normalizeSkillInput, resolveSkillsWithFallback } from "../../agents/skills.ts";
 import { buildAgentMemoryInjection } from "../../agents/agent-memory.ts";
 import { PI_CODING_AGENT_PACKAGE_ROOT_ENV, PROMPT_REDACTED, resolveChildCwd } from "../../shared/utils.ts";
@@ -642,6 +643,8 @@ async function spawnRunner(cfg: object, suffix: string, cwd: string, initialStat
 		if (typeof proc.pid !== "number") {
 			return { error: `async runner did not produce a pid for cwd: ${cwd}` };
 		}
+		// The runner leads its own process group, so ending the session ends the group.
+		proc.once("close", recordChild({ kind: "runner", pid: proc.pid, group: backgroundProcessOptions().detached }));
 		try {
 			const guarded = writePrivateGuardedStatus(initialStatusPath, {
 				...initialStatus,
