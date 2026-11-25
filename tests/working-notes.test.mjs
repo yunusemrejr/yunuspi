@@ -25,10 +25,17 @@ test('the built-in notes cover every area a session needs judgment in', () => {
     assert.match(WORKING_NOTES, new RegExp(`^${heading}`, 'm'), heading);
   }
   // The notes ride in every request, so their size is a budget, not an accident.
-  assert.ok(WORKING_NOTES.length < 20_300, `notes are ${WORKING_NOTES.length} chars`);
+  assert.ok(WORKING_NOTES.length < 21_200, `notes are ${WORKING_NOTES.length} chars`);
   for (const notes of [WORKING_NOTES, DELEGATED_NOTES]) {
     assert.match(notes, /Be quick and pragmatic\. Time, tokens and quality all matter/);
   }
+  // Time is part of the result: independent pieces launch in one call and the dependent chain is shortened first.
+  assert.match(WORKING_NOTES, /Time is part of the result\. Before a job with several pieces, lay out which are independent, which need another piece's result and which touch the same file, then launch the independent ones in one call\./);
+  assert.match(WORKING_NOTES, /The longest chain of pieces that depend on each other sets the finish time: shorten it first\./);
+  assert.match(WORKING_NOTES, /Never queue pieces behind one subagent or one file when they could be built in files of their own and joined once\./);
+  // A desktop-only tool is checked at the widths its users have.
+  assert.ok(WORKING_NOTES.includes('A tool that only ever runs on a known desktop machine (a plant, lab or admin console) is built and checked at the widths its users have.'));
+  assert.ok(WORKING_NOTES.includes('a rendered page at phone and desktop width (desktop only for a desktop-only tool)'));
 });
 
 test('a big improvement is the boldest scale and is worked with the bold guide', () => {

@@ -36,8 +36,20 @@ import { askJev } from "./lib/jev-client.ts";
 import { askTypedDecision, BOLD_EXAMPLE_SCALES, EXAMPLE_SCALE_DESCRIPTIONS, MAX_BOLD_PICKS, type ExampleScale } from "./lib/micro-intelligence/jev-decisions.ts";
 import type { JudgeFn } from "./lib/micro-intelligence/review.ts";
 import { uiPromptCue } from "./lib/ui-doctrine.ts";
+import { Pace, type PaceSubagent } from "./pace.ts";
 
 const RUN_STATE = Symbol.for("yunus-pi.run.v1");
+/** The pace note goes to the model only, like the facts line. */
+const PACE_NOTE_TYPE = "pace-note";
+/** The window is measured per extension runtime, which serves one session at a time. */
+const PACE_SESSION = "session";
+/** Subagent spans kept for the average; older ones cannot overlap a live window. */
+const MAX_SUBAGENT_SPANS = 128;
+
+/** A subagent span with the id that closes it. */
+interface SubagentSpan extends PaceSubagent {
+	key: string;
+}
 const CUSTOM_TYPE = "session-facts";
 const BUDGET_NOTE_TYPE = "run-budget";
 const HURRY_NOTE_TYPE = "session-hurry";
@@ -533,6 +545,40 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	let hurrySent = false;
 	/** The boldest design scale judged in this session; a complaint never lowers it. */
 	const designScale = designScaleMemory();
+	const pace = new Pace();
+	const subagentSpans: SubagentSpan[] = [];
+	const subagentOut = (): boolean => subagentSpans.some((span) => span.end === undefined);
+	/** One started event per run; a `tasks` list or a parallel chain launches several children at once. */
+	const childCountOf = (event: any): number => {
+		const groups = Array.isArray(event?.parallelGroups) ? event.parallelGroups : [];
+		const widest = Math.max(0, ...groups.map((group: any) => Number(group?.count) || 0));
+		return widest > 0 ? widest : 1;
+	};
+	const startSubagent = (key: string, children: number): void => {
+		if (!key) return;
+		const start = Date.now();
+		const count = Math.min(Math.max(1, Math.trunc(children)), MAX_SUBAGENT_SPANS);
+		for (let index = 0; index < count; index++) subagentSpans.push({ key, start });
+		while (subagentSpans.length > MAX_SUBAGENT_SPANS) subagentSpans.shift();
+	};
+	const endSubagent = (key: string, durationMs: number, results?: unknown): void => {
+		if (!key) return;
+		const now = Date.now();
+		let closed = false;
+		for (const span of subagentSpans) {
+			if (span.key === key && span.end === undefined) {
+				span.end = now;
+				closed = true;
+			}
+		}
+		if (closed) return;
+		// A run first seen at its completion (a recovered or detached result) still
+		// has a measured length; without one it cannot be placed in a window.
+		if (!Number.isFinite(durationMs) || durationMs < 0) return;
+		const children = Array.isArray(results) && results.length > 0 ? Math.min(results.length, MAX_SUBAGENT_SPANS) : 1;
+		for (let index = 0; index < children; index++) subagentSpans.push({ key, start: now - durationMs, end: now });
+		while (subagentSpans.length > MAX_SUBAGENT_SPANS) subagentSpans.shift();
+	};
 	/** The Where line, computed once and recomputed only when the working folder changes. */
 	let where: { cwd: string; line: string } | undefined;
 	const whereFor = (cwd: string): string => {
@@ -600,6 +646,8 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		hurrySent = false;
 		designScale.reset();
 		where = undefined;
+		subagentSpans.length = 0;
+		pace.end(PACE_SESSION);
 	};
 	pi.on("session_start", reset);
 	pi.on("session_switch", reset);
@@ -613,12 +661,41 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		}
 	});
 
+	// Subagent spans feed the pace note's average and its "is one still out"
+	// check. A failure here must never reach the subagent's own run.
+	try {
+		pi.events.on("subagent:async-started", (event: any) => {
+			try {
+				startSubagent(String(event?.id ?? ""), childCountOf(event));
+			} catch {
+				/* the pace is advisory */
+			}
+		});
+		pi.events.on("subagent:async-complete", (event: any) => {
+			try {
+				endSubagent(String(event?.runId ?? event?.id ?? ""), Number(event?.durationMs), event?.results);
+			} catch {
+				/* the pace is advisory */
+			}
+		});
+		pi.events.on("subagent:process-terminal", (event: any) => {
+			try {
+				endSubagent(String(event?.runId ?? ""), Number.NaN);
+			} catch {
+				/* the pace is advisory */
+			}
+		});
+	} catch {
+		/* an older runtime without the event bus leaves the note off */
+	}
+
 	pi.on("input", (event: any) => {
 		try {
 			if (event?.source === "extension") {
 				pending = undefined;
 				return undefined;
 			}
+			pace.human(PACE_SESSION, subagentOut());
 			const steer = (event?.source === "interactive" || event?.source === "rpc") && Boolean(event?.streamingBehavior);
 			if (steer) {
 				if (!hurrySent && hurryRequested(event?.originalText ?? event?.text)) {
@@ -642,7 +719,14 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 			if (run) run.resting = false;
 			const input = pending;
 			pending = undefined;
-			if (!input || input.signal?.aborted) return undefined;
+			if (!input) {
+				// No person typed this run: a subagent result or another extension
+				// woke the agent. The wait since the last run ended is measured here,
+				// and the note is one the model should read before waiting again.
+				const note = pace.machine(PACE_SESSION, subagentSpans);
+				return note ? { message: { customType: PACE_NOTE_TYPE, content: note, display: false } } : undefined;
+			}
+			if (input.signal?.aborted) return undefined;
 			const entries = entriesOf(ctx);
 			const spend = sessionUsd(ctx, entries);
 			if (run) {
@@ -694,6 +778,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 
 	pi.on("turn_end", (_event: any, ctx: any) => {
 		try {
+			pace.working(PACE_SESSION);
 			touch();
 			if (run) refreshUsd(sessionUsd(ctx));
 		} catch {
@@ -703,6 +788,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	pi.on("agent_end", () => {
 		pending = undefined;
 		try {
+			pace.stopped(PACE_SESSION);
 			touch();
 			if (run) run.resting = true;
 			// The run is over: a run the harness starts next may be hurried again.
@@ -714,6 +800,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 
 	pi.on("tool_result", (_event: any, ctx: any) => {
 		try {
+			pace.working(PACE_SESSION);
 			if (!run) return undefined;
 			touch();
 			const limits = run.limits;
