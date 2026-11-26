@@ -226,7 +226,7 @@ test("foreground and background hooks share policy; review approvals never overr
   safety.default({
     on: (name, fn) => hooks.set(name, [...(hooks.get(name) ?? []), fn]),
   });
-  let confirmations = 0;
+  let confirmations = 0, answer = true;
   const ctx = {
     cwd,
     hasUI: true,
@@ -234,7 +234,7 @@ test("foreground and background hooks share policy; review approvals never overr
       notify() {},
       async confirm() {
         confirmations++;
-        return true;
+        return answer;
       },
     },
   };
@@ -247,12 +247,18 @@ test("foreground and background hooks share policy; review approvals never overr
   for (const tool of ["bash", "bg_run"]) {
     assert.equal(await call("rm -rf ./build", tool), undefined);
     assert.equal((await call("rm -f /etc/passwd", tool))?.block, true);
-    assert.equal((await call('rm -rf "$UNKNOWN"', tool))?.block, true);
+    // A target nobody can read is put to the user, not guessed and not refused unseen.
+    assert.equal(await call('rm -rf "$UNKNOWN"', tool), undefined);
     assert.equal(await call("rm -rf .", tool), undefined);
   }
-  assert.equal(confirmations, 2);
+  assert.equal(confirmations, 4);
+  answer = false;
+  assert.equal((await call('rm -rf "$UNKNOWN"'))?.block, true, "declined");
+  assert.equal(confirmations, 5);
   ctx.hasUI = false;
   assert.equal((await call("rm -rf ."))?.block, true);
+  assert.equal((await call('rm -rf "$UNKNOWN"'))?.block, true, "nobody to ask");
+  assert.equal(confirmations, 5);
 });
 test("safety confirms record accounted waits for hook-health attribution", async () => {
   const hooks = new Map();
@@ -390,4 +396,67 @@ test("agent memory has one write policy for shell and edit: entries writable, tr
   for (const command of [`rm -rf ${memory}`, `rm -rf ${memory}/projects`, `rm -f ${memory}/*`])
     assert.equal(risk(command)?.level, "block", command);
   assert.equal(risk(`echo x >> ${home}/.bashrc`)?.level, "block", "other home files stay protected");
+});
+
+test("a loop variable bound to literal words is read as each of them, and unknown otherwise", () => {
+  const clear = [
+    'for f in a.txt b.txt; do rm -f "$f"; done',
+    'for f in app.css panel.css; do cp "$f" ../../verify/$f; done',
+    'for t in one two; do ./run --$t > /tmp/out_$t.log 2>&1; done',
+    'for a in x y; do for b in 1 2; do rm -f "$a$b"; done; done',
+    'for f in *.log; do rm -f "$f"; done',
+  ];
+  for (const command of clear) assert.equal(risk(command), undefined, command);
+  // Every word is read, so one that reaches a protected place still blocks.
+  for (const command of ['for d in build /etc; do rm -rf "$d"; done', 'for d in tmp-a /; do rm -rf $d; done', 'for f in ok.txt ../../../etc/hosts; do rm -f "$f"; done'])
+    assert.equal(risk(command)?.level, "block", command);
+  // Anything else about the operand, or the loop, stays unknown.
+  for (const command of [
+    'for f in $(ls); do rm -f "$f"; done',
+    'for f in a b; do f=$(pick); rm -f "$f"; done',
+    'for f in a b; do read f; rm -f "$f"; done',
+    'for f in a b; do rm -f "$f"; done; rm -f "$f"',
+    'for f in a b; do rm -f "$f$x"; done',
+    `for f in ${Array.from({ length: 65 }, (_, n) => `f${n}`).join(" ")}; do rm -f "$f"; done`,
+  ]) assert.equal(risk(command)?.resolved, false, command);
+});
+
+test("one named file among the user's own files asks instead of being refused; trees, globs, system paths and secrets stay refused", async () => {
+  const asks = [
+    "echo probe > ~/Downloads/.fusewrite_probe",
+    "rm -f ~/Downloads/.fusewrite_probe",
+    "printf x > ~/.config/autostart/keyring.desktop",
+    "sed -i s/a/b/ ~/.local/share/applications/app.desktop",
+    "echo hi > ~/Desktop/some-project/dev/logs/serve.log",
+  ];
+  for (const command of asks) {
+    const found = risk(command);
+    assert.equal(found?.level, "review", command);
+    assert.equal(found.resolved, true, command);
+  }
+  for (const command of [
+    "rm -rf ~/Downloads/old", "rm ~/Downloads/*", "rm ~/Downloads", "echo x > ~/Desktop", "mv a.txt ~/Downloads/b.txt",
+    "echo x > ~/.ssh/authorized_keys", "echo x > ~/.config/user-dirs.dirs", "echo x > ~/.local/share/keyrings/login.keyring",
+    "echo x > /etc/hosts", "echo x > ~/.pi/agent/settings.json",
+  ]) assert.equal(risk(command)?.level, "block", command);
+
+  const hooks = new Map();
+  safety.default({ on: (name, fn) => hooks.set(name, [...(hooks.get(name) ?? []), fn]) });
+  const prompts = [];
+  let answer = true;
+  const ctx = { cwd, hasUI: true, ui: { notify() {}, async confirm(title, body) { prompts.push({ title, body }); return answer; } } };
+  const call = async command => {
+    for (const hook of hooks.get("tool_call")) {
+      const result = await hook({ toolName: "bash", input: { command } }, ctx);
+      if (result?.block) return result;
+    }
+  };
+  assert.equal(await call(asks[0]), undefined, "the user said yes");
+  assert.equal(prompts.length, 1);
+  assert.match(prompts[0].body, /fusewrite_probe/);
+  answer = false;
+  assert.equal((await call(asks[0]))?.block, true, "the user said no");
+  ctx.hasUI = false;
+  assert.equal((await call(asks[0]))?.block, true, "headless keeps refusing");
+  assert.equal(prompts.length, 2, "headless never asks");
 });

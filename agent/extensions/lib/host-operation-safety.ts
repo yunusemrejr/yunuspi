@@ -6,6 +6,13 @@ import { readFileSync } from 'node:fs';
 
 export type HostOperationRisk = { level: 'block' | 'review'; reason: string; target: string; resolved: boolean };
 
+/** What the shell guard hands `kill` for a PID operand it cannot read as a number.
+ * `$!` is the background job this same command line started; it is never an
+ * ancestor and never another session. A PID taken from `lsof -t`, `pgrep` or
+ * `pidof` is only known once the lookup runs, so that one is the user's say. */
+export const OWN_JOB = '$!';
+export const LOOKED_UP_PID = '$(pid lookup)';
+
 /** Read only process identity fields; never command lines or environment values. */
 export function sessionAncestorPids(): number[] {
   const pids = new Set([1, process.pid, process.ppid]);
@@ -223,10 +230,13 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
     if (signal === '0' && !flag('--timeout')) return;
     const targets = args.slice(i).filter(arg => arg !== '--');
     const protectedPids = ancestors ?? sessionAncestorPids();
-    if (targets.some(arg => !/^\d+$/.test(arg) || Number(arg) === 0 || protectedPids.includes(Number(arg))))
+    const written = targets.filter(arg => arg !== OWN_JOB && arg !== LOOKED_UP_PID);
+    if (written.some(arg => !/^\d+$/.test(arg) || Number(arg) === 0 || protectedPids.includes(Number(arg))))
       return risk(`This signal may terminate the harness, an ancestor or a process group. Inspect the process list (ps) and target an exact unrelated PID; use process/bg tools to stop their own managed jobs${ownedTaskHint()}`);
-    if (targets.some(arg => separateHarnessPid(Number(arg))))
+    if (written.some(arg => separateHarnessPid(Number(arg))))
       return risk('This PID is a session of the separate stock Pi harness (ogpi, ~/.ogpi), not YunusPi: leave it running unless the user asked to stop that session.');
+    if (targets.includes(LOOKED_UP_PID))
+      return risk('This ends whichever process the lookup (lsof, pgrep, pidof) returns, and which one that is cannot be read before it runs. Check what it returns first, or stop your own job with bg_kill', 'review');
   }
   if (name === 'pkill' || name === 'killall') {
     // pkill -s selects a session; only killall uses -s for a signal. A probe
@@ -243,8 +253,10 @@ export function hostOperationRisk(name: string, values: readonly (string | undef
     // session stopping its own work (a dev server, a watcher): nothing to guard.
     const matched = values.includes(undefined) ? undefined : probe.matched(name, args);
     const guarded = ancestors ?? sessionAncestorPids();
-    if (matched?.length && matched.every(({ pid }) => !guarded.includes(pid) && probe.owned(pid))) return;
-    const reach = matched === undefined ? '' : matched.length ? ` Right now it matches ${tally(matched)}, and not all of those were started by this session.` : ' Right now it matches no process.';
+    // pgrep reports "nothing matched" only by its exit status, so an empty list
+    // is a measured fact, not a failed probe: the signal reaches no process.
+    if (matched && (!matched.length || matched.every(({ pid }) => !guarded.includes(pid) && probe.owned(pid)))) return;
+    const reach = matched?.length ? ` Right now it matches ${tally(matched)}, and not all of those were started by this session.` : '';
     return risk(`Name/pattern-wide process termination can kill this harness or unrelated applications.${reach} Inspect the process list (ps) and use an exact unrelated PID or the owning managed-job tool${ownedTaskHint()}`);
   }
   if (name === 'wipefs') {

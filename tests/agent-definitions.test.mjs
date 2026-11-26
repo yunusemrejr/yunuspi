@@ -47,6 +47,8 @@ test('read-and-answer agents return in the same call; long-running agents start 
     for (const name of ['worker', 'delegate', 'researcher']) assert.equal(builtin.get(name)?.defaultAsync, undefined, name);
     const scout = builtin.get('scout');
     assert.ok(!scout.tools.includes('write') && !scout.tools.includes('edit'), 'a scout changes nothing');
+    // A foreground child has no circuit breaker (only background runs do): a 95-turn, 109-tool-call scout ran 439 s on 17 Nov.
+    assert.deepEqual(scout.toolBudget, { soft: 40, hard: 80, block: '*' }, 'a scout is told to finish at 40 tool calls and has every tool blocked past 80');
     assert.match(scout.systemPrompt, /A direct question[^\n]*gets a direct answer/);
     assert.match(scout.systemPrompt, /A request to map an area[^\n]*gets a handoff/);
   } finally { fs.rmSync(work, { recursive: true, force: true }); discovery.clearAgentDiscoveryCache(); }

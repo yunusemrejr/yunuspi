@@ -9,7 +9,7 @@ import {
 	type Consequence, type ParsedCommand,
 } from "./lib/command-consequence.ts";
 import { commandIntent, HARNESS_INPUT_ENTRY, inputDigest, sessionModelAsker, userWords, type IntentReading } from "./lib/command-intent.ts";
-import { hostOperationRisk } from "./lib/host-operation-safety.ts";
+import { hostOperationRisk, LOOKED_UP_PID, OWN_JOB } from "./lib/host-operation-safety.ts";
 import { isDirectReplyPrompt } from "./lib/intent-context.ts";
 import { askJev, jevEnabled } from "./lib/jev-client.ts";
 import { checkpointWorktree, isSnapshotted } from "./lib/worktree-checkpoint.ts";
@@ -60,6 +60,19 @@ const PROTECTED_DIRS = [
 	path.join(HOME, ".config"),
 	path.join(HOME, ".local"),
 	path.join(HOME, ".env"),
+];
+
+/** Where a single named file asks for the user's say instead of being refused:
+ * their own documents, and the two startup-entry folders they configure by hand. */
+const USER_FILE_DIRS = [
+	path.join(HOME, "Desktop"),
+	path.join(HOME, "Documents"),
+	path.join(HOME, "Downloads"),
+	path.join(HOME, "Music"),
+	path.join(HOME, "Pictures"),
+	path.join(HOME, "Videos"),
+	path.join(HOME, ".config", "autostart"),
+	path.join(HOME, ".local", "share", "applications"),
 ];
 
 /** Contextual accident prevention; executable isolation remains the hard boundary.
@@ -174,6 +187,10 @@ function shellTokensUncached(source: string): ShellToken[] {
 	flush();
 	return tokens;
 }
+
+/** `lsof -t`, `pgrep` and `pidof` print PIDs: a substitution of one is a PID only the run knows. */
+const isPidLookup = (run: ParsedCommand): boolean =>
+	run.name === "pgrep" || run.name === "pidof" || run.name === "lsof" && run.values.some((value) => /^-[a-zA-Z]*t/.test(value ?? ""));
 
 function shellSubstitutions(word: string): string[] {
 	const mask = word.split("");
@@ -413,6 +430,9 @@ function agentMemoryRoots(): string[] {
 	});
 }
 
+/** A loop variable bound to more words than this, or an operand built from
+ * several such variables with more combinations, stays unresolved. */
+const MAX_LOOP_COMBINATIONS = 64;
 /** More separate effects than this on one command line are not reviewed together. */
 const MAX_REVIEWS = 6;
 /** More effects than this go straight to the user instead of one judge call each. */
@@ -550,7 +570,14 @@ function assessShell(
 	const branches: Array<{
 		vars: Map<string, string | undefined>;
 		cwd: string | undefined;
+		/** The variable a `for … in WORDS` loop binds, while its body is read. */
+		loop?: string;
 	}> = [];
+	/** The literal words a loop variable takes: `for f in a b; do rm "$f"; done`
+	 * reads each one as an operand instead of calling the variable unknown. */
+	const loops = new Map<string, string[]>();
+	/** Variables holding what a PID lookup (`lsof -t`, `pgrep`, `pidof`) returned. */
+	const pidLookups = new Set<string>();
 	let conditionalCd: string | undefined;
 	/** Where `pushd` came from, for `popd`. */
 	const dirs: (string | undefined)[] = [];
@@ -676,18 +703,14 @@ function assessShell(
 		return { name: path.basename(shellValue(run[0] ?? "", state) ?? ""), values: run.slice(1).map((raw) => shellValue(raw, state)) };
 	};
 	let parsed: ParsedCommand | undefined;
-	const check = (
+	const checkExpanded = (
 		raw: string,
-		recursive = false,
-		broad = false,
-		unlinkLeaf = false,
+		expanded: string,
+		recursive: boolean,
+		broad: boolean,
+		unlinkLeaf: boolean,
 		copySource?: string,
 	) => {
-		const expanded = shellValue(raw, state);
-		if (expanded === undefined) {
-			uncertain(raw);
-			return;
-		}
 		if (!expanded) return; // empty quoted operand is an rm error, not '/'
 		if (!mutationCwd && !path.isAbsolute(expanded)) {
 			uncertain(raw, "working directory is not known at this operation");
@@ -730,6 +753,13 @@ function assessShell(
 					return;
 				}
 			}
+			// One named file among the user's own files: the same ask the edit tool
+			// makes outside the workspace. Whole trees, globs, directories, system
+			// paths, credentials and the harness's own files stay refused.
+			if (!harnessDenial && !recursive && !glob && !expanded.endsWith("/") && USER_FILE_DIRS.some((dir) => physical !== dir && containsPath(dir, physical))) {
+				note({ level: "review", target: raw, expanded: physical, resolved: true, reason: "This changes a file outside the project, among the user's own files" });
+				return;
+			}
 			note({
 				level: "block",
 				target: raw,
@@ -761,6 +791,50 @@ function assessShell(
 				reason:
 					"This operation replaces or removes a whole working directory; select a narrower file set or review the exact command",
 			});
+	};
+	/** Every value an operand can take when its only unknowns are loop variables
+	 * bound to literal words; none when anything else about it is unknown. */
+	const loopValues = (raw: string): string[] | undefined => {
+		const names = new Set([...raw.matchAll(/\$(?:([A-Za-z_]\w*)|\{([A-Za-z_]\w*)\})/g)].map((m) => m[1] ?? m[2]));
+		const bound = [...names].filter((name) => loops.has(name) && state.vars.get(name) === undefined);
+		if (!bound.length) return;
+		let combinations: Array<Map<string, string>> = [new Map()];
+		for (const name of bound) {
+			combinations = combinations.flatMap((one) => loops.get(name)!.map((word) => new Map(one).set(name, word)));
+			if (combinations.length > MAX_LOOP_COMBINATIONS) return;
+		}
+		const found = new Set<string>();
+		for (const one of combinations) {
+			const value = shellValue(raw, { ...state, vars: new Map([...state.vars, ...one]) });
+			if (value === undefined) return;
+			found.add(value);
+		}
+		return [...found];
+	};
+	/** A `kill` operand the line itself explains: its own background job, or the
+	 * result of a PID lookup; anything else stays unread. */
+	const pidOperand = (raw: string | undefined): string | undefined => {
+		if (raw === undefined) return;
+		if (/^"?(?:\$!|\$\{!\})"?$/.test(raw)) return OWN_JOB;
+		const variable = /^"?\$(?:(\w+)|\{(\w+)\})"?$/.exec(raw);
+		if (variable && pidLookups.has(variable[1] ?? variable[2])) return LOOKED_UP_PID;
+		const bodies = /^"?\$\(.*\)"?$/s.test(raw) ? shellSubstitutions(raw) : [];
+		if (bodies.length === 1 && isPidLookup(substituted(bodies[0]))) return LOOKED_UP_PID;
+	};
+	const check = (
+		raw: string,
+		recursive = false,
+		broad = false,
+		unlinkLeaf = false,
+		copySource?: string,
+	) => {
+		const direct = shellValue(raw, state);
+		const candidates = direct === undefined ? loopValues(raw) : [direct];
+		if (!candidates) {
+			uncertain(raw);
+			return;
+		}
+		for (const expanded of candidates) checkExpanded(raw, expanded, recursive, broad, unlinkLeaf, copySource);
 	};
 	const processSegment = (tokens: ShellToken[]) => {
 		conditionalCd = undefined;
@@ -816,13 +890,17 @@ function assessShell(
 			const source = shellSubstitutions(m[2]).map(substituted).find((run) => isDownloader(run.name));
 			if (source) facts.fetchedVars.set(m[1], downloadHost(source.values));
 			else facts.fetchedVars.delete(m[1]);
+			if (shellSubstitutions(m[2]).map(substituted).some(isPidLookup)) pidLookups.add(m[1]);
+			else pidLookups.delete(m[1]);
 			assignments.push([m[1], value]);
 			state.vars.set(m[1], value);
+			loops.delete(m[1]);
 			i++;
 		}
 		if (i === args.length) {
 			for (const [key, value] of assignments) {
 				state.vars.set(key, value);
+				loops.delete(key);
 				if (exportsVariables) exported.add(key);
 			}
 			return;
@@ -954,7 +1032,7 @@ function assessShell(
 			values = operands.map((arg) => shellValue(arg, state));
 		// Reuse the parsed executable/operands, so quoted examples and grep data
 		// do not become host mutations. Wrappers and substitutions share this gate.
-		note(hostOperationRisk(name, values));
+		note(hostOperationRisk(name, name === "kill" ? values.map((value, at) => value ?? pidOperand(operands[at])) : values));
 		if (/^python[\d.]*$/.test(name) && values[0] === "-m" && values[1] === "esptool")
 			note(hostOperationRisk("esptool", values.slice(2)));
 		parsed = {
@@ -1081,7 +1159,10 @@ function assessShell(
 			return;
 		}
 		if (name === "unset") {
-			for (const key of operands) state.vars.set(key, undefined);
+			for (const key of operands) {
+				state.vars.set(key, undefined);
+				loops.delete(key);
+			}
 			return;
 		}
 		if (
@@ -1108,6 +1189,7 @@ function assessShell(
 		}
 		if (["fi", "done", "esac"].includes(name)) {
 			const before = branches.pop();
+			if (before?.loop) loops.delete(before.loop);
 			if (before) {
 				for (const key of new Set([
 					...state.vars.keys(),
@@ -1153,7 +1235,16 @@ function assessShell(
 			for (const key of state.vars.keys()) state.vars.set(key, undefined);
 			if (name === "for" || name === "read")
 				for (const key of operands)
-					if (/^[A-Za-z_]\w*$/.test(key)) state.vars.set(key, undefined);
+					if (/^[A-Za-z_]\w*$/.test(key)) {
+						state.vars.set(key, undefined);
+						loops.delete(key);
+					}
+			// `for f in a b c`: the variable takes exactly these words, one at a time.
+			const words = values.slice(2);
+			if (name === "for" && operands[1] === "in" && /^[A-Za-z_]\w*$/.test(operands[0]) && words.length && words.length <= MAX_LOOP_COMBINATIONS && words.every((word) => word)) {
+				loops.set(operands[0], words as string[]);
+				branches.at(-1)!.loop = operands[0];
+			}
 			return;
 		}
 		if (/^(?:bash|sh|dash|zsh|ksh)$/.test(name)) {
@@ -2028,8 +2119,10 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 		if (risk.level !== "review") return { block: true, reason: describe(risk) };
 		const { also = [], ...first } = risk;
 		const reviews: ShellRisk[] = [first, ...also];
-		const unresolved = reviews.find((one) => !one.resolved);
-		if (unresolved || ctx.signal?.aborted) return { block: true, reason: describe(unresolved ?? first) + narrow };
+		if (ctx.signal?.aborted) return { block: true, reason: describe(first) + narrow };
+		// A command that cannot be read is shown to the user, who is the only one
+		// who can clear it (no judge reads it); with no user present it is refused.
+		const unread = reviews.some((one) => !one.resolved);
 
 		// Clearing a review covers this exact invocation only: the next one is
 		// read again. It never enlarges write scope or overrides a hard
@@ -2053,7 +2146,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 		const decided = async (asks: ShellRisk[]) => {
 			const readings = new Map<ShellRisk, IntentReading>();
 			const copy = asks.find(one => one.copy);
-			if (!copy && process.env.PI_COMMAND_JUDGE !== "off" && asks.length <= MAX_JUDGED) {
+			if (!copy && !unread && process.env.PI_COMMAND_JUDGE !== "off" && asks.length <= MAX_JUDGED) {
 				let words: string[] = [];
 				try { words = child ? [] : userWords(ctx.sessionManager?.getBranch?.()); } catch { words = []; }
 				for (const one of asks) {
@@ -2083,7 +2176,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 						? `${sentence(asks[0])}${unasked(asks[0]) ? "\nYour messages do not ask for that." : ""}\n\n${command}\n\nWorking directory: ${ctx.cwd}`
 						: `${describe(asks[0])}\n\nWorking directory: ${ctx.cwd}\n${command}`
 					: `This command line does ${asks.length} things that need your say:\n${asks.map((one) => `- ${sentence(one)}${unasked(one) ? " Your messages do not ask for that." : ""}`).join("\n")}\n\n${command}\n\nWorking directory: ${ctx.cwd}`;
-				const title = copy ? "Confirm external file copy" : named ? "Run this command?" : "Review destructive operation";
+				const title = copy ? "Confirm external file copy" : named || unread ? "Run this command?" : "Review destructive operation";
 				const allowed = await confirmAccounted(ctx, title, body);
 				if (allowed && current()) {
 					each("confirmed");

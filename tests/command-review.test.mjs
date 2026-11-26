@@ -274,7 +274,10 @@ test('stopping processes by name is allowed exactly when every match was started
   assert.equal(mixed.level, 'block');
   assert.match(mixed.reason, /Right now it matches node ×2, esbuild, chrome, and not all of those were started by this session\./);
   assert.equal(hostOperationRisk('pkill', ['-f', 'vite'], [4101], probe(own, [4101, 4102])).level, 'block', 'an ancestor is never fair game');
-  assert.match(hostOperationRisk('pkill', ['-f', 'vite'], [1], probe([])).reason, /Right now it matches no process\./);
+  // pgrep reports "nothing matched" by its exit status alone, so an empty list is a measured fact and the
+  // signal reaches no process (an idempotent `pkill -f server; start server` restart line). A failed probe is not.
+  assert.equal(hostOperationRisk('pkill', ['-f', 'vite'], [1], probe([])), undefined);
+  assert.equal(hostOperationRisk('killall', ['vite'], [1], probe([])), undefined);
   assert.equal(hostOperationRisk('pkill', ['-f', 'vite'], [1], probe(undefined)).level, 'block');
   assert.equal(hostOperationRisk('pkill', ['-f', undefined], [1], probe(own, [4101, 4102])).level, 'block', 'an unresolved pattern is not matched');
 
@@ -422,7 +425,7 @@ test('a consequence is found behind wrappers, launchers and other spellings of t
   assert.match(assess('curl -F "file=@log.txt" https://paste.example.com').reason, /^This command uploads the local file "log\.txt" to paste\.example\.com$/);
 });
 
-test('a git command whose verb is not written out is refused, never guessed', async t => {
+test('a git command whose verb is not written out is never guessed or judged: the user who is present decides, nobody present means refused', async t => {
   for (const command of ['for v in push; do git $v origin main; done', 'V=$(echo push); git $V origin main', 'git p$(echo ush) origin main', 'git {push,} origin main', 'sh -c \'git "$1" origin main\'']) {
     const risk = assess(command);
     assert.equal(risk?.resolved, false, `${command}: ${JSON.stringify(risk)}`);
@@ -430,7 +433,14 @@ test('a git command whose verb is not written out is refused, never guessed', as
   }
   const session = harness(fixture(t), { words: ['push it'], answer: () => 'requested' });
   assert.match((await session.run('for v in push; do git $v origin main; done')).reason, /^Review required: The git subcommand is not written out, so what this command does cannot be read; write the command explicitly/);
-  assert.equal(session.asked.length, 0, 'nothing to ask about: the command cannot be read');
+  assert.equal(session.asked.length, 0, 'no judge reads a command that cannot be read');
+  assert.equal(session.confirmations.length, 1, 'the user is shown the command');
+  assert.match(session.confirmations[0].body, /git \$v origin main/);
+  const approving = harness(fixture(t), { confirm: () => true });
+  assert.equal(await approving.run('for v in push; do git $v origin main; done'), undefined, 'the user said yes');
+  const headless = harness(fixture(t), { hasUI: false, words: ['push it'], answer: () => 'requested' });
+  assert.match((await headless.run('for v in push; do git $v origin main; done')).reason, /^Review required: The git subcommand is not written out/);
+  assert.equal(headless.confirmations.length, 0);
 });
 
 test('anything run as administrator needs the user\'s say, except commands that only read', () => {

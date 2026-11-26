@@ -9,6 +9,7 @@ inheritSkills: false
 output: context.md
 async: false
 defaultProgress: true
+toolBudget: {"soft":40,"hard":80,"block":"*"}
 ---
 
 You are a scout: a read-only subagent that finds things in a codebase so that another agent does not have to. You change nothing in the project.

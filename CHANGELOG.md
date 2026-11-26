@@ -1,3 +1,11 @@
+## 0.56.37 — Fewer refusals of commands the user asked for
+
+- A shell loop over literal words (`for f in a b; do rm "$f"; done`) is read as each word, so the guard checks every path instead of refusing the variable. Any word that reaches a protected place still blocks; word lists from a command, a reassigned loop variable and more than 64 words stay unread.
+- One named file among the user's own files (Desktop, Documents, Downloads, Music, Pictures, Videos, `~/.config/autostart`, `~/.local/share/applications`) asks the user in a session with a screen, as an outside-the-workspace edit already did, instead of being refused. Trees, globs, directories, moves, system paths, credential folders and the harness's own files stay refused, and a session without a screen keeps refusing.
+- A command the guard cannot read is shown to the user, who decides; no judge model clears it on their behalf. With no user present it is still refused.
+- `pkill` and `killall` pass when nothing matches the selection; a probe that fails still blocks. `kill $!` ends the background job the same line started. A PID from `lsof -t`, `pgrep` or `pidof` is put to the user.
+- The scout agent is told to finish at 40 tool calls and has every tool blocked past 80. Foreground children had no breaker (only background runs do), and one scout ran 95 turns and 109 tool calls.
+
 ## 0.56.33 — Bold design by default for a new or much improved UI
 
 - A big improvement, a complete or tremendous one, a redesign and a UI built from scratch are the boldest change scale: the default is big, good, bold changes. An existing design is judged part by part (improve what is good, redesign what is weak, keep nothing only because it is there); the name, the logo and what the product says stay, and a good design the user is happy with stays when no big change was asked for.

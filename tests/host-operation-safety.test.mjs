@@ -38,7 +38,7 @@ test('dangerous host commands are blocked before execution, including wrappers a
     "nft list ruleset ';' flush ruleset", 'nft list ruleset -f fixture.nft',
     'kill -- -1 --help', `kill ${process.pid} -l`, 'killall -- -0',
     'wipefs --all -- /dev/fixture --no-act',
-    'shutdown -h now -- -c', 'pkill -s 0 node', 'pkill -0 --signal TERM node',
+    'shutdown -h now -- -c', 'pkill -0 --signal TERM node',
     'killall -0 -s TERM node', `kill --signal 0 --timeout 1000 KILL ${process.pid}`,
     'sudo --user root nmcli radio wifi off', 'timeout --signal TERM --kill-after 2 5 nmcli radio wifi off',
     'setsid nmcli radio wifi off', 'busybox reboot',
@@ -184,4 +184,32 @@ test('a session of the separate stock Pi harness (ogpi) is not YunusPi\'s to kil
   const plain = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
   t.after(() => plain.kill('SIGKILL'));
   assert.equal(assess(`kill ${plain.pid}`), undefined, 'an unrelated exact PID stays allowed');
+});
+
+test('a kill aimed at the line\'s own background job passes; a PID from a lookup is the user\'s say; any other unread PID stays blocked', () => {
+  for (const command of ['sleep 30 & kill $!', 'sleep 30 & kill "$!"', 'sleep 30 & kill -9 ${!}', '(sleep 30 & echo $! > /tmp/host-safety-pid); sleep 1; kill -TERM $!'])
+    assert.equal(assess(command), undefined, command);
+  for (const command of [
+    'PID=$(lsof -ti tcp:8791 2>/dev/null | head -1) && kill "$PID"',
+    'PID=`pgrep -f dev-server`; kill -9 $PID',
+    'kill $(lsof -nP -iTCP:8791 -sTCP:LISTEN -t)',
+    'kill "$(pidof dev-server)"',
+  ]) {
+    const risk = assess(command);
+    assert.equal(risk?.level, 'review', command);
+    assert.equal(risk.resolved, true, `${command}: a resolved review asks a present user; it is not an unreadable command`);
+    assert.match(risk.reason, /whichever process the lookup/, command);
+  }
+  for (const command of [
+    'kill $!  1', 'sleep 1 & kill $! 1', 'kill $(ps aux | awk \'{print $2}\')', 'kill "$PID"', 'PID=$(lsof -ti :80); PID=$(cat /tmp/pid); kill $PID',
+    'PID=$(lsof -i :80); kill $PID', 'kill ${process.ppid}'.replace('${process.ppid}', String(process.ppid)),
+  ]) assert.equal(assess(command)?.level, 'block', command);
+});
+
+test('a pkill or killall that matches no process passes, and one that cannot be probed does not', () => {
+  const probe = matched => ({ matched: () => matched, owned: () => false });
+  assert.equal(hostOperationRisk('pkill', ['-f', '[s]erver.py'], [1], probe([])), undefined);
+  assert.equal(hostOperationRisk('killall', ['teach_yunus'], [1], probe([])), undefined);
+  assert.equal(hostOperationRisk('pkill', ['-f', '[s]erver.py'], [1], probe(undefined))?.level, 'block');
+  assert.equal(hostOperationRisk('pkill', ['-f', '[s]erver.py'], [1], probe([{ pid: 9, name: 'python3' }]))?.level, 'block');
 });
