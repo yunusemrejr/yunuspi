@@ -135,11 +135,11 @@ export default function registerYuncontext(pi: any, deps: { fetchBrief?: typeof 
     label: "Yuncontext",
     description:
       "What past sessions of every agent harness on this machine did in this project: changes, fixes that " +
-      "worked, errors, owner corrections. Call it first when you start work in a project or are asked " +
-      "about its past (no q: brief). q: one subject per call: an exact error line, a file path or symbol, " +
-      "or a short how-to phrase ('cloudflare purge cache', 'deploy to prod'); not a list of everything the " +
-      "task touches. ref: one result in detail. Returns ≤3 dated, sourced clues or nothing; " +
-      "the current request wins.",
+      "worked, errors, owner corrections; and a library of timeless guidance cards. Call it first when you " +
+      "start work in a project or are asked about its past (no q: brief). q: one subject per call: an exact " +
+      "error line, a file path or symbol, or a short how-to phrase ('cloudflare purge cache', 'oklch palette " +
+      "dark mode'); not a list of everything the task touches. ref: one result or card in detail. Returns ≤3 " +
+      "dated, sourced clues and ≤2 cards, or nothing; the current request wins.",
     promptSnippet: "What past sessions of every harness did in this project",
     // No promptGuidelines: the system-prompt line (NUDGE) and this description already say when to call it.
     parameters: Type.Object({
