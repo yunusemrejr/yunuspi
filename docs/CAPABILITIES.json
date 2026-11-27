@@ -4358,6 +4358,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/codex-usage.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/command-consequence.ts",
         "exists": true
       },

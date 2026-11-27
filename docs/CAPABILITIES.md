@@ -1395,6 +1395,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/code-lexical-mask.ts`](../agent/extensions/lib/code-lexical-mask.ts)
 - [`agent/extensions/lib/code-quality.ts`](../agent/extensions/lib/code-quality.ts)
 - [`agent/extensions/lib/code-structure.ts`](../agent/extensions/lib/code-structure.ts)
+- [`agent/extensions/lib/codex-usage.ts`](../agent/extensions/lib/codex-usage.ts)
 - [`agent/extensions/lib/command-consequence.ts`](../agent/extensions/lib/command-consequence.ts)
 - [`agent/extensions/lib/command-intent.ts`](../agent/extensions/lib/command-intent.ts)
 - [`agent/extensions/lib/compact-tool-json.ts`](../agent/extensions/lib/compact-tool-json.ts)
