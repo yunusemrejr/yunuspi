@@ -3470,7 +3470,7 @@
       {
         "name": "subagent",
         "source": "agent/extensions/pi-subagents/src/extension/index.ts",
-        "line": 803,
+        "line": 814,
         "kind": "definition"
       },
       {
@@ -3579,13 +3579,13 @@
       {
         "name": "yuncontext",
         "source": "agent/extensions/yuncontext.ts",
-        "line": 120,
+        "line": 133,
         "kind": "literal"
       },
       {
         "name": "yuncontext_record",
         "source": "agent/extensions/yuncontext.ts",
-        "line": 145,
+        "line": 158,
         "kind": "literal"
       }
     ],
@@ -3833,13 +3833,13 @@
       {
         "name": "yuncontext",
         "source": "agent/extensions/yuncontext.ts",
-        "line": 120,
+        "line": 133,
         "kind": "literal"
       },
       {
         "name": "yuncontext_record",
         "source": "agent/extensions/yuncontext.ts",
-        "line": 145,
+        "line": 158,
         "kind": "literal"
       }
     ],
@@ -3957,7 +3957,7 @@
           "registration receives the source-owned subagent definition"
         ],
         "lines": [
-          854
+          865
         ],
         "knownNames": [
           "subagent"

@@ -35,6 +35,7 @@ import { catalogSkills, matchingGuides, type CatalogSkill } from "./lib/skill-re
 import { askJev } from "./lib/jev-client.ts";
 import { askTypedDecision, BOLD_EXAMPLE_SCALES, EXAMPLE_SCALE_DESCRIPTIONS, MAX_BOLD_PICKS, type ExampleScale } from "./lib/micro-intelligence/jev-decisions.ts";
 import type { JudgeFn } from "./lib/micro-intelligence/review.ts";
+import { goalRequestText } from "./lib/media-work.ts";
 import { uiPromptCue } from "./lib/ui-doctrine.ts";
 import { Pace, type PaceSubagent } from "./lib/pace.ts";
 
@@ -494,7 +495,8 @@ export async function pickExampleLine(
  * judge only picks among the installed examples.
  */
 export async function designExamplesLineFor(event: any, judge: JudgeFn | undefined, rememberScale?: (judged?: ExampleScale) => ExampleScale | undefined): Promise<string | undefined> {
-	const prompt = typeof event?.prompt === "string" ? event.prompt : "";
+	// Examples are chosen for what the user asked, not for the criteria and standards a goal kickoff wraps around it.
+	const prompt = goalRequestText(typeof event?.prompt === "string" ? event.prompt : "");
 	if (uiPromptCue(prompt).strength !== "strong") return undefined;
 	const candidates = exampleCandidates(event, prompt);
 	if (!candidates.length) return undefined;
@@ -764,7 +766,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 			} catch {
 				/* no usable cache data: the figure stays out */
 			}
-			const prompt = typeof event?.prompt === "string" ? event.prompt : "";
+			const prompt = goalRequestText(typeof event?.prompt === "string" ? event.prompt : "");
 			const rememberScale = designScale.remember(prompt);
 			const examples = await designExamplesLineFor(event, (site, state, questions, options) =>
 				askJev(site, state, questions, { pi, signal: options?.signal, timeoutMs: DESIGN_EXAMPLES_TIMEOUT_MS }), rememberScale);

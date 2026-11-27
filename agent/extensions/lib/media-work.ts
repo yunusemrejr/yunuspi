@@ -27,7 +27,7 @@ const HARNESS_CRITERION = /^\s*-\s*(?:V:|C\d+:\s*(?:3D|Video|Noslop|Nobug|Anatom
  */
 export function goalRequestText(prompt: string): string {
 	if (!/^\[goal(?:-tracked)? \w+/.test(prompt)) return prompt;
-	const words = /The user wrote: «([\s\S]*?)»/.exec(prompt)?.[1] ?? /^\[goal-tracked \w+\] Goal: ([^\n]*)/.exec(prompt)?.[1] ?? "";
+	const words = /The user wrote: «([\s\S]*?)»/.exec(prompt)?.[1] ?? /^\[goal-tracked \w+\] Goal: ([\s\S]*?)(?:\n\nAcceptance criteria|$)/.exec(prompt)?.[1] ?? "";
 	const own = (prompt.match(/^\s*-\s*(?:C\d+|V):[^\n]*$/gm) ?? []).filter((line) => !HARNESS_CRITERION.test(line));
 	return [words, ...own].join("\n");
 }

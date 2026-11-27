@@ -209,3 +209,16 @@ test('the candidate index is bounded and follows the request vocabulary', () => 
   const withoutGuides = exampleCandidates({ prompt: VISUAL }, VISUAL);
   assert.deepEqual(withoutGuides.map((candidate) => candidate.id), ['refero'], 'no installed examples means no made-up paths');
 });
+
+test('a goal kickoff gets examples only when the goal itself is visual work', async () => {
+  const { createGoal, goalKickoff } = await import(pathToFileURL(path.join(root, 'agent/extensions/lib/goal-state.ts')).href);
+  const { standardsOffer } = await import(pathToFileURL(path.join(root, 'agent/extensions/lib/presets.ts')).href);
+  const kickoff = (text) => { const goal = createGoal(text); return `${goalKickoff(goal)}\n\n${standardsOffer(goal)}`; };
+  let calls = 0;
+  const judge = async (...args) => { calls++; return judgeChoosing('scrolltide:heroes', 'uncommon:shaders-webgl-3d')(...args); };
+  assert.equal(await designExamplesLineFor({ ...installed, prompt: kickoff('add a --version flag to cli.js') }, judge), undefined);
+  assert.equal(calls, 0, 'a CLI goal makes no design decision');
+  const line = await designExamplesLineFor({ ...installed, prompt: kickoff('redesign the landing page') }, judge);
+  assert.match(line, /^Examples for this request: /);
+  assert.equal(calls, 1);
+});

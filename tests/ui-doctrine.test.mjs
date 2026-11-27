@@ -60,3 +60,18 @@ test('ui-work decision is registered with a owner and bars', () => {
   assert.equal(spec.interpret({ supported: { noul: 0.05 } }).verdict.supported, false);
   assert.equal(spec.interpret({ supported: { noul: 0.5 } }).ok, false);
 });
+
+test('a goal kickoff is read by the user\'s goal text, not by the standards menu around it', async () => {
+  // The menu line "browser: operating a live website" made every goal strong UI work (art-direction brief,
+  // a design-examples decision before the prompt, scrolltide examples) for a goal about a CLI flag.
+  const { createGoal, goalKickoff } = await load('lib/goal-state.ts');
+  const { standardsOffer } = await load('lib/presets.ts');
+  const kickoff = (text) => { const goal = createGoal(text); return `${goalKickoff(goal)}\n\n${standardsOffer(goal)}`; };
+  assert.match(kickoff('add a --version flag to cli.js'), /operating a live website/, 'the real kickoff carries the menu');
+  assert.deepEqual(uiPromptCue(kickoff('add a --version flag to cli.js')), { strength: 'none', terms: [] });
+  const ui = uiPromptCue(kickoff('redesign the landing page'));
+  assert.equal(ui.strength, 'strong');
+  assert.ok(ui.terms.includes('landing page') && !ui.terms.includes('website'));
+  // A goal written over several lines is read whole.
+  assert.equal(uiPromptCue(kickoff('Please do this:\n\nmake the new dashboard look better')).strength, 'strong');
+});

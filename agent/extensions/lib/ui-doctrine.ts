@@ -14,7 +14,7 @@
  * never gates. Editing a UI file is deterministic and needs no judge.
  */
 import type { TypedVerdict } from "./micro-intelligence/jev-decisions.ts";
-import { mediaFile, mediaWork } from "./media-work.ts";
+import { goalRequestText, mediaFile, mediaWork } from "./media-work.ts";
 
 export const UI_DOCTRINE_SKILL = "ui-design";
 
@@ -35,7 +35,9 @@ export type UiCue = { strength: "none" | "weak" | "strong"; terms: string[] };
 
 /** Deterministic first reading of a request. `none` never reaches the judge. */
 export function uiPromptCue(prompt: string): UiCue {
-  const text = typeof prompt === "string" ? prompt.slice(0, 6000) : "";
+  // A goal kickoff wraps the user's words in criteria and a menu of standards ("operating a live website"):
+  // only the user's own words say whether this is interface work.
+  const text = typeof prompt === "string" ? goalRequestText(prompt.slice(0, 20000)).slice(0, 6000) : "";
   // Film work says "typography" and "palette" too; it is not interface work unless it names a surface.
   if (!text.trim() || NARRATIVE.test(text) || NO_UI.test(text) || !WORK_VERB.test(text) || mediaWork(text)) return { strength: "none", terms: [] };
   const strong = [...text.matchAll(new RegExp(STRONG_PROMPT.source, "gi"))].map((m) => m[0].toLowerCase());

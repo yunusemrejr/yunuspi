@@ -1,3 +1,16 @@
+## 0.56.39 — Fewer false nudges, no imposed formatting
+
+- A check whose exit status is hidden behind `;`, `||` or a pipe is judged by its output, so a failure there is no longer taken as a pass. A `>` inside quotes is not a file write. "Deferred", "postponed" or "as a next step" in a report are sent back only when the report puts its own work off ("I deferred …", a "Deferred:" heading). A report that already says the check failed, with no success claim, is not asked again. A push started with bg_run is held like one started in bash.
+- The speed note is added only when the agent is asked to hurry, not when the product is described as fast ("does SEO work very quickly", "make the engine faster", "rush order", "no time zone", "hemen hemen").
+- The Where line tests the home folder before repositories below it, does not count dot folders as repositories, leaves out git facts it could not read, and is sent again only when it changes.
+- Yuncontext: a resumed session that already holds its brief gets no second one, subagent children get none, and the working notes no longer repeat the rule the extension already states.
+- The needed check keeps the request across short replies such as "ok", "continue" or "devam", and keeps code-like angle brackets in the request text.
+- Subagent exit hooks are installed once per process, so Ctrl+C still ends the process after /reload.
+- pi-lens formats a file only when the project has its own formatter config. Without one, it no longer applies biome or prettier defaults (quote style on unrelated lines after the checks had run). gofmt, rustfmt and other canonical formatters still run.
+- `.pi-project-id` and `.pi/tasks` are added to the repository's `info/exclude` when the harness creates them, so `git status` stays clean.
+- A /goal is judged as interface work by the user's own goal text, not by the standards menu the kickoff adds ("operating a live website"), so a CLI goal no longer gets the UI brief, a design-examples wait and a scrolltide line.
+- Shortened project notes keep a code block's closing fence. A guard refusal says "Blocked:" once.
+
 ## 0.56.38 — Evidence gates for code and other work
 
 - Code changed after its last check (tests, build, type check, or the program run on real input) keeps the agent working once per prompt when it settles, and a push, publish or deploy is held once until the check runs. A failing check is named. A check piped into `tail` or followed by `|| true` is judged by its output. The look gate covers a plain finish too. `PI_CHECK_GATE=0` and `PI_LOOK_GATE=0` turn the gates off.
