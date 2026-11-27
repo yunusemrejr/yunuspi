@@ -24,3 +24,10 @@ Globes, fluid ink, gradients with depth and flat pseudo-3D. GPU backdrops that f
 - **three-nebula**: WebGL 3D particle engine for three.js, with JSON-defined systems `npm i three three-nebula` · MIT v13.3.0 · [source](https://github.com/creativelifeform/three-nebula) · [demo](https://webdev.teknium.io/d/gl3/demos/three-nebula-galaxy/)
 - **three-raymarcher**: Raymarched SDF boxes, capsules and spheres as a three.js Mesh `npm i three-raymarcher` · MIT v0.4.0 · [source](https://github.com/danielesteban/three-raymarcher) · [demo](https://webdev.teknium.io/d/gl3/demos/three-raymarcher-metaballs/)
 - **three-good-godrays**: Raymarched volumetric god rays for three.js, occluded by real shadow maps `npm i three-good-godrays postprocessing three` · Zlib v0.12.1 · [source](https://github.com/ameobea/three-good-godrays) · [demo](https://webdev.teknium.io/d/gl3/demos/good-godrays-lattice/)
+
+## Checked by hand, 27 Nov 2026
+
+Outside the field guide; licences and versions as read on that date.
+
+- **Shaders** (above, shaders.com): docs at `shaders.com/llms.txt` and an agent skill (`npx shaders skill`, an install: only with the owner's OK at that moment); its MCP server and code export from the visual editor are in the paid Pro plan. Not related to Paper Shaders.
+- **Unicorn Studio**: a no-code WebGL scene editor (90+ effects, timeline, 3D) that publishes embeds for React, Vue, Svelte, Webflow or plain HTML · the free plan is watermarked and has no commercial licence (Legend, $20 a month, has one); embeds load its script from a CDN · [site](https://www.unicorn.studio/). Worth it when the owner designs the effect by hand; otherwise one of the code libraries above stays lighter.

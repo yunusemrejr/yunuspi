@@ -10,7 +10,7 @@ Good code does what the person needs, the next reader understands it, and it fai
 ## Before writing
 - What is it for: who runs it, how often, on what data, what happens if it is wrong. A one-off script, a private tool and a public service deserve different amounts of everything.
 - Read the neighbors: how this codebase handles errors, config, logging, naming, data access and tests. Use its helpers and dependencies; read the exact region before editing.
-- Check, do not recall: library and CLI interfaces change. Look at the installed version, its types or `--help`.
+- Check, do not recall: library and CLI interfaces change. Look at the installed version, its types or `--help`. Many libraries publish their docs as `/llms.txt` or `.md` pages; the `research` skill says where to find them.
 
 ## Design
 - Simplest thing that fully works: delete code, use the platform, use a dependency already present, write a little code, only then add a dependency or a structure. Nothing "for later"; generalize at the third real repetition.

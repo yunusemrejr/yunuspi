@@ -19,3 +19,9 @@ Glass that refracts, surfaces that wobble, gaussian-splat captures and sequenced
 - **TresJS**: Declarative three.js scenes written as Vue components `npm i @tresjs/core @tresjs/cientos three` · MIT v5.10.0 · [source](https://github.com/Tresjs/tres) · [demo](https://webdev.teknium.io/d/scene2/demos/tresjs-wobble-blobs/)
 - **svader**: GPU-rendered Svelte components from GLSL or WGSL fragment shaders `npm i -D svader` · MIT v1.0.0 · [source](https://github.com/sockmaster27/svader) · [demo](https://webdev.teknium.io/d/scene2/demos/svader-shader-tiles/)
 - **EZ-Tree**: Procedural three.js tree generator with presets and wind sway `npm i @dgreenheck/ez-tree three` · MIT v1.1.0 · [source](https://github.com/dgreenheck/ez-tree) · [demo](https://webdev.teknium.io/d/scene2/demos/ez-tree-grove/)
+
+## Checked by hand, 27 Nov 2026
+
+Outside the field guide; licences and versions as read on that date.
+
+- **Spline**: a browser 3D design tool whose scenes run on the page through `@splinetool/runtime`, with states and events · the runtime is proprietary with no published licence, and free exports are watermarked (paid plans from $12 a month) · [site](https://spline.design/), docs at `spline.design/llms.txt`. Good for a designed 3D object the owner edits by eye; a three.js scene stays lighter and fully owned.

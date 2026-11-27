@@ -20,3 +20,9 @@ Page curls, origami folds, zooming interfaces, scrollytelling and the 23 Interne
 - **Lottie + lottie-interactivity**: Scroll- and cursor-synced playback for Lottie animations `npm i lottie-web @lottiefiles/lottie-interactivity` · MIT v1.6.2 · [source](https://github.com/LottieFiles/lottie-interactivity) · [demo](https://webdev.teknium.io/d/flow3/demos/lottie-scroll-scrub/)
 - **Zumly**: Zooming user interfaces: navigate in depth, not pages `npm i zumly` · MIT v0.97.0 · [source](https://github.com/zumerlab/zumly) · [demo](https://webdev.teknium.io/d/flow3/demos/zumly-zoom-dive/)
 - **Vue Flux**: Vue 3 image slider with 20 built-in 2D and 3D transitions `npm i vue-flux` · MIT v7.1.2 · [source](https://github.com/ragnarlotus/vue-flux) · [demo](https://webdev.teknium.io/d/flow3/demos/vue-flux-transitions/)
+
+## Checked by hand, 27 Nov 2026
+
+Outside the field guide; licences and versions as read on that date.
+
+- **Barba.js**: animated transitions between the pages of a server-rendered site `npm i @barba/core` · MIT v2.10.3 · [docs](https://barba.js.org/). No release since Aug 2024: Swup above, or the native View Transitions API (`@view-transition { navigation: auto; }` for multi-page sites), covers the same need with less risk.

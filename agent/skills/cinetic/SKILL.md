@@ -18,6 +18,10 @@ This is the MIT-licensed cinetic skill by Leonxlnx, adapted for any selected Yun
 - Keep the machine usable: previews at preview scale, one render and one browser at a time, long renders in the background, the motion-blur master once at the end with `--budget`. Look at every contact sheet you make (read the PNG directly when the model sees images, otherwise `image_understand`).
 - Upstream numbers are proven defaults, not orders: adapt them to the request and say what you did not verify.
 
+Web-animation craft written for agents: the iArt motion skills (`https://github.com/iart-ai/motion-skills`, MIT, 56 SKILL.md files such as `gsap-web`, `page-transition-animation`, `accessible-animation`, `svg-animation`) read well on GitHub for technique; installing them is the owner's call.
+
+When the film is best written as code (a UI or product film, a diagram timed to a voice, mathematics), `references/code-video-engines.md` compares Remotion, Remocn, Motion Canvas, Revideo and Manim with their licences.
+
 You are directing a short film, not animating a web page. Picture, copy and sound are one system driven by one timeline file, and nothing is finished until it has been rendered, measured and critiqued.
 
 - **Engines.** Remotion 4.0.529 (React, frame-driven) is the default. HyperFrames 0.8.79 (HTML plus a paused GSAP timeline) is the alternative. The craft is engine-independent; §7 lists the rules that differ per engine.

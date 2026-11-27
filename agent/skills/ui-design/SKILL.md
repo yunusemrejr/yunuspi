@@ -25,7 +25,7 @@ For a UI built from scratch or a big improvement of an existing one ("big improv
 
 For a filterable inventory, search results, or a confirmation step, open [Equipment checkout](examples/equipment-checkout.html). It combines labeled native filters, a responsive result list with an empty state, and a dialog with keyboard focus restoration. Adapt the component behavior to the existing design system. The page runs directly in a browser with sample data and no dependencies.
 
-For navigation, footer and call-to-action references, open [pattern galleries](references/patterns.md). For how real products write out a complete system of colour, type, spacing and radius, read the style systems at [Refero](https://styles.refero.design/).
+For navigation, footer and call-to-action references, open [pattern galleries](references/patterns.md). For how real products write out a complete system of colour, type, spacing and radius, read the style systems at [Refero](https://styles.refero.design/). For a specific colour or token question, the measured tokens of 84 real brands as DESIGN.md files: `https://github.com/VoltAgent/awesome-design-md` (never a source for another brand's palette).
 
 ## While building
 
@@ -44,3 +44,5 @@ For navigation, footer and call-to-action references, open [pattern galleries](r
 - Render it in a real browser at 360, 768 and 1440 px (`render_see`, or `browser_session` when it needs interaction) and look at the screenshots. Fix what a designer would reject: overflow, overlap, cramped or orphaned text, weak hierarchy.
 - Run the swap test once more on the finished screen.
 - Say which states and widths you looked at, and what you did not check.
+
+Design files in Penpot, shadcn registries, and a second-opinion slop checker: `references/design-tools.md`.

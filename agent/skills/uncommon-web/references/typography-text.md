@@ -54,3 +54,9 @@ Text laid out without the DOM, split into glyphs, scrambled, hand-annotated and 
 - **FloodText**: Variable-font waves washing through text, one character at a time `npm i @overpunch/floodtext` · MIT v1.1.1 · [source](https://github.com/over-punch/FloodText) · [demo](https://webdev.teknium.io/d/type6/demos/floodtext-axis-tide/)
 - **BrowserTextEffects**: 37 terminaltexteffects animations ported to the browser DOM `npm i browsertexteffects` · MIT v1.0.0 · [source](https://github.com/donlair/browsertexteffects) · [demo](https://webdev.teknium.io/d/type6/demos/browsertexteffects-terminal-showroom/)
 - **use-springface**: React hook: spring-physics variable-font axes plus chromatic shadow trails `npm i use-springface` · ISC v0.3.0 · [source](https://github.com/tol-is/springface) · [demo](https://webdev.teknium.io/d/type6/demos/springface-chromatic-wordmark/)
+
+## Checked by hand, 27 Nov 2026
+
+Outside the field guide; licences and versions as read on that date.
+
+- **Calligraph**: fluid text and number morphs for React, powered by Motion `npm i calligraph` · MIT v1.4.1 · [demo](https://calligraph.raphaelsalaja.com/). A small one-author project: read the source before depending on it.

@@ -42,3 +42,11 @@ Springs, timelines, layout transitions, smooth scroll, parallax and rigid-body p
 - **Moveable**: Draggable, resizable, rotatable, warpable, clippable, snappable control boxes `npm i moveable` · MIT v0.53.0 · [source](https://github.com/daybrush/moveable) · [demo](https://webdev.teknium.io/d/motion5/demos/moveable-design-canvas/)
 - **SmoothUI**: Motion-first React components installed through a shadcn registry `npx shadcn@latest add @smoothui/siri-orb @smoothui/dynamic-island @smoothui/music-toggle` ; `npx shadcn@latest add @smoothui/time-machine-stack @smoothui/card-swipe-deck` · MIT vregistry @ 2026-10-22 (repo 4d29b8b) · [source](https://github.com/educlopez/smoothui) · [demo 1](https://webdev.teknium.io/d/motion5/demos/smoothui-siri-island/) [demo 2](https://webdev.teknium.io/d/motion5/demos/smoothui-card-stacks/)
 - **Tailwind Motion**: Tailwind CSS plugin: animations as composable utility classes `npm i tailwindcss-motion` · MIT v1.1.1 · [source](https://github.com/romboHQ/tailwindcss-motion) · [demo](https://webdev.teknium.io/d/motion5/demos/tailwind-motion-presets/)
+
+## Checked by hand, 27 Nov 2026
+
+Outside the field guide; licences and versions as read on that date.
+
+- **Motion AI kit**: `npx motion-ai` adds a free docs-search MCP server (`https://mcp.motion.dev`, no account) and a `/motion` skill; Motion+ ($399 once) adds 550+ examples and paid tools on top of the MIT core · [guide](https://motion.dev/docs/ai-kit-install). That is an install, so ask first; the same docs read fine at `motion.dev/llms.txt`.
+- **GSAP terms**: every plugin (SplitText, MorphSVG, DrawSVG, ScrollSmoother …) is free for commercial work, and the licence FAQ says AI-written GSAP code is not a prohibited use. The prohibited use is a no-code visual animation builder that competes with Webflow · [licence](https://gsap.com/licensing), docs index at `gsap.com/llms.txt`
+- **GSAP Vault**: an unaffiliated catalogue of about 400 GSAP effects, sections and templates, each with a live demo; 29 are free under MIT ([free](https://gsapvault.com/free)), the rest are paid and the licence page was missing. Watch the demos for technique; its llms.txt asks agents to link to the products rather than rebuild them.

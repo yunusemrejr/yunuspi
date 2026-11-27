@@ -88,6 +88,10 @@ A request changes the work; it is never its content. The reader saw neither the 
 
 Factual sources a reader needs (a vendor, a date, a public URL) stay.
 
+## Playbooks for marketing pages
+
+For a landing page, pricing page, sign-up flow, comparison page or cold email, `references/marketing-playbooks.md` points to open playbooks that may be worth a look for the questions they ask. The brief, the voice, the facts and the rules above decide.
+
 ## 7. Check before handing over
 
 1. Read every visible string once in place: rendered page, slide, screen. Text that wraps badly, truncates or overflows at 360 px is a copy problem too.

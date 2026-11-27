@@ -47,6 +47,13 @@ An existing design that is good, that the user is happy with, and that comes wit
 - **Refero Styles:** written style systems of real products (`https://styles.refero.design/`)
 - **Scrolltide:** scroll templates, components, sections, shaders and UI screens (`https://www.scrolltide.co/` + `/templates`, `/components`, `/sections`, `/shaders`, `/ui`); details in the `references/` folder of the `scrolltide` guide
 - **Uncommon Web:** libraries with live demos (`https://webdev.teknium.io/`); install command, licence and demo per library in the `references/` folder of the `uncommon-web` guide
+- **Codrops:** experimental demos with tutorials and source (`https://tympanus.net/codrops/`): WebGL scroll transitions, kinetic menus, image and type effects; demos MIT unless a page says otherwise. Plain fetching is refused; open it in the browser.
+- **Awwwards by tag:** juried real sites, `https://www.awwwards.com/websites/<tag>/` (`ui-design`, `animation`, `3d`, `typography`, `e-commerce` …) and `/sites_of_the_day/`; filter by technology (WebGL, Three.js, GSAP) to see a technique in use.
+- **Pageflows:** screen-by-screen recordings of real apps' flows (onboarding, sign-in, checkout, settings) by platform and product (`https://pageflows.com/`); the full flows need a paid account.
+- **Made in Webflow:** real Webflow sites by tag (`https://webflow.com/made-in-webflow/` + `animation`, `interactions`, `portfolio`, `ecommerce`), mixed with UI-kit showcases.
+- **Dribbble:** concept shots, mostly not shipped products (`https://dribbble.com/tags/<tag>`): useful for one detail (an icon set, an empty state, a chart treatment), unreliable as a layout. Fetching is blocked; open it in the browser.
+- **DESIGN.md collection:** 84 brands' colour tokens, type scales, spacing and component notes as DESIGN.md files (`https://github.com/VoltAgent/awesome-design-md`), extracted from their public sites by VoltAgent, not official, with hover and error states marked unreliable. Use it like Refero: to measure a system against a real one, never to dress another brand in it.
+- **Block and template shops** (shadcnblocks, Tailark, Cruip, `vercel.com/templates`): how a pricing table, docs portal or dashboard is usually assembled. Their look is the median SaaS page, so they answer structure questions only.
 
 ## Uncommon Web libraries (`webdev.teknium.io`)
 

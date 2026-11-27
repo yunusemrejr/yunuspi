@@ -23,3 +23,5 @@ Ink landscapes, voxel sculptures as SVG, pen-plotter renderers, pigment mixing a
 - **Poline**: Palettes interpolated between anchor colours along polar HSL paths `npm i poline` · MIT v0.13.1 · [source](https://github.com/meodai/poline) · [demo](https://webdev.teknium.io/d/gen3/demos/poline-polar-palette/)
 - **Sketchy Plants**: Procedural house plants drawn as SVG in fineliner and watercolour `npm i @orta/sketchy-plants` · MIT v0.1.3 · [source](https://github.com/orta/plants) · [demo](https://webdev.teknium.io/d/gen3/demos/sketchy-plants-shelf/)
 - **hairline**: Thirty-three isometric line figures that answer the pointer `npm i @lucasmarkes/hairline` · MIT v0.5.1 · [source](https://github.com/lucasmarkes/hairline) · [demo](https://webdev.teknium.io/d/gen3/demos/hairline-specimen-sheet/)
+
+To look further than this list: [awesome-generative-art](https://github.com/camilleroux/awesome-generative-art) (CC0, kept up to date) indexes generative-art tools, colour maths, plotter software and artists by kind; each linked project keeps its own licence.

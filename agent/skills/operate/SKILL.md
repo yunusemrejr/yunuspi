@@ -14,6 +14,10 @@ For decision-model or routing work, open the [route comparison note](examples/ro
 
 For an external write, name the exact target, operation and reason in the scoped approval. If the host cannot prompt, ask the user in chat and continue work within scope while waiting.
 
+## Further checklists
+
+For a full audit, a schema plan or programmatic pages, the open playbooks in `../copywriting/references/marketing-playbooks.md` (`seo-audit`, `ai-seo`, `schema`, `programmatic-seo`, `site-architecture`) list checks worth comparing against this file.
+
 ## YunusPi self-maintenance
 
 - The live install under `~/.pi` is not edited directly. The source is a clone of the yunuspi repository (find it with `git worktree list` from any clone; its root holds `scripts/install.mjs`).
