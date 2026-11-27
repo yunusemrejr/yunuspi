@@ -66,6 +66,18 @@ const COOLDOWN_MS = [5, 10, 20].map((minutes) => minutes * 60_000);
 /** After a question that got no usable answer the agent's next question waits this long. */
 const UNANSWERED_WAIT_MS = 5 * 60_000;
 const MAX_REQUEST = 1_200;
+/** A message of at most this many words that only agrees or says go on is not a new request. */
+const ACK_WORDS_AT = 4;
+const ACK_WORDS = new Set([
+	"ok", "okay", "yes", "yep", "yeah", "sure", "fine", "thanks", "thank", "you", "please", "go", "on", "ahead", "continue", "proceed", "keep", "going",
+	"tamam", "tamamdır", "evet", "olur", "devam", "et", "edin", "lütfen", "peki", "sağol", "teşekkürler",
+]);
+
+/** True when a typed message only agrees or says to go on, so it carries no task of its own. */
+export function isAcknowledgement(message: string): boolean {
+	const words = plain(message).toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+	return words.length <= ACK_WORDS_AT && words.every((word) => ACK_WORDS.has(word));
+}
 const LABEL_CHARS = 100;
 const NOTE_CHARS = 200;
 const RECENT_FOR_MODEL = 12;
@@ -78,9 +90,12 @@ const READ_TOOLS = new Set([
 const WRITE_TOOLS = new Set(["edit", "write", "apply_patch", "multi_edit", "notebook_edit"]);
 const RUN_TOOLS = new Set(["bash", "powershell"]);
 
+/** The tags the harness and its notices wrap text in; other angle brackets (generics, comparisons, HTML a person typed) are content. */
+const FRAME_TAG = /<\/?(?:system|harness|goal|task-notification)[\w:-]*(?:\s[^<>]*)?>/gi;
+
 /** Request, brief and labels enter a note through here: one line, no way to forge the frame around them. */
 export function plain(text: unknown, max = Number.POSITIVE_INFINITY): string {
-	const clean = String(text ?? "").replace(/<\/?[a-zA-Z][^>]*>/g, " ").replace(/[«»]/g, "").replace(/\s+/g, " ").trim();
+	const clean = String(text ?? "").replace(FRAME_TAG, " ").replace(/[«»]/g, "").replace(/\s+/g, " ").trim();
 	return clean.length > max ? `${clean.slice(0, max - 1).trimEnd()}…` : clean;
 }
 
@@ -260,10 +275,10 @@ export class Needed {
 		this.now = options.now ?? Date.now;
 	}
 
-	/** The person's typed message: it replaces the request and starts the check over. A worker keeps its first brief. */
+	/** The person's typed message: it replaces the request and starts the check over, unless it only says ok or go on. A worker keeps its first brief. */
 	request(message: string): void {
 		const request = plain(message, MAX_REQUEST);
-		if (!request || (this.worker && this.requestText)) return;
+		if (!request || isAcknowledgement(request) || (this.worker && this.requestText)) return;
 		this.reset();
 		this.requestText = request;
 	}

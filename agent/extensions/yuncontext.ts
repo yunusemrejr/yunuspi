@@ -62,7 +62,8 @@ async function callYuncontext(name: string, args: Record<string, unknown>, signa
 // One constant line at the end of the system prompt (stable, so the prompt cache keeps it); it names the
 // tool and when to use it, and carries no history itself.
 const NUDGE =
-  "Project memory: ask yuncontext (cwd, no q) when you start in a project; ask again with q = one subject when the " +
+  "Project memory: the first prompt carries the yuncontext brief when the service answers; without one, ask " +
+  "yuncontext (cwd, no q) when you start in a project. Ask again with q = one subject when the " +
   "work moves to a new part of the project, before non-trivial work, and with the exact error line when something " +
   "fails. Record with yuncontext_record straight after each of these, not at the end of the session: a fix you " +
   "verified, a cause you found, a correction the user made (their words and what it applies to), a trap that cost " +
@@ -94,6 +95,15 @@ export async function fetchYuncontextBrief(
   return yuncontextBriefText(reply);
 }
 
+function hasBrief(ctx: any): boolean {
+  try {
+    const branch = ctx?.sessionManager?.getBranch?.();
+    return Array.isArray(branch) && branch.some((entry: any) => entry?.customType === "yuncontext-brief");
+  } catch {
+    return false;
+  }
+}
+
 export default function registerYuncontext(pi: any, deps: { fetchBrief?: typeof fetchYuncontextBrief } = {}) {
   const fetchBrief = deps.fetchBrief ?? fetchYuncontextBrief;
   let briefSent = false;
@@ -102,8 +112,11 @@ export default function registerYuncontext(pi: any, deps: { fetchBrief?: typeof 
   pi.on?.("session_switch", resetBrief);
   pi.on?.("session_shutdown", resetBrief);
   pi.on?.("before_agent_start", async (_event: any, ctx: any) => {
-    if (briefSent || !yuncontextBriefOn()) return undefined;
+    // A child works from its caller's brief and can ask the tool itself; a fetch per child only adds wait and tokens.
+    if (briefSent || !yuncontextBriefOn() || process.env.PI_SUBAGENT_CHILD === "1") return undefined;
     briefSent = true;
+    // A resumed session already carries its brief; a second copy only costs tokens.
+    if (hasBrief(ctx)) return undefined;
     try {
       const text = await fetchBrief(ctx?.cwd ?? process.cwd());
       if (text) return { message: { customType: "yuncontext-brief", content: text, display: false } };

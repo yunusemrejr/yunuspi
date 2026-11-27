@@ -38,6 +38,16 @@ test('fenced code is never cut', () => {
   assert.ok(slimNotesFile('/p/A.md', fenced).includes('y'.repeat(900)), 'code is never cut');
 });
 
+test('a fenced block that crosses the section cap keeps its closing fence', () => {
+  const prose = Array.from({ length: 30 }, (_, i) => `Line ${i} ${'of plain prose '.repeat(15)}`).join('\n');
+  const block = `\`\`\`\n${Array.from({ length: 10 }, () => 'z'.repeat(300)).join('\n')}\n\`\`\``;
+  const notes = `# T\n\n## Setup\n\n${prose}\n${block}\n${prose}\n\n## Rules\n\n1. Rule after the block.\n\n## Log\n\n${LOG}`;
+  assert.ok(notes.length >= SLIM_FILE_MIN);
+  const out = slimNotesFile('/p/A.md', notes);
+  assert.equal(out.split('\n').filter(line => /^\s*```/.test(line)).length % 2, 0, 'every opened fence is closed');
+  assert.ok(out.includes('1. Rule after the block.'));
+});
+
 test('a large dense file that saves under 20% is sent unchanged', () => {
   assert.ok(DENSE.length >= SLIM_FILE_MIN);
   assert.equal(slimNotesFile('/p/CLAUDE.md', DENSE), DENSE);

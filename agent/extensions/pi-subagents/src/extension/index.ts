@@ -433,17 +433,28 @@ export function projectActiveHerdrRuns(state: SubagentState): HerdrStatusRun[] {
 		});
 }
 
-let leavingHooksInstalled = false;
-/** Once per process: a TERM-less exit signals the session's children, and INT (which pi does not handle) ends them before the process leaves. */
-function installLeavingHooks(): void {
-	if (leavingHooksInstalled) return;
-	leavingHooksInstalled = true;
-	process.once("exit", () => signalOwnChildrenAtExit());
-	process.on("SIGINT", () => {
+/** The hooks this process holds, kept on globalThis: the extension loader evaluates the module afresh on every reload. */
+const LEAVING_HOOKS = Symbol.for("yunus-pi.leaving-hooks.v1");
+type LeavingHooks = { exit: () => void; interrupt: () => void };
+
+/** Once per process, whatever the reloads: a TERM-less exit signals the session's children, and INT (which pi does not handle) ends them before the process leaves. A reload replaces the hooks of the load before it. */
+export function installLeavingHooks(): void {
+	const holder = globalThis as { [LEAVING_HOOKS]?: LeavingHooks };
+	const previous = holder[LEAVING_HOOKS];
+	if (previous) {
+		process.off("exit", previous.exit);
+		process.off("SIGINT", previous.interrupt);
+	}
+	const exit = () => signalOwnChildrenAtExit();
+	const interrupt = () => {
 		// Another handler (a suspended terminal ignoring INT) owns the decision.
-		if (process.listenerCount("SIGINT") > 1) return;
-		void Promise.race([endOwnChildren("session-end"), new Promise<void>((resolve) => setTimeout(resolve, 4_500))]).finally(() => process.exit(130));
-	});
+		if (process.listeners("SIGINT").some((listener) => listener !== interrupt)) return;
+		const limit = new Promise<void>((resolve) => setTimeout(resolve, 4_500).unref());
+		void Promise.race([endOwnChildren("session-end"), limit]).finally(() => process.exit(130));
+	};
+	holder[LEAVING_HOOKS] = { exit, interrupt };
+	process.once("exit", exit);
+	process.on("SIGINT", interrupt);
 }
 
 export default function registerSubagentExtension(pi: ExtensionAPI): void {
@@ -1217,7 +1228,8 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 		});
 		rpcBridge.emitReady(ctx);
 		supervisorChannel.start();
-		supervisorChannel.activateTransport();		void endOrphans();
+		supervisorChannel.activateTransport();
+		void endOrphans();
 	});
 
 	installLeavingHooks();

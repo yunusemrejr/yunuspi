@@ -95,7 +95,7 @@ function liveSigns(root: string, remotes: readonly string[]): string[] {
 	return [...new Set(signs)];
 }
 
-/** Repositories one or two levels below a folder, bounded and sorted. */
+/** Repositories one or two levels below a folder, bounded and sorted; dot folders (tool caches, `.nvm`) are not projects. */
 function repositoriesBelow(cwd: string): string[] {
 	const found: string[] = [];
 	const visit = (dir: string, depth: number): void => {
@@ -103,7 +103,7 @@ function repositoriesBelow(cwd: string): string[] {
 		let entries;
 		try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
 		for (const entry of entries) {
-			if (!entry.isDirectory() || entry.name === "node_modules" || entry.name === ".git") continue;
+			if (!entry.isDirectory() || entry.name === "node_modules" || entry.name.startsWith(".")) continue;
 			const child = join(dir, entry.name);
 			if (existsSync(join(child, ".git"))) found.push(entry.name);
 			else if (depth < 2) visit(child, depth + 1);
@@ -134,23 +134,28 @@ export function whereLine(cwd: string, home = homedir()): string {
 				/* treat as the root */
 			}
 		}
-		const remotes = (gitText(root, ["remote"], left) ?? "").split("\n").map((name) => name.trim()).filter(Boolean);
+		// A git answer that is missing (budget spent, git failed) stays out of the line instead of reading as "none", "detached" or 0.
+		const remoteList = gitText(root, ["remote"], left);
+		const remotes = (remoteList ?? "").split("\n").map((name) => name.trim()).filter(Boolean);
 		const remoteName = remotes.includes("origin") ? "origin" : remotes[0];
-		const remote = remoteName ? remoteLabel(gitText(root, ["remote", "get-url", remoteName], left)) ?? "none" : "none";
-		const branch = gitText(root, ["branch", "--show-current"], left) || "detached";
-		const name = basename(root);
-		if (prefix) {
-			kind = `a subfolder of the git repository ${name} (remote ${remote}, branch ${branch})`;
-		} else {
-			const changed = (gitText(root, ["status", "--porcelain"], left) ?? "").split("\n").filter(Boolean).length;
-			kind = `the git repository ${name} (remote ${remote}, branch ${branch}, ${changed} uncommitted files)`;
+		const remote = remoteList === undefined ? undefined : remoteName ? remoteLabel(gitText(root, ["remote", "get-url", remoteName], left)) : "none";
+		const current = gitText(root, ["branch", "--show-current"], left);
+		const facts: string[] = [];
+		if (remote) facts.push(`remote ${remote}`);
+		if (current !== undefined) facts.push(`branch ${current || "detached"}`);
+		if (!prefix) {
+			const status = gitText(root, ["status", "--porcelain"], left);
+			if (status !== undefined) facts.push(`${status.split("\n").filter(Boolean).length} uncommitted files`);
 		}
+		kind = `${prefix ? "a subfolder of the git repository" : "the git repository"} ${basename(root)}${facts.length ? ` (${facts.join(", ")})` : ""}`;
 		signs = liveSigns(root, remotes);
 	} else {
-		const repos = repositoriesBelow(folder);
-		if (repos.length) kind = `a folder holding ${repos.length} repositories (${repos.slice(0, 4).join(", ")})`;
-		else if (folder === resolvedHome) kind = "the home folder, no project: a general or system task unless the message names a project";
-		else kind = "a plain folder with no repository";
+		if (folder === resolvedHome) {
+			kind = "the home folder, no project: a general or system task unless the message names a project";
+		} else {
+			const repos = repositoriesBelow(folder);
+			kind = repos.length ? `a folder holding ${repos.length} repositories (${repos.slice(0, 4).join(", ")})` : "a plain folder with no repository";
+		}
 	}
 	const live = signs.length ? ` Live system in reach: ${signs.slice(0, 3).join(", ")}; a push or deploy from here changes it.` : "";
 	const line = `Where: ${shortFolder} is ${kind}.${live}`;
@@ -159,19 +164,23 @@ export function whereLine(cwd: string, home = homedir()): string {
 
 /** A message asking for speed, in English or Turkish. */
 const HURRY_PATTERNS: RegExp[] = [
-	/\brush\b/,
+	// "rush" and "no time" alone also name features ("rush order", "no time zone").
+	/\b(?:in a rush|please rush|rush (?:it|this|through))\b/,
 	/\bhurry\b/,
-	/\bbe quick\b/,
-	/\bquickly\b/,
-	/\bfaster\b/,
+	/\bbe quick(?:er)?\b/,
+	// Pace of the agent only: "make the engine faster" or "users find it quickly" describe the product.
+	// Said to the agent: at the start of a sentence or after "please", "you", "just" ("make the engine work faster" is a product goal).
+	/(?:^|[.!?]\s+|\b(?:please|you|just)\s+)(?:work|go|move|finish|be|do (?:it|this|that)) (?:faster|quicker|quickly)\b/m,
+	/\b(?:quickly|faster|quicker),? please\b/,
+	/\bas (?:fast|quickly) as (?:you can|possible)\b/,
 	/\basap\b/,
 	/\btaking (?:too|so) long\b/,
 	/\bwe don'?t have all day\b/,
-	/\bno time\b/,
+	/\b(?:have|got|there is|there'?s) no time(?!\s+zones?\b)|\bno time to lose\b/,
 	/\bacele\b/,
 	/çabuk/,
 	/\bhızlı ol\b/,
-	/\bhemen\b/,
+	/(?<!hemen\s)\bhemen\b(?!\s+hemen\b)/, // "hemen hemen" means almost
 	/\buzun sürdü/,
 	/\bvakit yok\b/,
 ];
@@ -579,11 +588,13 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		for (let index = 0; index < children; index++) subagentSpans.push({ key, start: now - durationMs, end: now });
 		while (subagentSpans.length > MAX_SUBAGENT_SPANS) subagentSpans.shift();
 	};
-	/** The Where line, computed once and recomputed only when the working folder changes. */
-	let where: { cwd: string; line: string } | undefined;
-	const whereFor = (cwd: string): string => {
-		if (!where || where.cwd !== cwd) where = { cwd, line: whereLine(cwd) };
-		return where.line;
+	/** The Where line as last sent. Read from the machine on every prompt (branch and uncommitted files move), sent only when its text changed. */
+	let whereSent: string | undefined;
+	const whereFor = (cwd: string): string | undefined => {
+		const line = whereLine(cwd);
+		if (line === whereSent) return undefined;
+		whereSent = line;
+		return line;
 	};
 
 	const entriesOf = (ctx: any): any[] => {
@@ -645,13 +656,15 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 		pending = undefined;
 		hurrySent = false;
 		designScale.reset();
-		where = undefined;
+		whereSent = undefined;
 		subagentSpans.length = 0;
 		pace.end(PACE_SESSION);
 	};
 	pi.on("session_start", reset);
 	pi.on("session_switch", reset);
 	pi.on("session_tree", reset);
+	// A compacted history may no longer hold the line that was sent.
+	pi.on("session_compact", () => { whereSent = undefined; });
 	pi.on("session_shutdown", () => {
 		reset();
 		try {

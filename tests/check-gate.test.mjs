@@ -52,6 +52,14 @@ test('exit and FAIL_MARK decide the outcome', () => {
   assert.equal(out('npm test 2>&1 | tail -5', { failed: false, output: '9 passed' }).kind, 'pass');
   // the marker is not read when the command exits 0 without a pipe
   assert.equal(out('npm test', { failed: false, output: '2 failed' }).kind, 'pass');
+  // the exit status of a later command hides the check's own, whatever joins them but &&
+  for (const command of ['npm test; echo done', 'npm test || true', 'pytest 2>&1 | tail -5', 'npm test\necho done']) {
+    assert.equal(out(command, { failed: false, output: 'Tests: 3 failed, 9 passed' }).kind, 'fail', command);
+    assert.equal(out(command, { failed: false, output: '9 passed' }).kind, 'pass', command);
+  }
+  // a lone command, a trailing separator and an && chain keep their exit code
+  for (const command of ['npm test', 'npm test;', 'npm test\n', 'cd app && npm test', 'npm test && npm run build'])
+    assert.equal(out(command, { failed: false, output: '2 failed' }).kind, 'pass', command);
   for (const sample of ['2 errors', '1 failing', 'not ok 3 - x', 'Traceback (most recent call last):', 'src/a.ts: error TS2322', 'FAIL src/a.test.ts', 'npm ERR! code 1', 'FAILED tests/x.py::t', 'thread panicked at x', 'E   assert 1 == 2'])
     assert.match(sample, ev.FAIL_MARK, sample);
   for (const sample of ['0 failed', 'all passed', 'no errors found']) assert.doesNotMatch(sample, ev.FAIL_MARK, sample);
@@ -65,6 +73,13 @@ test('code files and exclusions', () => {
   assert.equal(ev.isCodeFile('/work/build/proj/a.ts', '/work/build/proj'), true);
   assert.deepEqual(ev.shellWrittenFiles('sed -i s/a/b/ src/a.ts && cat > b.py <<EOF\nx\nEOF'), ['src/a.ts', 'b.py']);
   assert.deepEqual(ev.shellWrittenFiles('echo x | tee -a log.txt > /dev/null'), ['log.txt']);
+  // an arrow inside a quoted message is text, not a write
+  for (const command of ['git commit -m "rename a.ts -> b.ts"', "git commit -m 'a.ts > b.ts'", 'echo a \\> b.ts', 'npm test 2>&1 | tail -5', 'node x.js >&2'])
+    assert.deepEqual(ev.shellWrittenFiles(command), [], command);
+  assert.deepEqual(ev.shellWrittenFiles('echo "a > b" > out.py'), ['out.py']);
+  assert.deepEqual(ev.shellWrittenFiles('git commit -m "x -> y.ts" && echo hi >> log.ts'), ['log.ts']);
+  assert.deepEqual(ev.shellWrittenFiles('echo hi > "my file.ts"'), ['my file.ts']);
+  assert.deepEqual(ev.shellWrittenFiles("echo hi >'my file.ts'"), ['my file.ts']);
 });
 
 test('publishing commands', () => {
@@ -76,6 +91,18 @@ test('a report that puts work off is found', () => {
   assert.equal(ev.deferredPhrase('The pipeline follows as its own small update.'), 'follows as its own small update');
   assert.equal(ev.deferredPhrase('Docs left for later.'), 'left for later');
   assert.equal(ev.deferredPhrase('All done and verified.'), undefined);
+  for (const [report, phrase] of [
+    ['I deferred the migration.', 'I deferred'],
+    ["We've postponed the rollout.", "We've postponed"],
+    ['I have deferred the docs.', 'I have deferred'],
+    ['The rest is deferred to a later round.', 'deferred to a later'],
+    ['Postponed until the next release.', 'Postponed until the next'],
+    ['Done.\n**Deferred:** logging', 'Deferred:'],
+    ['Done.\n## Postponed:\n- docs', 'Postponed:'],
+  ]) assert.equal(ev.deferredPhrase(report), phrase, report);
+  // the word as part of the subject is not a promise to do it later
+  for (const report of ['Scripts are now loaded deferred.', 'I documented how deferred payments work.', 'The postponed jobs table is unchanged.', 'Deferred rendering is on by default.', 'The change is not deferred or postponed in any way.', 'As a next step you could add tests.'])
+    assert.equal(ev.deferredPhrase(report), undefined, report);
 });
 
 function harness() {
@@ -98,7 +125,7 @@ function harness() {
     screenshot: () => fire('tool_result', { toolName: 'browser_session', input: { action: 'screenshot' }, details: {}, content: [], isError: false }),
     reply: (text = 'done', stopReason = 'stop') => fire('message_end', { message: { role: 'assistant', stopReason, content: [{ type: 'text', text }] } }),
     settle: () => fire('agent_settled', {}),
-    call: (command) => fire('tool_call', { toolName: 'bash', input: { command } }),
+    call: (command, toolName = 'bash') => fire('tool_call', { toolName, input: { command } }),
   };
 }
 const start = async () => { const h = harness(); await h.ready(); await h.prompt(); return h; };
@@ -129,6 +156,35 @@ test('a failing check names the command and the failure', async () => {
   assert.match(h.sent[0].message.content, /The last check failed: `npm test 2>&1 \| tail -5` — Tests: 2 failed/);
 });
 
+test('a report that already states the failed check is not asked to do it again', async () => {
+  for (const report of ['Two tests still fail: the retry case and the timeout case.', 'I ran `npm test 2>&1 | tail -5` and read the output; the build is red.']) {
+    const h = await start();
+    await h.edit('/p/src/a.ts');
+    await h.run('npm test 2>&1 | tail -5', { output: 'Tests: 2 failed, 7 passed' });
+    await h.reply(report); await h.settle();
+    assert.equal(h.sent.length, 0, report);
+  }
+  // a success claim next to the failure still gets the notice
+  for (const report of ['All tests pass; fixed the failing test.', 'The build is green now, the earlier failure was a typo.', 'Ran `npm test 2>&1 | tail -5`.']) {
+    const h = await start();
+    await h.edit('/p/src/a.ts');
+    await h.run('npm test 2>&1 | tail -5', { output: 'Tests: 2 failed, 7 passed' });
+    await h.reply(report); await h.settle();
+    assert.match(h.sent[0]?.message.content ?? '', /The last check failed/, report);
+  }
+  {
+    const h = await start();
+    await h.edit('/p/src/a.ts');
+    await h.run('npm test', { output: 'Tests: 2 failed, 7 passed' });
+    await h.reply('npm test still fails: 2 failed'); await h.settle();
+    assert.equal(h.sent.length, 0);
+  }
+  // unchecked code is still asked about, whatever the report says
+  const h = await start();
+  await h.edit('/p/src/a.ts'); await h.reply('The failure was a typo; fixed.'); await h.settle();
+  assert.match(h.sent[0].message.content, /Code changed after its last check/);
+});
+
 test('notes, an interrupted run and a stop with work pending stay silent', async () => {
   const h = await start();
   await h.edit('/p/README.md'); await h.reply(); await h.settle();
@@ -147,6 +203,16 @@ test('a push is held once per prompt while code is unchecked', async () => {
   assert.equal(await h.call('git status'), undefined);
   await h.prompt(); await h.run('npm test');
   assert.equal(await h.call('git push'), undefined, 'nothing unchecked');
+});
+
+test('a push started in the background is held like one run in the foreground', async () => {
+  const h = await start();
+  await h.edit('/p/src/a.ts');
+  const first = await h.call('git push origin main', 'bg_run');
+  assert.equal(first.block, true);
+  assert.match(first.reason, /Hold the push: code changed after its last check \(src\/a\.ts\)/);
+  assert.equal(await h.call('git push origin main', 'bg_run'), undefined, 'the second attempt goes through');
+  assert.equal(await h.call('git push origin main', 'read'), undefined, 'other tools are not commands');
 });
 
 test('a final report that defers work after changes is named once, joined with the check text', async () => {

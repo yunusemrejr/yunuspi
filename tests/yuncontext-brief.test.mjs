@@ -55,6 +55,28 @@ test('the first prompt of a session gets the brief once; a failure stays quiet',
   assert.equal(await failing.brief()({}, { cwd: '/work/p' }), undefined);
 });
 
+test('a resumed session that already carries a brief gets no second copy', async () => {
+  const { pi, handlers, brief } = fakePi();
+  let fetched = 0;
+  registerYuncontext(pi, { fetchBrief: async () => { fetched++; return 'BRIEF'; } });
+  handlers.session_switch[0]();
+  const resumed = { cwd: '/work/p', sessionManager: { getBranch: () => [{ type: 'custom_message', customType: 'yuncontext-brief', content: 'OLD' }] } };
+  assert.equal(await brief()({}, resumed), undefined);
+  assert.equal(fetched, 0, 'no fetch for a brief the history already holds');
+});
+
+test('a subagent child gets no automatic brief', async () => {
+  const { pi, brief } = fakePi();
+  registerYuncontext(pi, { fetchBrief: async () => 'BRIEF' });
+  const before = process.env.PI_SUBAGENT_CHILD;
+  process.env.PI_SUBAGENT_CHILD = '1';
+  try {
+    assert.equal(await brief()({}, { cwd: '/work/p' }), undefined);
+  } finally {
+    if (before === undefined) delete process.env.PI_SUBAGENT_CHILD; else process.env.PI_SUBAGENT_CHILD = before;
+  }
+});
+
 test('the switch turns the brief off', async () => {
   assert.equal(yuncontextBriefOn('0'), false);
   assert.equal(yuncontextBriefOn(undefined), true);

@@ -32,21 +32,27 @@ export const isImageFile = (file: string): boolean => IMAGE_FILE.test(file);
 
 // ---------- commands ----------
 
-/** Segments of a shell command split on `&&`, `||`, `;`, `|` and newline outside quotes. `piped` when a single `|` joins two of them. */
-export function commandSegments(command: string): { segments: string[]; piped: boolean } {
-	const segments: string[] = [];
-	let current = "", quote = "", piped = false;
+/**
+ * Segments of a shell command split on `&&`, `||`, `;`, `|` and newline outside quotes.
+ * `exitMasked` when anything but `&&` joins two of them: the exit status then belongs to
+ * a later command (`npm test; echo done`, `npm test || true`, `pytest | tail`), not to the check.
+ */
+export function commandSegments(command: string): { segments: string[]; exitMasked: boolean } {
+	const parts: { text: string; join: string }[] = [];
+	let current = "", quote = "";
+	const cut = (join: string) => { parts.push({ text: current.trim(), join }); current = ""; };
 	for (let at = 0; at < command.length; at++) {
 		const char = command[at];
 		if (quote) { current += char; if (char === "\\" && quote === '"') current += command[++at] ?? ""; else if (char === quote) quote = ""; continue; }
 		if (char === "\\") { current += char + (command[++at] ?? ""); continue; }
 		if (char === '"' || char === "'") { quote = char; current += char; continue; }
-		if (char === "&" && command[at + 1] === "&" || char === "|" && command[at + 1] === "|") { segments.push(current); current = ""; at++; continue; }
-		if (char === ";" || char === "\n" || char === "|") { if (char === "|") piped = true; segments.push(current); current = ""; continue; }
+		if (char === "&" && command[at + 1] === "&" || char === "|" && command[at + 1] === "|") { cut(char + char); at++; continue; }
+		if (char === ";" || char === "\n" || char === "|") { cut(char); continue; }
 		current += char;
 	}
-	segments.push(current);
-	return { segments: segments.map(segment => segment.trim()).filter(Boolean), piped };
+	cut("");
+	const kept = parts.filter(part => part.text);
+	return { segments: kept.map(part => part.text), exitMasked: kept.slice(0, -1).some(part => part.join !== "&&") };
 }
 
 /** The command a segment runs, without the harmless wrappers in front of it. */
@@ -132,7 +138,7 @@ export function isCheckCommand(command: string): boolean {
 	return commandSegments(String(command ?? "")).segments.some(segment => isCheckToolStep(segment) || isRunStep(segment));
 }
 
-/** Output that says a check failed although the piped command exited 0. */
+/** Output that says a check failed although the command exited 0 (its exit status was a later command's). */
 export const FAIL_MARK = /(^|\s)[1-9]\d* (failed|failing|errors?)\b|^not ok \d|Traceback \(most recent call last\)|error TS\d{3,5}|^FAIL\s|npm ERR!|^FAILED |\bFAILED \(|panicked at|^E\s{3}\S/m;
 
 export interface CheckResult {
@@ -154,11 +160,23 @@ export function checkOutcome(command: string, result: CheckResult): CheckOutcome
 	if (result.background) return { kind: "background" };
 	const output = result.output ?? "";
 	const marked = FAIL_MARK.exec(output);
-	const piped = commandSegments(command).piped;
-	if (!result.failed && !(piped && marked)) return { kind: "pass" };
+	if (!result.failed && !(marked && commandSegments(command).exitMasked)) return { kind: "pass" };
 	const lines = output.split("\n");
 	const line = marked ? lines.find(candidate => FAIL_MARK.test(candidate)) ?? "" : lines.map(row => row.trim()).filter(Boolean).at(-1) ?? "";
 	return { kind: "fail", snippet: clip(line.trim(), 100) };
+}
+
+/** The text with everything inside quotes (and each backslash escape) blanked to `_`, same length: a `>` in a message is not a redirection. */
+function blankQuoted(text: string): string {
+	let quote = "", blank = "";
+	for (let at = 0; at < text.length; at++) {
+		const char = text[at];
+		if (char === "\\" && quote !== "'") { const escape = text.slice(at, at + 2); blank += "_".repeat(escape.length); at += escape.length - 1; continue; }
+		if (quote) { if (char === quote) { quote = ""; blank += char; } else blank += "_"; continue; }
+		if (char === '"' || char === "'") quote = char;
+		blank += char;
+	}
+	return blank;
 }
 
 /** Files a shell command writes: `sed -i`, redirection, `tee`. */
@@ -169,8 +187,10 @@ export function shellWrittenFiles(command: string): string[] {
 		const tokens = text.split(/\s+/).map(token => token.replace(/^["']|["']$/g, ""));
 		if (/^sed\s(?:\S+\s)*?-[A-Za-z]*i/.test(text)) for (const token of tokens.slice(1)) if (/\.\w+$/.test(token) && !token.startsWith("-")) files.add(token);
 		if (/^tee\s/.test(text)) for (const token of tokens.slice(1)) { if (/^\d*[<>]/.test(token)) break; if (!token.startsWith("-")) files.add(token); }
-		for (const match of segment.matchAll(/(?<![0-9&<>])>>?\s*(?!&)(?:"([^"]+)"|'([^']+)'|([^\s;&|<>()]+))/g)) {
-			const target = match[1] ?? match[2] ?? match[3];
+		// Found on the blanked copy, read from the real text: a quoted target after an unquoted `>` still counts.
+		for (const match of blankQuoted(segment).matchAll(/(?<![0-9&<>])>>?\s*(?!&)(?:"([^"]+)"|'([^']+)'|([^\s;&|<>()]+))/dg)) {
+			const [from, to] = match.indices!.slice(1).find(Boolean) ?? [0, 0];
+			const target = segment.slice(from, to);
 			if (target && !target.startsWith("/dev/")) files.add(target);
 		}
 	}
@@ -194,9 +214,13 @@ export function fileList(files: readonly string[]): string {
 	return files.length > 4 ? `${shown.join(", ")} and ${files.length - 4} more` : shown.join(", ");
 }
 
-/** A final report that puts part of the request off to a later round. */
-export const DEFER = /follows? (?:as|in) (?:its own|a) (?:small |separate )?(?:update|step|round|change)|in a (?:later|follow-up|separate|next) (?:step|round|pass|update|change)|left (?:it |this |that )?for (?:later|a follow-up|the next)|(?:will|can) (?:do|add|handle|finish) (?:it|that|this|the rest) (?:later|next time|in a follow-up)|as a next step|\b(?:deferred|postponed)\b/i;
+/** A final report that puts part of the request off to a later round. The word alone also describes a subject ("loaded deferred", "deferred payments"): only a promise to do it later, or a heading, counts. */
+export const DEFER = /follows? (?:as|in) (?:its own|a) (?:small |separate )?(?:update|step|round|change)|in a (?:later|follow-up|separate|next) (?:step|round|pass|update|change)|left (?:it |this |that )?for (?:later|a follow-up|the next)|(?:will|can) (?:do|add|handle|finish) (?:it|that|this|the rest) (?:later|next time|in a follow-up)|\b(?:I|we)(?: have|['\u2019]ve)? (?:deferred|postponed)\b|\b(?:deferred|postponed) (?:to|until|for) (?:a |the )?(?:later|next|follow-up|future|another)|(?<=^[ \t#>*-]*)(?:deferred|postponed)\*{0,2}[ \t]*:/im;
 export const deferredPhrase = (report: string): string | undefined => DEFER.exec(report)?.[0];
+/** The report names the failed command or says something failed, and claims no success next to it. */
+// Quoting the command is not stating its result: only a failure word counts.
+const statesFailure = (report: string): boolean =>
+	/\bfail(?:s|ed|ing|ure)?\b|\b(?:is|still|are) (?:red|broken)\b/i.test(report) && !/\b(?:all )?(?:tests? )?pass(?:es|ed|ing)?\b|\bgreen\b|\bsucceed(?:s|ed)?\b/i.test(report);
 
 export const checkTexts = {
 	stopUnchecked: (files: readonly string[]) => `Code changed after its last check: ${fileList(files)}. Run the check that proves this change (the tests it can break, the build or type check, or the program on real input) and read the result before you report. If nothing here can run it, say so in the report and why.`,
@@ -248,7 +272,11 @@ export function createCheckLedger() {
 			if (asked) return undefined;
 			const parts: string[] = [];
 			const phrase = switches.check && anyThisPrompt ? deferredPhrase(report) : undefined;
-			if (switches.check && codeThisPrompt && checkPending()) parts.push(unchecked.size ? checkTexts.stopUnchecked([...unchecked]) : checkTexts.stopFailed(failure()!));
+			if (switches.check && codeThisPrompt && checkPending()) {
+				// A report that already says what failed did what the ask would ask for.
+				if (unchecked.size) parts.push(checkTexts.stopUnchecked([...unchecked]));
+				else if (!statesFailure(report)) parts.push(checkTexts.stopFailed(failure()!));
+			}
 			if (switches.look && !lookOwned && visibleThisPrompt && unlooked.size) parts.push(checkTexts.look([...unlooked]));
 			if (phrase) parts.push(checkTexts.deferred(phrase));
 			if (!parts.length) return undefined;

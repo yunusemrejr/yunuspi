@@ -97,6 +97,12 @@ type ShellRisk = {
 	 * own: a snapshot settles one effect, the user's request another. */
 	also?: ShellRisk[];
 };
+/** The line the model reads for a refused or reviewed command. Some owners'
+ * reasons already read "Blocked: …." (the harness guard): one prefix, one full stop. */
+function describeShellRisk(one: ShellRisk): string {
+	const reason = one.reason.replace(/^\s*blocked:\s*/i, "").replace(/\.\s*$/, "");
+	return `${one.level === "review" ? "Review required" : "Blocked"}: ${reason}${one.target ? `: ${JSON.stringify(one.target)}` : ""}${one.expanded ? ` (resolves to ${JSON.stringify(one.expanded)})` : ""}.`;
+}
 type ShellState = {
 	vars: Map<string, string | undefined>;
 	cwd: string | undefined;
@@ -2114,12 +2120,11 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 
 		const risk = assessShellMutation(command, ctx.cwd);
 		if (!risk) return undefined;
-		const describe = (one: ShellRisk) => `${one.level === "review" ? "Review required" : "Blocked"}: ${one.reason}${one.target ? `: ${JSON.stringify(one.target)}` : ""}${one.expanded ? ` (resolves to ${JSON.stringify(one.expanded)})` : ""}.`;
 		const narrow = " Use explicit, narrow targets or a preview before retrying; unresolved targets are never guessed from variable names.";
-		if (risk.level !== "review") return { block: true, reason: describe(risk) };
+		if (risk.level !== "review") return { block: true, reason: describeShellRisk(risk) };
 		const { also = [], ...first } = risk;
 		const reviews: ShellRisk[] = [first, ...also];
-		if (ctx.signal?.aborted) return { block: true, reason: describe(first) + narrow };
+		if (ctx.signal?.aborted) return { block: true, reason: describeShellRisk(first) + narrow };
 		// A command that cannot be read is shown to the user, who is the only one
 		// who can clear it (no judge reads it); with no user present it is refused.
 		const unread = reviews.some((one) => !one.resolved);
@@ -2174,7 +2179,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 				const body = asks.length === 1
 					? named
 						? `${sentence(asks[0])}${unasked(asks[0]) ? "\nYour messages do not ask for that." : ""}\n\n${command}\n\nWorking directory: ${ctx.cwd}`
-						: `${describe(asks[0])}\n\nWorking directory: ${ctx.cwd}\n${command}`
+						: `${describeShellRisk(asks[0])}\n\nWorking directory: ${ctx.cwd}\n${command}`
 					: `This command line does ${asks.length} things that need your say:\n${asks.map((one) => `- ${sentence(one)}${unasked(one) ? " Your messages do not ask for that." : ""}`).join("\n")}\n\n${command}\n\nWorking directory: ${ctx.cwd}`;
 				const title = copy ? "Confirm external file copy" : named || unread ? "Run this command?" : "Review destructive operation";
 				const allowed = await confirmAccounted(ctx, title, body);
@@ -2188,14 +2193,14 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 					: "The external copy was declined. Continue within scope." };
 				if (!allowed && effects.length)
 					return { block: true, reason: `Not run: the user said no to this command (it ${effects.join("; it ")}). Do not retry it or reach the same effect another way; carry on with the rest, or ask what they would like instead.` };
-				return { block: true, reason: describe(open.find((one) => !one.consequence) ?? asks[0]) + narrow };
+				return { block: true, reason: describeShellRisk(open.find((one) => !one.consequence) ?? asks[0]) + narrow };
 			}
 			each("refused");
 			if (copy) return { block: true, reason: `Approval needed to ${copy.reason}. ${child
 				? "Return the exact copy to the parent for approval."
 				: "Tell the user the exact destination and why the copy is needed. An interactive session can present approval."}` };
 			const plain = open.find((one) => !one.consequence);
-			if (plain || !effects.length) return { block: true, reason: describe(plain ?? asks[0]) + narrow };
+			if (plain || !effects.length) return { block: true, reason: describeShellRisk(plain ?? asks[0]) + narrow };
 			return {
 				block: true,
 				reason: `Not run: this command ${effects.join(", and it ")}, and ${child ? "a delegated task cannot decide that" : "nothing in the user's messages asks for that"}. Leave this step out and finish the rest; in your report, say that it is waiting for ${child ? "the session that gave you this task" : "the user's go-ahead"}.`,
@@ -2236,7 +2241,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 			const refusal = await decided(unsaved);
 			if (refusal) return refusal;
 		}
-		if (!current()) return { block: true, reason: describe(first) + narrow };
+		if (!current()) return { block: true, reason: describeShellRisk(first) + narrow };
 		for (const one of saved) receipt(one, "snapshot");
 		if (notes.length && event.toolCallId) snapshotNotes.set(event.toolCallId, notes.join("\n"));
 		return undefined;
@@ -2422,6 +2427,7 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 // the default export above remains the extension entry point.
 export {
 	assessShellMutation,
+	describeShellRisk,
 	automaticWriteRoot,
 	mutationPath,
 	sensitiveExternalPath,

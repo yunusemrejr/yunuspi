@@ -45,14 +45,17 @@ export function slimNotesFile(file, body) {
     };
     lines.forEach((raw, i) => {
         const n = i + 1;
-        if (/^\s*(```|~~~)/.test(raw))
+        const fence = /^\s*(```|~~~)/.test(raw);
+        // A kept block keeps its closing fence, or every rule after it reads as code.
+        const closing = fence && fenced;
+        if (fence)
             fenced = !fenced;
         if (!fenced && /^#{1,3} /.test(raw))
             closeSection(i);
         if (skipFrom)
             return;
-        const line = fenced ? raw : cutLine(raw, n);
-        if (used + line.length > SECTION_MAX && used > 0 && !fenced) {
+        const line = fenced || closing ? raw : cutLine(raw, n);
+        if (used + line.length > SECTION_MAX && used > 0 && !fenced && !closing) {
             skipFrom = n;
             return;
         }

@@ -389,6 +389,17 @@ test('speed detection reads prose in both languages and not a technical term', a
 		'çok uzun sürdü',
 		'vakit yok',
 		'ACELE ET, HIZLI OL',
+		'Please be quicker about the rest.',
+		'Do it faster please.',
+		'work faster, we are late',
+		'finish quickly',
+		'quickly please',
+		'faster please',
+		'Do it as fast as you can.',
+		'Hemen hemen bitti ama şimdi hemen yap.',
+		"We're in a rush.",
+		'We have no time, wrap up.',
+		'no time to lose',
 	]) assert.equal(hurryRequested(text), true, text);
 	for (const text of [
 		'Implement a quick sort for the numbers.',
@@ -398,7 +409,35 @@ test('speed detection reads prose in both languages and not a technical term', a
 		'Sort the list and update the README.',
 		'```\nmake it faster\n```',
 		'Call `faster()` in the loop.',
+		// a product described as fast is not a request for the agent to hurry
+		'The goal is a fully autonomous terminal tool that does amazing off-site SEO work very quickly and smartly, and checks every claim.',
+		'make the engine faster',
+		'Make the engine work faster and add a cache.',
+		'let users search quickly',
+		'Users find the results quickly and the page loads faster.',
+		'hemen hemen bitti',
+		// a feature that mentions rush or time is not a request for speed
+		'add a rush order status to the shop',
+		'There is no time zone handling in the scheduler yet.',
+		'Users have no time zone setting.',
 	]) assert.equal(hurryRequested(text), false, text);
+});
+
+test('the Where line goes with the first prompt, then only when it changed', async (t) => {
+	const f = fixture(t, { entries: [assistantEntry()] });
+	registerSessionFacts(f.pi);
+	const where = /\nWhere: /;
+	assert.match((await f.humanMessage('One.'))[0].message.content, where, 'the first prompt carries it');
+	assert.doesNotMatch((await f.humanMessage('Two.'))[0].message.content, where, 'unchanged: not sent again');
+	const other = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-session-facts-moved-'));
+	t.after(() => fs.rmSync(other, { recursive: true, force: true }));
+	f.ctx.cwd = other;
+	assert.match((await f.humanMessage('Three.'))[0].message.content, where, 'a new folder changes the text');
+	assert.doesNotMatch((await f.humanMessage('Four.'))[0].message.content, where);
+	await f.emit('session_compact', {});
+	assert.match((await f.humanMessage('Five.'))[0].message.content, where, 'a compacted history may have dropped it');
+	await f.emit('session_start', {});
+	assert.match((await f.humanMessage('Six.'))[0].message.content, where, 'a new session starts over');
 });
 
 test('a hurry steer into a running run sends the speed note once', async (t) => {

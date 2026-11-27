@@ -65,7 +65,8 @@ export default function checkGate(pi: ExtensionAPI): void {
 	});
 
 	pi.on("tool_call", (event: any) => {
-		if (event.toolName !== "bash") return;
+		// A push started with bg_run is still a push.
+		if (event.toolName !== "bash" && event.toolName !== "bg_run") return;
 		const command = typeof event.input?.command === "string" ? event.input.command : "";
 		if (!command || wasHeld(command) || !isPublishCommand(command) && !isDeployCommand("bash", { command })) return;
 		try {

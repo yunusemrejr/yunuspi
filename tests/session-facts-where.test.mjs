@@ -59,6 +59,41 @@ test('the home folder and a plain folder have their own sentence', (t) => {
   assert.match(whereLine(plain, home), /is a plain folder with no repository\.$/);
 });
 
+test('the home folder is the home folder even when repositories sit below it, and dot folders are not projects', (t) => {
+  const home = temp(t, 'where-home-repos-');
+  repo(path.join(home, 'proj'));
+  repo(path.join(home, '.nvm'));
+  const line = whereLine(home, home);
+  assert.match(line, /is the home folder, no project/);
+  assert.doesNotMatch(line, /repositories|\.nvm/);
+  const base = temp(t, 'where-dots-');
+  repo(path.join(base, 'r1'));
+  repo(path.join(base, '.cache-tool'));
+  assert.match(whereLine(base, home), /is a folder holding 1 repositories \(r1\)\.$/);
+});
+
+// A git that answers where the repository is and fails on everything else stands in for a spent time budget.
+const withGit = (t, script, run) => {
+  const bin = temp(t, 'where-git-');
+  fs.writeFileSync(path.join(bin, 'git'), `#!/bin/sh\n${script}\n`, { mode: 0o755 });
+  const saved = process.env.PATH;
+  process.env.PATH = `${bin}:${saved}`;
+  try { return run(); } finally { process.env.PATH = saved; }
+};
+
+test('a git answer that is missing is left out, not printed as none, detached or zero', (t) => {
+  const dir = temp(t, 'where-fake-');
+  const answers = (extra) => `case "$*" in *--show-toplevel*) echo "${dir}";; *--show-prefix*) echo;; ${extra} *) exit 1;; esac`;
+  const none = withGit(t, answers(''), () => whereLine(dir));
+  assert.doesNotMatch(none, /remote|branch|detached|uncommitted/);
+  assert.match(none, /is the git repository .+\.$/);
+  const part = withGit(t, answers('*"remote"*) ;; *--show-current*) echo main;;'), () => whereLine(dir));
+  assert.match(part, /\(remote none, branch main\)\./);
+  assert.doesNotMatch(part, /uncommitted/);
+  const detached = withGit(t, answers('*"remote"*) ;; *--show-current*) ;; *status*) ;;'), () => whereLine(dir));
+  assert.match(detached, /\(remote none, branch detached, 0 uncommitted files\)\./);
+});
+
 test('a production remote and a deploy script add the live-system sentence', (t) => {
   const dir = repo(path.join(temp(t, 'where-live-'), 'shop'), [['origin', 'https://github.com/acme/shop.git'], ['production', 'git@example.com:acme/shop.git']]);
   fs.writeFileSync(path.join(dir, 'deploy.sh'), '#!/bin/sh\n');

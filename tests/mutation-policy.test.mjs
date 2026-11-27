@@ -460,3 +460,10 @@ test("one named file among the user's own files asks instead of being refused; t
   assert.equal((await call(asks[0]))?.block, true, "headless keeps refusing");
   assert.equal(prompts.length, 2, "headless never asks");
 });
+
+test("a refusal whose reason already says Blocked reads with one prefix and one full stop", () => {
+  const guard = "Blocked: this session was launched outside the harness maintenance directory. Harness writes require a new human-started session inside the harness root.";
+  const line = safety.describeShellRisk({ level: "block", reason: guard, target: "x.ts", resolved: true });
+  assert.equal(line, 'Blocked: this session was launched outside the harness maintenance directory. Harness writes require a new human-started session inside the harness root: "x.ts".');
+  assert.equal(safety.describeShellRisk({ level: "review", reason: "This changes a file outside the project", resolved: true }), "Review required: This changes a file outside the project.");
+});
