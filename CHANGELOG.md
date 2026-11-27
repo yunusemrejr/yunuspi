@@ -1,3 +1,10 @@
+## 0.56.38 — Evidence gates for code and other work
+
+- Code changed after its last check (tests, build, type check, or the program run on real input) keeps the agent working once per prompt when it settles, and a push, publish or deploy is held once until the check runs. A failing check is named. A check piped into `tail` or followed by `|| true` is judged by its output. The look gate covers a plain finish too. `PI_CHECK_GATE=0` and `PI_LOOK_GATE=0` turn the gates off.
+- A final report that puts part of the work off to a later round is sent back once. The finish text names every copy the change must reach: the deploy, a mirror, a packaged zip, a cache purge, the push.
+- One message per settle: the project-tests and "no check has passed" follow-ups stay silent when the check gate asks about the same code, and a command is held at most once across both gates.
+- The working notes hold the expert's bar for each kind of work, the bug rule (reproduce, find the cause, change approach after two failed fixes), checks run again after the last edit, claims backed by this session's output, and the 0.6.112 design gates. Skills by kind: build (code and debugging), api-security (servers, APIs, databases; with security and migration checklists), data-science, linux-ops and research now carry full guides.
+
 ## 0.56.37 — Fewer refusals of commands the user asked for
 
 - A shell loop over literal words (`for f in a b; do rm "$f"; done`) is read as each word, so the guard checks every path instead of refusing the variable. Any word that reaches a protected place still blocks; word lists from a command, a reassigned loop variable and more than 64 words stay unread.

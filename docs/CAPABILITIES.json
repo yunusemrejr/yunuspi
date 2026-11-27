@@ -3209,7 +3209,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 220,
+        "line": 221,
         "kind": "literal"
       },
       {
@@ -3433,7 +3433,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 375,
+        "line": 376,
         "kind": "literal"
       },
       {
@@ -3629,7 +3629,7 @@
       {
         "name": "checkpoint_read",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 220,
+        "line": 221,
         "kind": "literal"
       },
       {
@@ -3785,7 +3785,7 @@
       {
         "name": "session_stop",
         "source": "agent/extensions/checkpoints.ts",
-        "line": 375,
+        "line": 376,
         "kind": "literal"
       },
       {
@@ -4060,7 +4060,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 669,
+      "sourceFiles": 671,
       "registrationSites": 62,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 79,
@@ -4097,6 +4097,10 @@
       },
       {
         "path": "agent/extensions/blender-studio.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/check-gate.ts",
         "exists": true
       },
       {
@@ -4319,6 +4323,10 @@
       },
       {
         "path": "agent/extensions/lib/catalog-cache-lock.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/check-evidence.ts",
         "exists": true
       },
       {

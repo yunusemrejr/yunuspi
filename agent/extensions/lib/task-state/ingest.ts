@@ -7,6 +7,7 @@
  */
 import { createHash } from "node:crypto";
 import { tokenizeSimple } from "../bash-routing.ts";
+import { isCheckToolStep } from "../check-evidence.ts";
 import type {
 	TaskEntityKind,
 	TaskEntityStatus,
@@ -482,7 +483,8 @@ function isSingleTestStep(step: string): boolean {
 		const script = args.find(arg => !arg.startsWith("-")) ?? "";
 		return /(?:^|\/)(?:[\w.-]+\.(?:test|spec)\.(?:[cm]?js|tsx?)|(?:verify-harness|check-public)\.m?js)$/.test(script);
 	}
-	return false;
+	// The tool list the check gate uses, so a goal's verification and a plain finish agree on what a check is.
+	return isCheckToolStep(step);
 }
 
 export function isTestLikeCommand(command: string): boolean {

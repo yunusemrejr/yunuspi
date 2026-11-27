@@ -54,6 +54,7 @@ import { currentTaskStateService } from "./lib/task-state/service.ts";
 import { completionClaimEvents } from "./lib/task-state/ingest.ts";
 import { collectVerificationReceipts } from "./lib/continuation-notice.ts";
 import { isDeployCommand } from "./lib/session-hooks.ts";
+import { checkGateCovers, heldByCheckGate, noteHeld } from "./lib/check-evidence.ts";
 import {
 	emptyRequirementLedger,
 	foldRequirements,
@@ -729,12 +730,14 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 	pi.on("agent_settled", async (event, ctx) => {
 		// A stopped session stays silent: no test/review follow-ups revive it.
 		if (isSessionStopped(ctx)) return;
-		await projectTests.settled(event, ctx);
+		// One message per settle: when the check gate asks about the same unchecked code, its text is the ask.
+		const gateAsks = checkGateCovers();
+		if (!gateAsks) await projectTests.settled(event, ctx);
 		await quality.settled(event, ctx);
 		// A child's caller checks its work; a test follow-up already asked for the same thing.
 		try {
 			const s = load(sidOf(ctx));
-			if (SHADOW || verifyNudged || process.env.PI_SUBAGENT_CHILD === "1" || runMutations === 0 || s.editsSinceCommand === 0) return;
+			if (SHADOW || gateAsks || verifyNudged || process.env.PI_SUBAGENT_CHILD === "1" || runMutations === 0 || s.editsSinceCommand === 0) return;
 			if (ctx?.signal?.aborted || ctx?.hasPendingMessages?.() || ctx?.isIdle?.() === false || isSessionStopped(ctx)) return;
 			verifyNudged = true;
 			await pi.sendMessage({
@@ -773,7 +776,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		const declared = Boolean(candidate && projectTests.snapshot().assessment?.checks.some(check => check.key === candidate.key));
 		const deferred = await flushLensBeforeVerification(event, ctx, declared);
 		if (deferred) return deferred;
-		const gate = event.toolName === "bash" && isDeployCommand("bash", event.input ?? {}) ? gateCompletion("deploy", ctx) : undefined;
+		const gate = event.toolName === "bash" && isDeployCommand("bash", event.input ?? {}) ? gateCompletion("deploy", ctx, event.input?.command) : undefined;
 		if (gate) return gate;
 		if (
 			["bash", "read", "read_symbol", "read_enclosing"].includes(event.toolName)
@@ -925,9 +928,11 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		const gate = gateCompletion("plan-complete", check.ctx);
 		if (gate) check.refuse(gate.reason);
 	});
-	function gateCompletion(moment: "deploy" | "plan-complete", ctx: ExtensionContext): { block: true; reason: string } | undefined {
+	function gateCompletion(moment: "deploy" | "plan-complete", ctx: ExtensionContext, command?: unknown): { block: true; reason: string } | undefined {
 		try {
 			if (SHADOW || isSessionStopped(ctx)) return undefined;
+			// A command the check gate already held once is not held again here.
+			if (typeof command === "string" && heldByCheckGate(command)) return undefined;
 			// A previous deploy's own live-verification receipt never blocks the next deploy.
 			const receipts = collectVerificationReceipts(8, ctx.sessionManager).filter((receipt) => receipt.source !== "deploy");
 			try {
@@ -970,6 +975,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 			} catch {
 				/* claim recording is advisory */
 			}
+			if (decision.block && typeof command === "string") noteHeld(command, "receipts");
 			return decision.block ? { block: true, reason: decision.reason! } : undefined;
 		} catch {
 			return undefined; /* the gate never breaks a tool call it cannot evaluate */

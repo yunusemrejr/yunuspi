@@ -45,10 +45,12 @@
     "blender-studio.ts",
     "session-facts.ts",
     "needed-check.ts",
+    "check-gate.ts",
     "yuncontext.ts"
   ],
   "lib": [
     "activity-indicators.ts",
+    "check-evidence.ts",
     "asset-registry.ts",
     "authored-review.ts",
     "bash-routing.ts",

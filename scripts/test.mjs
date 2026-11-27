@@ -15,7 +15,7 @@ export const QUICK_TESTS = [
   'stream-lifecycle', 'rpc-client-lifecycle', 'guarded-process',
   'needle-embedding-cache', 'memory-guard', 'creative-evidence', 'creative-qa',
   'ui-doctrine', 'goal-state', 'completion-gate', 'motion-routing-sdk',
-  'source-integrity', 'sync-versions', 'test-pipeline',
+  'source-integrity', 'sync-versions', 'test-pipeline', 'check-gate',
 ].map(name => `tests/${name}.test.mjs`);
 
 // --quick is the short catalogue plus the changed tests; without it every test runs.
