@@ -7,6 +7,9 @@
  * hold with the same facts. Each fires once per user prompt, never loops.
  * PI_CHECK_GATE=0 turns it all off; PI_LOOK_GATE=0 only the look part.
  */
+import { statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
 import { armCheckGate, checkGateOn, clearHeld, finalTurn, isImageFile, isPublishCommand, lookGateOn, noteHeld, sharedCheckLedger, shellWrittenFiles, wasHeld } from "./lib/check-evidence.ts";
 import { collectVerificationReceipts, resumesElsewhere } from "./lib/continuation-notice.ts";
@@ -16,14 +19,39 @@ import { isDeployCommand } from "./lib/session-hooks.ts";
 const WRITE_TOOLS = new Set(["edit", "write"]);
 /** Tools whose successful result shows pixels of the real output. */
 const LOOK_TOOLS = new Set(["render_see", "ui_explore", "visual_review", "image_understand", "video_qa"]);
+/** Tools whose result can show a background task as finished; the registry also announces every end on this channel. */
+const BACKGROUND_TOOLS = new Set(["bg_wait", "bg_status", "bg_logs", "bg_kill"]);
+const BG_TERMINAL_CHANNEL = "pi-background-tasks:terminal:v1";
+const TASK_ENDED = new Set(["completed", "failed", "killed"]);
+/** File times are coarse: an image written this close before the change still counts as made after it. */
+const MTIME_SLACK_MS = 2000;
 
 const textOf = (content: unknown): string => Array.isArray(content) ? content.map((part: any) => (part?.type === "text" ? part.text : "")).join("\n") : typeof content === "string" ? content : "";
 
-function isLook(name: string, input: Record<string, unknown> | undefined, content: unknown): boolean {
+/** True when the image file was written no earlier than `since` (epoch ms, less the slack). The path is read as the read tool reads it: `@` prefix, `~`, then cwd. An unreadable file is not a look. */
+function writtenSince(path: string, cwd: string | undefined, since: number): boolean {
+	try {
+		const bare = path.replace(/^@/, "");
+		const file = bare === "~" || bare.startsWith("~/") ? join(homedir(), bare.slice(1)) : resolve(cwd ?? process.cwd(), bare);
+		return statSync(file).mtimeMs >= since - MTIME_SLACK_MS;
+	} catch { return false; }
+}
+
+/** A finished background task: failed unless it completed with exit 0. Undefined while it runs. */
+function taskEnd(task: any): { id: string; failed: boolean } | undefined {
+	if (typeof task?.id !== "string" || !TASK_ENDED.has(task.status)) return undefined;
+	return { id: task.id, failed: task.status !== "completed" || typeof task.exitCode === "number" && task.exitCode !== 0 };
+}
+
+function isLook(name: string, input: Record<string, unknown> | undefined, content: unknown, cwd: string | undefined, changedAt: number): boolean {
 	if (LOOK_TOOLS.has(name)) return !["plan", "status", "list"].includes(String(input?.action ?? ""));
 	if (name === "browser_session") return input?.action === "screenshot";
 	if (name === "office_doc") return ["render", "inspect"].includes(String(input?.action ?? ""));
-	if (name === "read") return typeof input?.path === "string" && isImageFile(input.path) || Array.isArray(content) && content.some((part: any) => part?.type === "image");
+	if (name === "read") {
+		// An image file already in the project shows nothing of this change: only one written since it counts.
+		if (typeof input?.path === "string" && isImageFile(input.path)) return writtenSince(input.path, cwd, changedAt);
+		return Array.isArray(content) && content.some((part: any) => part?.type === "image");
+	}
 	return false;
 }
 
@@ -41,9 +69,12 @@ export default function checkGate(pi: ExtensionAPI): void {
 		finalTurn.stop = event.message.stopReason;
 		finalTurn.report = textOf(event.message.content);
 	});
-	// Shell and extension-owned writers are named by their paths too.
-	pi.events?.on?.("harness:mutation-committed", (event: any) => {
-		for (const file of Array.isArray(event?.paths) ? event.paths : []) if (typeof file === "string") ledger.change(file, event?.ctx?.cwd);
+	// The registry announces each background task's end, also when the agent never asks.
+	pi.events?.on?.(BG_TERMINAL_CHANNEL, (data: any) => {
+		try {
+			const end = taskEnd(data?.task);
+			if (end) ledger.backgroundEnded(end.id, { failed: end.failed });
+		} catch { /* a gate never breaks the task registry */ }
 	});
 
 	pi.on("tool_result", (event: any, ctx: any) => {
@@ -55,12 +86,24 @@ export default function checkGate(pi: ExtensionAPI): void {
 				if (!event.isError && typeof file === "string") ledger.change(file, ctx?.cwd);
 				return;
 			}
-			if (!event.isError && isLook(name, input, event.content)) ledger.look();
+			if (!event.isError && isLook(name, input, event.content, ctx?.cwd, ledger.visibleChangedAt())) ledger.look();
+			if (BACKGROUND_TOOLS.has(name) && !event.isError) {
+				const carried = [event.details?.providerOutcome, event.details?.task, ...(Array.isArray(event.details?.tasks) ? event.details.tasks : [])].filter(Boolean);
+				// The output text belongs to the task only when the result is about that one task.
+				const output = carried.length === 1 ? textOf(event.content) : "";
+				for (const task of carried) {
+					const end = taskEnd(task);
+					if (end) ledger.backgroundEnded(end.id, { failed: end.failed, output });
+				}
+			}
 			const command = typeof input?.command === "string" ? input.command : "";
 			if (name !== "bash" && name !== "bg_run" || !command) return;
 			if (!event.isError) for (const file of shellWrittenFiles(command)) ledger.change(file, ctx?.cwd);
 			const exit = event.details?.exitCode;
-			ledger.check(command, { failed: event.isError === true || typeof exit === "number" && exit !== 0, output: textOf(event.content), background: name === "bg_run" });
+			const output = textOf(event.content);
+			// A command managed bash moved to the background has no result yet: it proves nothing until it ends.
+			if (name === "bash" && output.includes("[managed bash] Still running — detached")) return;
+			ledger.check(command, { failed: event.isError === true || typeof exit === "number" && exit !== 0, output, background: name === "bg_run", taskId: name === "bg_run" ? event.details?.task?.id : undefined });
 		} catch { /* a gate never breaks a tool result */ }
 	});
 

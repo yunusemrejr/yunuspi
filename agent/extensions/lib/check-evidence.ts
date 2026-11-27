@@ -148,9 +148,12 @@ export interface CheckResult {
 	output?: string;
 	/** Started in the background; its outcome arrives later. */
 	background?: boolean;
+	/** The background task's id, so its end can be matched to this start. */
+	taskId?: string;
 }
 
 export type CheckOutcome = { kind: "pass" } | { kind: "background" } | { kind: "fail"; snippet: string };
+type Settled = Exclude<CheckOutcome, { kind: "background" }>;
 
 const clip = (text: string, max: number) => text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
@@ -241,32 +244,59 @@ export interface LedgerSwitches { check: boolean; look: boolean }
  * Unchecked and unlooked entries persist across prompts; the asks reset with each user prompt.
  */
 export function createCheckLedger() {
-	const unchecked = new Set<string>();
+	/** Unchecked code files, each with the revision of its last change. */
+	const unchecked = new Map<string, number>();
 	const unlooked = new Set<string>();
+	/** Checks started in the background, by task id: what they run and how many changes existed when they started. */
+	const background = new Map<string, { command: string; revision: number }>();
 	let failed: { command: string; snippet: string } | undefined;
+	let revision = 0, visibleChangedAt = 0;
 	let codeThisPrompt = false, visibleThisPrompt = false, anyThisPrompt = false, asked = false, held = false;
 	const checkPending = () => unchecked.size > 0 || failed !== undefined;
 	const failure = () => failed && { command: clip(failed.command, 80), snippet: failed.snippet };
+	const uncheckedFiles = () => [...unchecked.keys()];
+	/** A finished check proves the changes made up to `upTo`, not those made while it ran. */
+	const settle = (command: string, outcome: Settled, upTo: number) => {
+		for (const [file, changed] of unchecked) if (changed <= upTo) unchecked.delete(file);
+		failed = outcome.kind === "pass" ? undefined : { command, snippet: outcome.snippet };
+	};
 	return {
 		/** A file the agent wrote or edited. */
 		change(file: string, cwd?: string) {
 			anyThisPrompt = true;
-			if (isCodeFile(file, cwd)) { unchecked.add(projectPath(file, cwd)); codeThisPrompt = true; }
-			if (isVisibleFile(file, cwd)) { unlooked.add(projectPath(file, cwd)); visibleThisPrompt = true; }
+			revision++;
+			if (isCodeFile(file, cwd)) { unchecked.set(projectPath(file, cwd), revision); codeThisPrompt = true; }
+			if (isVisibleFile(file, cwd)) { unlooked.add(projectPath(file, cwd)); visibleThisPrompt = true; visibleChangedAt = Date.now(); }
 		},
-		/** A command that ran. Returns what it meant for the gate; undefined when it was not a check. */
+		/** A command that ran. Returns what it meant for the gate; undefined when it was not a check. A check started in the background proves nothing until `backgroundEnded`. */
 		check(command: string, result: CheckResult): CheckOutcome | undefined {
 			const outcome = checkOutcome(command, result);
 			if (!outcome) return undefined;
-			unchecked.clear();
-			if (outcome.kind === "pass") failed = undefined;
-			else if (outcome.kind === "fail") failed = { command, snippet: outcome.snippet };
+			if (outcome.kind === "background") {
+				if (result.taskId) {
+					background.set(result.taskId, { command, revision });
+					while (background.size > 32) background.delete(background.keys().next().value!);
+				}
+				return outcome;
+			}
+			settle(command, outcome, revision);
+			return outcome;
+		},
+		/** A background task ended with this exit and output. Does nothing for a task that was not a check started here. */
+		backgroundEnded(taskId: string, result: Omit<CheckResult, "background" | "taskId">): CheckOutcome | undefined {
+			const started = background.get(taskId);
+			if (!started) return undefined;
+			background.delete(taskId);
+			const outcome = checkOutcome(started.command, result);
+			if (outcome && outcome.kind !== "background") settle(started.command, outcome, started.revision);
 			return outcome;
 		},
 		/** An image or rendered output was opened. */
 		look() { unlooked.clear(); },
+		/** When (epoch ms) the latest visible file was written: an image older than that shows an earlier state. */
+		visibleChangedAt: () => visibleChangedAt,
 		newPrompt() { codeThisPrompt = false; visibleThisPrompt = false; anyThisPrompt = false; asked = false; held = false; },
-		reset() { this.newPrompt(); unchecked.clear(); unlooked.clear(); failed = undefined; },
+		reset() { this.newPrompt(); unchecked.clear(); unlooked.clear(); background.clear(); failed = undefined; visibleChangedAt = 0; },
 		/** The text for the end of a turn: once per prompt, only for what this prompt changed. `lookOwned` is true when another owner already asks for the look; `report` is the final assistant message. */
 		finish(switches: LedgerSwitches, lookOwned = false, report = ""): string | undefined {
 			if (asked) return undefined;
@@ -274,7 +304,7 @@ export function createCheckLedger() {
 			const phrase = switches.check && anyThisPrompt ? deferredPhrase(report) : undefined;
 			if (switches.check && codeThisPrompt && checkPending()) {
 				// A report that already says what failed did what the ask would ask for.
-				if (unchecked.size) parts.push(checkTexts.stopUnchecked([...unchecked]));
+				if (unchecked.size) parts.push(checkTexts.stopUnchecked(uncheckedFiles()));
 				else if (!statesFailure(report)) parts.push(checkTexts.stopFailed(failure()!));
 			}
 			if (switches.look && !lookOwned && visibleThisPrompt && unlooked.size) parts.push(checkTexts.look([...unlooked]));
@@ -287,7 +317,7 @@ export function createCheckLedger() {
 		beforePublish(switches: LedgerSwitches): string | undefined {
 			if (held) return undefined;
 			const parts: string[] = [];
-			if (switches.check && checkPending()) parts.push(unchecked.size ? checkTexts.shipUnchecked([...unchecked]) : checkTexts.shipFailed(failure()!));
+			if (switches.check && checkPending()) parts.push(unchecked.size ? checkTexts.shipUnchecked(uncheckedFiles()) : checkTexts.shipFailed(failure()!));
 			if (switches.look && unlooked.size) parts.push(checkTexts.look([...unlooked]));
 			if (!parts.length) return undefined;
 			held = true;
@@ -295,7 +325,7 @@ export function createCheckLedger() {
 		},
 		/** True when this gate asks, or already asked, about unchecked code in this prompt: other end-of-turn check nudges stay silent. */
 		coversCheck: (switches: LedgerSwitches) => switches.check && codeThisPrompt && (checkPending() || asked),
-		snapshot: () => ({ unchecked: [...unchecked], unlooked: [...unlooked], failed: failure(), codeThisPrompt, visibleThisPrompt }),
+		snapshot: () => ({ unchecked: uncheckedFiles(), unlooked: [...unlooked], failed: failure(), codeThisPrompt, visibleThisPrompt }),
 	};
 }
 

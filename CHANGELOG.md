@@ -1,3 +1,9 @@
+## 0.56.40 — Background checks and screenshots count only when they show the result
+
+- A check started with bg_run no longer counts as passed when it starts. It counts when it ends (bg_wait, bg_status, bg_logs, bg_kill or the task's end notice), with its real exit, and settles only the changes made before it started. A command managed bash moved to the background counts the same way: not until it ends.
+- Reading an image counts as looking at the result only when the image was written after the last change to a visible file (a fresh screenshot or render). An old logo in the repo no longer clears the look.
+- Three listeners for an event nothing sends any more were removed.
+
 ## 0.56.39 — Fewer false nudges, no imposed formatting
 
 - A check whose exit status is hidden behind `;`, `||` or a pipe is judged by its output, so a failure there is no longer taken as a pass. A `>` inside quotes is not a file write. "Deferred", "postponed" or "as a next step" in a report are sent back only when the report puts its own work off ("I deferred …", a "Deferred:" heading). A report that already says the check failed, with no success claim, is not asked again. A push started with bg_run is held like one started in bash.

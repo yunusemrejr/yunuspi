@@ -919,14 +919,6 @@ export default function siblingsExtension(pi: ExtensionAPI, options: {directory?
 	pi.events?.on("harness:mutation-preflight", (request: any) => {
 		request.checks.push(() => mutationPolicy({toolName: request.kind, input: {path: request.target}}, request.ctx));
 	});
-	pi.events?.on("harness:mutation-committed", (event: any) => {
-		try {
-			const targets = event.paths.map((file: string) => targetPath(event.ctx.cwd, file));
-			for (const target of targets) readVersions.delete(target);
-			coordination = cleanCoordination({...coordination, recentWrites:[...targets, ...coordination.recentWrites.filter(file => !targets.includes(file))].slice(0,12)});
-			publish(event.ctx);
-		} catch { /* bookkeeping cannot invalidate committed files */ }
-	});
 	const recordCheck = (event:any,ctx:any) => {
 		try {
 			if (event.toolName === "bash" && preparedCheck?.toolCallId===event.toolCallId) {

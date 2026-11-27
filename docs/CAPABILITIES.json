@@ -3118,7 +3118,7 @@
       {
         "name": "asset_register",
         "source": "agent/extensions/art-direction.ts",
-        "line": 594,
+        "line": 593,
         "kind": "factory"
       },
       {
@@ -3227,7 +3227,7 @@
       {
         "name": "creative_direct",
         "source": "agent/extensions/art-direction.ts",
-        "line": 433,
+        "line": 432,
         "kind": "factory"
       },
       {
@@ -3283,7 +3283,7 @@
       {
         "name": "image_generate",
         "source": "agent/extensions/art-direction.ts",
-        "line": 640,
+        "line": 639,
         "kind": "factory"
       },
       {
@@ -3482,7 +3482,7 @@
       {
         "name": "svg_inspect",
         "source": "agent/extensions/art-direction.ts",
-        "line": 559,
+        "line": 558,
         "kind": "factory"
       },
       {
@@ -3512,7 +3512,7 @@
       {
         "name": "ui_explore",
         "source": "agent/extensions/art-direction.ts",
-        "line": 529,
+        "line": 528,
         "kind": "factory"
       },
       {
@@ -3548,7 +3548,7 @@
       {
         "name": "visual_review",
         "source": "agent/extensions/art-direction.ts",
-        "line": 476,
+        "line": 475,
         "kind": "factory"
       },
       {
@@ -3859,7 +3859,7 @@
           "registration passes names through a local factory; literal factory call sites are enumerated"
         ],
         "lines": [
-          397
+          396
         ],
         "knownNames": [
           "asset_register",

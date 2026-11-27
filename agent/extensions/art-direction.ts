@@ -379,7 +379,6 @@ export default function artDirection(pi: any) {
     observationTail = job.catch(() => {});
     return job;
   };
-  pi.events?.on?.('harness:mutation-committed', (event: any) => observeEvent(event, false));
   pi.events?.on?.('project-source-observed', (event: any) => observeEvent(event, true));
   pi.on?.('agent_settled', async (_event: any, ctx: any) => {
     if (!automatic() || !ctx?.cwd || isSessionStopped(ctx) || resumesElsewhere(ctx.sessionManager) || ctx.hasPendingMessages?.()) return;
