@@ -82127,22 +82127,22 @@ async function getFormattersForFile(filePath, cwd) {
       selected = formatterPolicy.defaultFormatter ? explicitlyConfigured.find((f) => f.name === formatterPolicy.defaultFormatter) ?? explicitlyConfigured[0] : explicitlyConfigured[0];
     } else if (smartDefaultFormatterName) {
       const smartDefaultFormatter = candidateFormatters.find((f) => f.name === smartDefaultFormatterName);
-      if (smartDefaultFormatter) {
-        const autoInstallToolId = getAutoInstallToolIdForFormatter(smartDefaultFormatter.name);
-        if (autoInstallToolId) {
+      // PI_LENS_CONFIG_ONLY_FORMAT: formatters that choose a style (the auto-installable
+      // set: biome, prettier, ruff, shfmt, ...) never run on a project that has no config
+      // for them; only canonical formatters (gofmt, rustfmt, ...) are smart defaults.
+      if (smartDefaultFormatter && !getAutoInstallToolIdForFormatter(smartDefaultFormatter.name)) {
+        const { detected, error, outcome } = await detectCandidate(smartDefaultFormatter, cwd);
+        candidateOutcomes.push(outcome);
+        if (error !== void 0)
+          throw error;
+        if (detected)
           selected = smartDefaultFormatter;
-        } else {
-          const { detected, error, outcome } = await detectCandidate(smartDefaultFormatter, cwd);
-          candidateOutcomes.push(outcome);
-          if (error !== void 0)
-            throw error;
-          if (detected)
-            selected = smartDefaultFormatter;
-        }
       }
     }
   } else {
     for (const formatter of candidateFormatters) {
+      if (FORMATTERS_WITH_EXPLICIT_CONFIG_CHECK.has(formatter.name) && !hasExplicitFormatterConfig(formatter.name, cwd, ext2))
+        continue;
       const { detected, error, outcome } = await detectCandidate(formatter, cwd);
       candidateOutcomes.push(outcome);
       if (error !== void 0) {

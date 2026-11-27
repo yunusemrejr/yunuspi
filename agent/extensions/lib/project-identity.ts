@@ -272,6 +272,41 @@ export function gitOriginUrl(repoRoot: string, env: Env = process.env): string |
 }
 
 /**
+ * Keep harness-written files out of the user's `git status` without touching a
+ * tracked .gitignore: append root-anchored patterns to the repository's
+ * `info/exclude` (resolved through git, so linked worktrees work). `dir` is
+ * where the files live; `names` are paths relative to it. Each pattern is added
+ * once. Never throws: no git, no work tree or an unwritable file leave things as they were.
+ */
+export function excludeFromGitStatus(dir: string, names: string[], env: Env = process.env): void {
+  if ((env.PI_PROJECT_ID_GIT ?? "").toLowerCase() === "off") return;
+  try {
+    const out = execFileSync("git", ["-C", dir, "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-path", "info/exclude"], {
+      encoding: "utf-8",
+      timeout: 3000,
+      stdio: ["ignore", "pipe", "ignore"],
+    }).split("\n");
+    const [toplevel, excludeFile] = out;
+    if (!toplevel || !excludeFile) return;
+    const prefix = path.relative(bestEffortRealpath(toplevel), bestEffortRealpath(dir)).split(path.sep).filter(Boolean);
+    const wanted = names.map((name) => `/${[...prefix, ...name.split("/")].join("/")}`);
+    let current = "";
+    try {
+      current = fs.readFileSync(excludeFile, "utf-8");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") return;
+    }
+    const present = new Set(current.split("\n").map((line) => line.trim()));
+    const missing = wanted.filter((pattern) => !present.has(pattern));
+    if (!missing.length) return;
+    fs.mkdirSync(path.dirname(excludeFile), { recursive: true });
+    fs.appendFileSync(excludeFile, `${current && !current.endsWith("\n") ? "\n" : ""}${missing.join("\n")}\n`);
+  } catch {
+    // Best effort: a dirty status is cosmetic, a failed session start is not.
+  }
+}
+
+/**
  * Normalize remote URLs so https/ssh/scp spellings of one repo match. Only
  * the host + path identify a repository; scheme, user, port and `.git`
  * suffix are transport details.
@@ -397,6 +432,7 @@ function resolveGenerated(cwd: string, anchorDir: string, opts: ResolveProjectOp
     const generated = `prj_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
     try {
       fs.writeFileSync(path.join(anchorDir, PROJECT_ID_FILE), `${generated}\n`, { flag: "wx" });
+      excludeFromGitStatus(anchorDir, [PROJECT_ID_FILE], env);
       return resolveExplicit(anchorDir, generated, anchorDir, env, now);
     } catch (error) {
       // A concurrent writer (or a file that appeared mid-resolution) wins:

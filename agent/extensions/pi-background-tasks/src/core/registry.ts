@@ -3,6 +3,7 @@ import { guardedCommand } from "../../../lib/self-mutation-guard.ts";
 import { createMountedReadyParser } from "../../../lib/guard-readiness.ts";
 import { fileSizeLimitPrefix, getDiskLimits, watchDisk } from "../../../lib/disk-guard.ts";
 import { ownProcessGroup } from "../../../lib/process-owner.ts";
+import { excludeFromGitStatus } from "../../../lib/project-identity.ts";
 import { spawn as nodeSpawn, type SpawnOptions } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
 import { once } from "node:events";
@@ -835,6 +836,7 @@ export class BackgroundTaskRegistry {
     const runtimeDirAbs = join(ctx.cwd, ".pi", "tasks", runId);
     const runtimeDirDisplay = join(".pi", "tasks", runId);
     await mkdir(runtimeDirAbs, { recursive: true });
+    excludeFromGitStatus(ctx.cwd, [join(".pi", "tasks")], process.env);
     this.runtimeDir = { abs: runtimeDirAbs, display: runtimeDirDisplay };
     this.runtimeDirKey = runtimeDirKey;
     return this.runtimeDir;
