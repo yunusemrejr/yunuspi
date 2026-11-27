@@ -7,7 +7,7 @@
  * hold with the same facts. Each fires once per user prompt, never loops.
  * PI_CHECK_GATE=0 turns it all off; PI_LOOK_GATE=0 only the look part.
  */
-import { statSync } from "node:fs";
+import { closeSync, openSync, readSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@yunuspi/coding-agent";
@@ -38,6 +38,18 @@ function writtenSince(path: string, cwd: string | undefined, since: number): boo
 }
 
 /** A finished background task: failed unless it completed with exit 0. Undefined while it runs. */
+/** The last 16 KB of a finished task's output file: a piped check (`npm test | tail`) is judged by what it printed. */
+const OUTPUT_TAIL_BYTES = 16_384;
+function outputTail(file: string): string {
+	let fd: number | undefined;
+	try {
+		fd = openSync(file, "r");
+		const size = statSync(file).size, length = Math.min(size, OUTPUT_TAIL_BYTES), buffer = Buffer.alloc(length);
+		readSync(fd, buffer, 0, length, size - length);
+		return buffer.toString("utf8");
+	} catch { return ""; } finally { if (fd !== undefined) try { closeSync(fd); } catch { /* closed */ } }
+}
+
 function taskEnd(task: any): { id: string; failed: boolean } | undefined {
 	if (typeof task?.id !== "string" || !TASK_ENDED.has(task.status)) return undefined;
 	return { id: task.id, failed: task.status !== "completed" || typeof task.exitCode === "number" && task.exitCode !== 0 };
@@ -70,10 +82,13 @@ export default function checkGate(pi: ExtensionAPI): void {
 		finalTurn.report = textOf(event.message.content);
 	});
 	// The registry announces each background task's end, also when the agent never asks.
+	// Where each background check's output lives: its snapshot path is relative to the session folder it started in.
+	const taskOutput = new Map<string, string>();
+	const outputOf = (id: string) => { const file = taskOutput.get(id); taskOutput.delete(id); return file ? outputTail(file) : ""; };
 	pi.events?.on?.(BG_TERMINAL_CHANNEL, (data: any) => {
 		try {
 			const end = taskEnd(data?.task);
-			if (end) ledger.backgroundEnded(end.id, { failed: end.failed });
+			if (end) ledger.backgroundEnded(end.id, { failed: end.failed, output: outputOf(end.id) });
 		} catch { /* a gate never breaks the task registry */ }
 	});
 
@@ -93,7 +108,7 @@ export default function checkGate(pi: ExtensionAPI): void {
 				const output = carried.length === 1 ? textOf(event.content) : "";
 				for (const task of carried) {
 					const end = taskEnd(task);
-					if (end) ledger.backgroundEnded(end.id, { failed: end.failed, output });
+					if (end) ledger.backgroundEnded(end.id, { failed: end.failed, output: [output, outputOf(end.id)].filter(Boolean).join("\n") });
 				}
 			}
 			const command = typeof input?.command === "string" ? input.command : "";
@@ -101,6 +116,11 @@ export default function checkGate(pi: ExtensionAPI): void {
 			if (!event.isError) for (const file of shellWrittenFiles(command)) ledger.change(file, ctx?.cwd);
 			const exit = event.details?.exitCode;
 			const output = textOf(event.content);
+			const task = name === "bg_run" ? event.details?.task : undefined;
+			if (typeof task?.id === "string" && typeof task.outputPath === "string" && ctx?.cwd) {
+				if (taskOutput.size >= 32) taskOutput.delete(taskOutput.keys().next().value!);
+				taskOutput.set(task.id, resolve(ctx.cwd, task.outputPath));
+			}
 			// A command managed bash moved to the background has no result yet: it proves nothing until it ends.
 			if (name === "bash" && output.includes("[managed bash] Still running — detached")) return;
 			ledger.check(command, { failed: event.isError === true || typeof exit === "number" && exit !== 0, output, background: name === "bg_run", taskId: name === "bg_run" ? event.details?.task?.id : undefined });

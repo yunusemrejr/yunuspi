@@ -1,3 +1,8 @@
+## 0.56.41 — Piped background checks read their output; a shorter head
+
+- A background check piped through `tail` or `head` is judged by the end of its own output file when it finishes, so a printed failure is a failure even when the exit code says 0.
+- The system prompt states three rules once instead of twice (the expert's bar, rules that hold until lifted, when to call yuncontext): about 650 characters less on every request.
+
 ## 0.56.40 — Background checks and screenshots count only when they show the result
 
 - A check started with bg_run no longer counts as passed when it starts. It counts when it ends (bg_wait, bg_status, bg_logs, bg_kill or the task's end notice), with its real exit, and settles only the changes made before it started. A command managed bash moved to the background counts the same way: not until it ends.

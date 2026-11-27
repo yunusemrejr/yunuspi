@@ -131,6 +131,7 @@ function harness(cwd = '/p') {
     read: (path, content = []) => fire('tool_result', { toolName: 'read', input: { path }, details: {}, content, isError: false }),
     // The shapes the background-tasks tools return: bg_run and bg_logs carry a task snapshot, bg_status a list of them, bg_wait the provider outcome.
     bgRun: (command, id = 'b1') => fire('tool_result', { toolName: 'bg_run', input: { command, isAgent: false }, details: { task: { id, command, status: 'running' } }, content: [{ type: 'text', text: `Started background task ${id}` }], isError: false }),
+    fire,
     bgWait: (id, status = 'completed', exitCode = 0) => fire('tool_result', { toolName: 'bg_wait', input: { id }, details: { mode: 'management', results: [], providerOutcome: { provider: 'bg_run', id, status, ...(exitCode === undefined ? {} : { exitCode }) } }, content: [{ type: 'text', text: `Waited 3s. Background task "${id}" ${status}${exitCode === undefined ? '' : ` (exit ${exitCode})`}.` }], isError: false }),
     bgStatus: (...tasks) => fire('tool_result', { toolName: 'bg_status', input: {}, details: { tasks }, content: [{ type: 'text', text: tasks.map(task => `${task.id} ${task.status}`).join('\n') }], isError: false }),
     bgLogs: (task, output) => fire('tool_result', { toolName: 'bg_logs', input: { taskId: task.id }, details: { task, path: '/x', bytesRead: output.length, truncated: false, tail: true }, content: [{ type: 'text', text: output }], isError: false }),
@@ -427,4 +428,18 @@ test('a check that managed bash detached to the background is not a pass yet', a
   await h.run('npm test', { output: '[managed bash] Still running — detached to background after 30s grace.\n  job: j1 · pid 4 · state: running' });
   await h.reply('Done.'); await h.settle();
   assert.match(h.sent[0]?.message.content ?? '', /Code changed after its last check/);
+});
+
+test('a piped background check that printed a failure is a failure, read from its output file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cg-bg-out-'));
+  try {
+    const file = join(dir, 'b1.output');
+    writeFileSync(file, 'Tests: 2 failed, 7 passed\n');
+    const h = await start();
+    await h.edit('/p/src/a.ts');
+    await h.fire('tool_result', { toolName: 'bg_run', input: { command: 'npm test 2>&1 | tail -5' }, details: { task: { id: 'b1', status: 'running', outputPath: file } }, content: [{ type: 'text', text: 'Started background task b1' }], isError: false });
+    await h.bgWait('b1');
+    await h.reply(); await h.settle();
+    assert.match(h.sent[0]?.message.content ?? '', /The last check failed/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

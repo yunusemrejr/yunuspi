@@ -141,10 +141,7 @@ export default function registerYuncontext(pi: any, deps: { fetchBrief?: typeof 
       "task touches. ref: one result in detail. Returns ≤3 dated, sourced clues or nothing; " +
       "the current request wins.",
     promptSnippet: "What past sessions of every harness did in this project",
-    promptGuidelines: [
-      "Call yuncontext (no q) first when you start work in a project or are asked about its past, and with q = one exact error, path, symbol or short how-to phrase when something fails or before non-trivial work.",
-      "After a verified fix, a found cause or an owner correction, call yuncontext_record (supersedes = the outdated ref).",
-    ],
+    // No promptGuidelines: the system-prompt line (NUDGE) and this description already say when to call it.
     parameters: Type.Object({
       cwd: Type.Optional(Type.String({ description: "Absolute path of your current working directory. Defaults to this session's." })),
       q: Type.Optional(Type.String({ maxLength: 2000, description: "One subject: exact error line, path, symbol, or a short how-to phrase." })),
