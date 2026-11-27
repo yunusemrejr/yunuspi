@@ -139,18 +139,44 @@ function groupExists(pid: number): boolean {
 	}
 }
 
-function stillRunning(record: ChildRecord): boolean {
-	return stillThere(record.pid, record.startIdentity) || (record.group && groupExists(record.pid));
+/** The process group of this process (field 5 of /proc/self/stat); undefined when unreadable. */
+function ownGroupId(): number | undefined {
+	try {
+		const stat = fs.readFileSync("/proc/self/stat", "utf-8");
+		const group = Number(stat.slice(stat.lastIndexOf(")") + 1).trim().split(/\s+/)[2]);
+		return Number.isSafeInteger(group) ? group : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * A recorded child that leads a group of its own still counts while any member
+ * of that group runs, even after the leader exited: a group id cannot be handed
+ * out again while a member holds it, so the group is the one the harness made.
+ * Not when the leader's pid now belongs to another process (different start
+ * time), and never this process's own group.
+ */
+function groupOutlivesLeader(record: ChildRecord): boolean {
+	if (!record.group || record.pid === process.pid || record.pid === ownGroupId()) return false;
+	const leader = readProcessState(record.pid);
+	if (leader && leader.startIdentity !== record.startIdentity) return false;
+	return groupExists(record.pid);
+}
+
+/** True while the recorded child, or the group it led, can still be ended. */
+function endable(record: ChildRecord): boolean {
+	return stillThere(record.pid, record.startIdentity) || groupOutlivesLeader(record);
 }
 
 const pause = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function waitUntilGone(records: readonly ChildRecord[], ms: number): Promise<ChildRecord[]> {
 	const deadline = Date.now() + ms;
-	let alive = records.filter(stillRunning);
+	let alive = records.filter(endable);
 	while (alive.length > 0 && Date.now() < deadline) {
 		await pause(POLL_MS);
-		alive = alive.filter(stillRunning);
+		alive = alive.filter(endable);
 	}
 	return alive;
 }
@@ -172,7 +198,7 @@ function logEnding(record: ChildRecord, reason: EndReason, outcome: "term" | "ki
 async function endRecords(entries: Array<{ file: string; record: ChildRecord }>, reason: EndReason, options: ReapOptions): Promise<number> {
 	const dir = options.dir ?? REAP_RECORDS_DIR;
 	const now = options.now ?? Date.now;
-	const targets = entries.filter(({ record }) => reapOn() && record.pid !== process.pid && stillThere(record.pid, record.startIdentity));
+	const targets = entries.filter(({ record }) => reapOn() && record.pid !== process.pid && endable(record));
 	for (const { record } of targets) signal(record, "SIGTERM");
 	const survivors = await waitUntilGone(targets.map(({ record }) => record), options.termGraceMs ?? TERM_GRACE_MS);
 	for (const record of survivors) signal(record, "SIGKILL");
@@ -217,7 +243,7 @@ export function signalOwnChildrenAtExit(options: ReapOptions = {}): void {
 		const owner = self(options);
 		if (!owner || !reapOn()) return;
 		for (const { record } of readRecords(options.dir ?? REAP_RECORDS_DIR)) {
-			if (record.ownerPid === owner.pid && record.ownerStartIdentity === owner.startIdentity && record.pid !== process.pid && stillThere(record.pid, record.startIdentity)) signal(record, "SIGTERM");
+			if (record.ownerPid === owner.pid && record.ownerStartIdentity === owner.startIdentity && record.pid !== process.pid && endable(record)) signal(record, "SIGTERM");
 		}
 	} catch { /* leaving must never hang or throw */ }
 }
@@ -231,4 +257,26 @@ export interface RunningJob {
 export function stillRunningNote(jobs: readonly RunningJob[], now: number): string {
 	const list = jobs.map((job) => `${job.name} (${Math.max(0, Math.round((now - job.startedAt) / 60_000))} min)`).join("; ");
 	return `Still running: ${list}. The work is not done while a worker is out: read its report when it lands, or stop it now if its result is no longer needed.`;
+}
+
+export const STILL_RUNNING_TYPE = "subagents-still-running";
+
+export interface NotedJob extends RunningJob {
+	asyncId: string;
+}
+
+/**
+ * The still-running note is read in a later turn, when the worker it names may
+ * have finished. Applied to each message of a request: other messages pass
+ * unchanged; the note is cut down to the workers still out (named in its
+ * `details.jobs`), and is dropped (undefined) when none is.
+ */
+export function keepStillRunningNote<T extends object>(message: T, isOut: (asyncId: string) => boolean): T | undefined {
+	const note = message as { role?: string; customType?: string; timestamp?: number; details?: { jobs?: NotedJob[] } };
+	if (note.role !== "custom" || note.customType !== STILL_RUNNING_TYPE) return message;
+	const named = note.details?.jobs ?? [];
+	const running = named.filter((job) => isOut(job.asyncId));
+	if (running.length === named.length && named.length > 0) return message;
+	if (running.length === 0) return undefined;
+	return { ...message, content: stillRunningNote(running, note.timestamp ?? Date.now()), details: { jobs: running } };
 }

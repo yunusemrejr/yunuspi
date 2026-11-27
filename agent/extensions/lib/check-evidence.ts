@@ -9,6 +9,9 @@
 const CODE_EXT = new Set(("ts tsx js jsx mjs cjs mts cts py pyw go rs java kt kts scala c h cc cpp cxx hpp hh cs fs rb php pl pm lua sh bash zsh fish ps1 swift m mm dart ex exs erl hs clj sql r jl zig nim vue svelte astro gd").split(" "));
 /** Files people see when they open the result. */
 const VISIBLE_EXT = new Set(("html htm css scss sass less jsx tsx vue svelte astro svg twig erb hbs ejs pug njk liquid mustache pptx docx odp odt key").split(" "));
+/** Folders whose pages are test fixtures, documentation or mail templates: nobody opens them as the product. */
+const NOT_UI_DIR = new Set(["test", "tests", "__tests__", "fixture", "fixtures", "__fixtures__", "__snapshots__", "email", "emails", "mail"]);
+const NOT_UI_FILE = /\.(?:test|spec|fixture)\./i;
 const EXCLUDED_DIR = new Set(["node_modules", "dist", "build", "out", ".git", "__pycache__", "vendor", "target", ".cache", ".venv", "venv", "coverage"]);
 const IMAGE_FILE = /\.(?:png|jpe?g|webp|gif)$/i;
 
@@ -27,7 +30,14 @@ function excluded(file: string, cwd?: string): boolean {
 }
 
 export const isCodeFile = (file: string, cwd?: string): boolean => CODE_EXT.has(extensionOf(file)) && !excluded(file, cwd);
-export const isVisibleFile = (file: string, cwd?: string): boolean => VISIBLE_EXT.has(extensionOf(file)) && !excluded(file, cwd);
+
+/** A page, component or stylesheet of the product: not a test fixture or a mail template (a docs/ site is a real page). */
+export function isVisibleFile(file: string, cwd?: string): boolean {
+	if (!VISIBLE_EXT.has(extensionOf(file)) || excluded(file, cwd)) return false;
+	const parts = projectPath(file, cwd).split("/");
+	const folders = parts.slice(0, -1).map(part => part.toLowerCase());
+	return !(NOT_UI_FILE.test(parts.at(-1) ?? "") || folders.some(part => NOT_UI_DIR.has(part)) || /(?:^|\/)templates\/emails?(?:\/|$)/.test(folders.join("/")));
+}
 export const isImageFile = (file: string): boolean => IMAGE_FILE.test(file);
 
 // ---------- commands ----------
@@ -235,6 +245,60 @@ export const checkTexts = {
 	look: (files: readonly string[]) => `Changed and not looked at: ${fileList(files)}. Open the real output (a page at phone width 360 px and at desktop width; a document or slide rendered) and look at the images before you report or push. A text check (curl, grep, a passing test) shows that words are there, not that they can be read.`,
 };
 
+// ---------- what the user forbade ----------
+
+export interface RunBans { check: boolean; look: boolean }
+
+const NEGATE = String.raw`(?:do not|don'?t|never|no need to|need not|not to|avoid)`;
+const DETERMINER = String.raw`(?:(?:the|my|any|all|your|a|some)\s+)*(?:(?:unit|integration|e2e|existing|new)\s+)?`;
+const CHECK_WORDS = String.raw`(?:tests?|test suites?|specs?|builds?|checks?|linters?|lint|type ?checks?|compil\w+|commands?|scripts?|code|anything|it|them)`;
+const UI_WORDS = String.raw`(?:browsers?|screenshots?|previews?|renders?|rendering|pages?|dev servers?|visual\w*)`;
+const CLAUSE_END = String.raw`(?=\s*(?:please\b|needed\b|required\b|necessary\b|[.,;!:\n]|$))`;
+const EN_BANS_CHECK: RegExp[] = [
+	new RegExp(String.raw`\b${NEGATE}\s+(?:(?:actually|even|really)\s+)?(?:run|execute|launch|start)\s+${DETERMINER}${CHECK_WORDS}\b`, "gi"),
+	new RegExp(String.raw`\b(?:do not|don'?t|never)\s+(?:test|build|compile|verify|lint)\b`, "gi"),
+	new RegExp(String.raw`\b(?:skip|omit)\s+(?:running\s+)?${DETERMINER}(?:tests?|builds?|checks?|verification)\b`, "gi"),
+	new RegExp(String.raw`\bwithout\s+(?:running|executing|testing|building)\b`, "gi"),
+	new RegExp(String.raw`\bno\s+(?:(?:test|build|check)\s+runs?|(?:unit |integration )?tests?|builds?|checks?|verification)${CLAUSE_END}`, "gi"),
+];
+const EN_BANS_LOOK: RegExp[] = [
+	new RegExp(String.raw`\b${NEGATE}\s+(?:open|launch|start|use|take|show|render|look at|check)\s+${DETERMINER}${UI_WORDS}\b`, "gi"),
+	new RegExp(String.raw`\bwithout\s+(?:opening|launching|taking|rendering|a browser|screenshots?)\b`, "gi"),
+	new RegExp(String.raw`\bno\s+${UI_WORDS}${CLAUSE_END}`, "gi"),
+];
+const EN_BANS_ALL = /\b(?:do not|don'?t|never)\s+(?:run|execute)\s+anything\b|\bnothing\s+(?:should|must|needs? to)\s+be\s+(?:run|executed)\b/gi;
+// Turkish is read on text folded to ASCII (ç ı ş ğ ö ü), so a message typed without diacritics counts too.
+const TR_END = String.raw`(?=\s*(?:[.,;!:\n]|$|lutfen\b|ama\b|sadece\b|yalnizca\b))`;
+const TR_BANS_CHECK: RegExp[] = [
+	/calistir(?:mayin|mayiniz|mayalim|madan)(?![a-z])/g,
+	new RegExp(String.raw`calistirma${TR_END}`, "g"),
+	/\btest\s+(?:etme|yapma)(?:yin|yiniz)?(?![a-z])/g,
+	/\b(?:build|derleme)\s+(?:yapma|alma|etme)(?:yin|yiniz)?(?![a-z])/g,
+	/\b(?:test|build|derleme)\w*\s+(?:gerek yok|gerekmez)/g,
+];
+const TR_BANS_LOOK: RegExp[] = [
+	/\b(?:tarayici|browser|ekran goruntusu|screenshot|onizleme)\w*\s+(?:acma|alma|kullanma)(?:yin|yiniz)?(?![a-z])/g,
+	/\bgorsel\s+(?:kontrol|dogrulama)\s+(?:yapma|gerek yok|gerekmez)/g,
+];
+const TR_BANS_ALL = /\bhicbir\s+(?:sey\w*|komut\w*)\s+calistirma/g;
+/** Words after a ban that narrow it to a place or a case: the instruction then stays the model's to apply, not a switch-off. */
+const SCOPED = /^\s+(?:for|in|on|under|inside|against|of|that|which)\b/i;
+
+const foldTurkish = (text: string) => text.toLocaleLowerCase("tr-TR").replace(/ç/g, "c").replace(/ı/g, "i").replace(/ş/g, "s").replace(/ğ/g, "g").replace(/ö/g, "o").replace(/ü/g, "u");
+const banned = (patterns: readonly RegExp[], text: string, scoped: boolean) => patterns.some(pattern => [...text.matchAll(pattern)].some(match => !scoped || !SCOPED.test(text.slice(match.index! + match[0].length))));
+
+/** What the user's own message forbids running: tests and builds, or opening a browser or screenshots. Plain mentions ("run the tests and tell me") forbid nothing. */
+export function runsForbiddenBy(message: string): RunBans {
+	const prose = String(message ?? "").replace(/```[\s\S]*?```|`[^`\n]*`/g, " ").split("\n").filter(line => !/^\s*>/.test(line)).join("\n").replace(/[\u2018\u2019]/g, "'")
+		.replace(/\b(?:do not|don'?t|never)\s+(?:skip|omit)\s+(?:the\s+|any\s+|unit\s+)*(?:tests?|builds?|checks?)\b/gi, "");
+	const folded = foldTurkish(prose);
+	const all = banned([EN_BANS_ALL], prose, false) || banned([TR_BANS_ALL], folded, false);
+	return {
+		check: all || banned(EN_BANS_CHECK, prose, true) || banned(TR_BANS_CHECK, folded, false),
+		look: all || banned(EN_BANS_LOOK, prose, true) || banned(TR_BANS_LOOK, folded, false),
+	};
+}
+
 // ---------- ledger ----------
 
 export interface LedgerSwitches { check: boolean; look: boolean }
@@ -252,9 +316,19 @@ export function createCheckLedger() {
 	let failed: { command: string; snippet: string } | undefined;
 	let revision = 0, visibleChangedAt = 0;
 	let codeThisPrompt = false, visibleThisPrompt = false, anyThisPrompt = false, asked = false, held = false;
+	/** What the user's message for this prompt forbade running. */
+	let bans: RunBans = { check: false, look: false };
+	/** Assistant messages seen, and the one after which the gate asked about unchecked code: the same settle, whichever owner runs first. */
+	let turn = 0, askedCheckTurn = -1;
 	const checkPending = () => unchecked.size > 0 || failed !== undefined;
 	const failure = () => failed && { command: clip(failed.command, 80), snippet: failed.snippet };
 	const uncheckedFiles = () => [...unchecked.keys()];
+	/** The check part of the end-of-turn ask; a report that already says what failed did what the ask would ask for. */
+	const checkAsk = (report: string): string | undefined => {
+		if (!codeThisPrompt || !checkPending()) return undefined;
+		if (unchecked.size) return checkTexts.stopUnchecked(uncheckedFiles());
+		return statesFailure(report) ? undefined : checkTexts.stopFailed(failure()!);
+	};
 	/** A finished check proves the changes made up to `upTo`, not those made while it ran. */
 	const settle = (command: string, outcome: Settled, upTo: number) => {
 		for (const [file, changed] of unchecked) if (changed <= upTo) unchecked.delete(file);
@@ -295,19 +369,21 @@ export function createCheckLedger() {
 		look() { unlooked.clear(); },
 		/** When (epoch ms) the latest visible file was written: an image older than that shows an earlier state. */
 		visibleChangedAt: () => visibleChangedAt,
-		newPrompt() { codeThisPrompt = false; visibleThisPrompt = false; anyThisPrompt = false; asked = false; held = false; },
+		/** `message` is what the user wrote: a ban on running checks or opening a browser holds for this prompt only. */
+		/** The user's message for this prompt forbids running checks. */
+		checksForbidden() { return bans.check; },
+		newPrompt(message = "") { codeThisPrompt = false; visibleThisPrompt = false; anyThisPrompt = false; asked = false; held = false; askedCheckTurn = -1; bans = runsForbiddenBy(message); },
+		/** An assistant message ended. */
+		turnEnded() { turn++; },
 		reset() { this.newPrompt(); unchecked.clear(); unlooked.clear(); background.clear(); failed = undefined; visibleChangedAt = 0; },
 		/** The text for the end of a turn: once per prompt, only for what this prompt changed. `lookOwned` is true when another owner already asks for the look; `report` is the final assistant message. */
 		finish(switches: LedgerSwitches, lookOwned = false, report = ""): string | undefined {
 			if (asked) return undefined;
 			const parts: string[] = [];
 			const phrase = switches.check && anyThisPrompt ? deferredPhrase(report) : undefined;
-			if (switches.check && codeThisPrompt && checkPending()) {
-				// A report that already says what failed did what the ask would ask for.
-				if (unchecked.size) parts.push(checkTexts.stopUnchecked(uncheckedFiles()));
-				else if (!statesFailure(report)) parts.push(checkTexts.stopFailed(failure()!));
-			}
-			if (switches.look && !lookOwned && visibleThisPrompt && unlooked.size) parts.push(checkTexts.look([...unlooked]));
+			const check = switches.check && !bans.check ? checkAsk(report) : undefined;
+			if (check) { parts.push(check); askedCheckTurn = turn; }
+			if (switches.look && !bans.look && !lookOwned && visibleThisPrompt && unlooked.size) parts.push(checkTexts.look([...unlooked]));
 			if (phrase) parts.push(checkTexts.deferred(phrase));
 			if (!parts.length) return undefined;
 			asked = true;
@@ -317,14 +393,18 @@ export function createCheckLedger() {
 		beforePublish(switches: LedgerSwitches): string | undefined {
 			if (held) return undefined;
 			const parts: string[] = [];
-			if (switches.check && checkPending()) parts.push(unchecked.size ? checkTexts.shipUnchecked(uncheckedFiles()) : checkTexts.shipFailed(failure()!));
-			if (switches.look && unlooked.size) parts.push(checkTexts.look([...unlooked]));
+			if (switches.check && !bans.check && checkPending()) parts.push(unchecked.size ? checkTexts.shipUnchecked(uncheckedFiles()) : checkTexts.shipFailed(failure()!));
+			if (switches.look && !bans.look && unlooked.size) parts.push(checkTexts.look([...unlooked]));
 			if (!parts.length) return undefined;
 			held = true;
 			return parts.join("\n\n");
 		},
-		/** True when this gate asks, or already asked, about unchecked code in this prompt: other end-of-turn check nudges stay silent. */
-		coversCheck: (switches: LedgerSwitches) => switches.check && codeThisPrompt && (checkPending() || asked),
+		/** True when this gate asks about unchecked code at this settle, or asked at it already: other end-of-turn check nudges stay silent. When the gate stays silent (the run did not end with a stop, the user forbade running checks, it asked after an earlier turn) they speak as before. */
+		coversCheck: (switches: LedgerSwitches, last: { stop?: string; report: string }): boolean => {
+			if (!switches.check || bans.check) return false;
+			if (askedCheckTurn >= 0) return askedCheckTurn === turn;
+			return last.stop === "stop" && checkAsk(last.report) !== undefined;
+		},
 		snapshot: () => ({ unchecked: uncheckedFiles(), unlooked: [...unlooked], failed: failure(), codeThisPrompt, visibleThisPrompt }),
 	};
 }
@@ -348,8 +428,10 @@ export function noteHeld(command: string, owner = "check-gate"): void {
 /** Armed while the check gate is loaded in this process (not in a subagent child), so others know it speaks. */
 const ARMED = Symbol.for("yunus-pi.check-gate-armed.v1");
 export const armCheckGate = () => { (globalThis as any)[ARMED] = true; };
-/** True when the check gate owns this prompt's end-of-turn check ask, so the older nudges for the same state hold back. */
-export const checkGateCovers = (): boolean => (globalThis as any)[ARMED] === true && sharedCheckLedger().coversCheck({ check: checkGateOn(), look: lookGateOn() });
+/** True when the check gate asks about this settle's unchecked code, so the older nudges for the same state hold back. */
+/** The user forbade running checks this prompt: no other owner asks for one either. */
+export const userForbidsChecks = (): boolean => (globalThis as any)[ARMED] === true && sharedCheckLedger().checksForbidden();
+export const checkGateCovers = (): boolean => (globalThis as any)[ARMED] === true && sharedCheckLedger().coversCheck({ check: checkGateOn(), look: lookGateOn() }, finalTurn);
 
 /** One ledger per process: the extension loader evaluates a module once per importer. */
 const SHARED = Symbol.for("yunus-pi.check-ledger.v1");

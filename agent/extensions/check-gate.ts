@@ -5,6 +5,8 @@
  * check (or the check that failed), what was changed but never looked at, and a
  * final report that puts part of the request off. Before a push or deploy, one
  * hold with the same facts. Each fires once per user prompt, never loops.
+ * A user who says not to run tests or builds (or not to open a browser) silences
+ * that part for the prompt.
  * PI_CHECK_GATE=0 turns it all off; PI_LOOK_GATE=0 only the look part.
  */
 import { closeSync, openSync, readSync, statSync } from "node:fs";
@@ -75,9 +77,10 @@ export default function checkGate(pi: ExtensionAPI): void {
 	const switches = () => ({ check: checkGateOn(), look: lookGateOn() });
 
 	for (const name of ["session_start", "session_switch", "session_tree"] as const) pi.on(name as any, () => { ledger.reset(); finalTurn.report = ""; finalTurn.stop = undefined; });
-	pi.on("input", (event: any) => { if (event?.source !== "extension") { ledger.newPrompt(); clearHeld(); finalTurn.report = ""; } });
+	pi.on("input", (event: any) => { if (event?.source !== "extension") { ledger.newPrompt(typeof event.text === "string" ? event.text : ""); clearHeld(); finalTurn.report = ""; } });
 	pi.on("message_end", (event: any) => {
 		if (event?.message?.role !== "assistant") return;
+		ledger.turnEnded();
 		finalTurn.stop = event.message.stopReason;
 		finalTurn.report = textOf(event.message.content);
 	});

@@ -85,6 +85,19 @@ test('code files and exclusions', () => {
   assert.deepEqual(ev.shellWrittenFiles("echo hi >'my file.ts'"), ['my file.ts']);
 });
 
+test('pages of the product are visible files; fixtures and mail templates are not', () => {
+  for (const file of ['site/index.html', 'src/App.tsx', 'src/styles/main.css', 'public/logo.svg', 'src/components/Hero.vue', '/p/app/pages/contact.html']) assert.equal(ev.isVisibleFile(file, '/p/app'), true, file);
+  for (const file of [
+    'test/fixtures/page.html', 'tests/render.svg', 'src/__tests__/Card.tsx', 'src/Card.test.tsx', 'src/Card.spec.jsx', 'pages/home.fixture.html',
+    'src/__snapshots__/a.svg', 'fixtures/site.css', 'emails/welcome.html', 'src/mail/reset.hbs', 'templates/email/receipt.html',
+  ]) assert.equal(ev.isVisibleFile(file), false, file);
+  // only the project's own folders count: a checkout that lives under a folder named docs or test is not excluded
+  assert.equal(ev.isVisibleFile('/srv/docs/shop/index.html', '/srv/docs/shop'), true);
+  assert.equal(ev.isVisibleFile('/p/app/index.html', '/p/app'), true);
+  // a test fixture is still code to check
+  assert.equal(ev.isCodeFile('tests/render.test.ts'), true);
+});
+
 test('publishing commands', () => {
   for (const command of ['git push', 'git push origin main', 'cd x && git -C y push --force', 'npm publish', 'gh release create v1']) assert.equal(ev.isPublishCommand(command), true, command);
   for (const command of ['git pull', 'git status', 'git push --help', 'echo git push']) assert.equal(ev.isPublishCommand(command), false, command);
@@ -124,7 +137,7 @@ function harness(cwd = '/p') {
   return {
     sent,
     ready: () => done,
-    prompt: (source = 'interactive') => fire('input', { source, text: 'do it' }),
+    prompt: (source = 'interactive', text = 'do it') => fire('input', { source, text }),
     edit: (path) => fire('tool_result', { toolName: 'edit', input: { path }, details: {}, content: [], isError: false }),
     run: (command, { exitCode = 0, output = '', isError = false } = {}) => fire('tool_result', { toolName: 'bash', input: { command }, details: { exitCode }, content: [{ type: 'text', text: output }], isError }),
     screenshot: () => fire('tool_result', { toolName: 'browser_session', input: { action: 'screenshot' }, details: {}, content: [], isError: false }),
@@ -267,9 +280,10 @@ test('one message per settle and one hold per command across the older gates', a
   const h = await start();
   assert.equal(ev.checkGateCovers(), false, 'nothing unchecked');
   await h.edit('/p/src/a.ts');
-  assert.equal(ev.checkGateCovers(), true, 'the older test and checkpoint nudges stay silent');
-  await h.reply(); await h.settle();
-  assert.equal(ev.checkGateCovers(), true, 'and after the ask too, for the rest of the prompt');
+  await h.reply();
+  assert.equal(ev.checkGateCovers(), true, 'the older test and checkpoint nudges stay silent when the gate will ask');
+  await h.settle();
+  assert.equal(ev.checkGateCovers(), true, 'and when it just asked, whichever owner settles second');
   await h.run('npm test'); await h.prompt();
   assert.equal(ev.checkGateCovers(), false);
   // a command another gate already held passes this one
@@ -278,6 +292,99 @@ test('one message per settle and one hold per command across the older gates', a
   assert.equal(await h.call('git push origin main'), undefined);
   ev.clearHeld();
   assert.equal((await h.call('git push origin main')).block, true);
+});
+
+test('a user who forbids running checks or opening a browser is understood, a plain mention is not', () => {
+  const bans = (text) => ev.runsForbiddenBy(text);
+  for (const text of [
+    "don't run tests", 'Do not run the tests', 'please dont run any tests', 'never run the build', 'no builds', 'No tests please.', 'skip the tests', 'without running anything',
+    "don't test it", 'no need to run the checks', 'just fix it, do not run the linter', 'Do not run unit tests, write the code only',
+    'sadece kodu yaz, çalıştırma', 'testleri çalıştırma', 'çalıştırmayın', 'çalıştırmadan yaz', 'test etme', 'build alma', 'derleme yapma', 'testlere gerek yok', 'sadece kodu yaz, calistirma',
+  ]) assert.equal(bans(text).check, true, text);
+  for (const text of ['do not run anything', "Don't execute anything", 'hiçbir şey çalıştırma', 'hicbir sey calistirma', 'nothing should be run']) assert.deepEqual(bans(text), { check: true, look: true }, text);
+  for (const text of ["don't open a browser", 'no screenshots', 'do not take screenshots', 'without opening a browser', 'tarayıcı açma', 'ekran görüntüsü alma', 'screenshot alma'])
+    assert.deepEqual(bans(text), { check: false, look: true }, text);
+  for (const text of [
+    'run the tests and tell me', 'Run npm test, then fix whatever fails', "don't forget to run the tests", 'do not skip the tests', 'please run the build before you push',
+    'I never run tests on Fridays, but you should', 'do not run tests in production', 'skip tests for docs', 'add a command that runs the tests', 'no tests failed?',
+    'testleri çalıştır', 'testleri çalıştırma komutunu ekle', 'derleme hatasını düzelt', 'take a screenshot of the page', 'open the browser and look',
+    'Fix the bug:\n```\nnpm test -- --no-tests\n```\n> do not run anything\nthanks',
+  ]) assert.deepEqual(bans(text), { check: false, look: false }, text);
+});
+
+test('the older nudges are muted only while the gate will ask about the same code at this settle', async () => {
+  // the run did not end with a stop: the gate is silent, the other nudges speak
+  const interrupted = await start();
+  await interrupted.edit('/p/src/a.ts'); await interrupted.reply('stopped', 'aborted');
+  assert.equal(ev.checkGateCovers(), false, 'an interrupt is not a finish');
+  await interrupted.reply('done', 'stop');
+  assert.equal(ev.checkGateCovers(), true, 'a stop with unchecked code is');
+  // the gate asked on an earlier turn: it stays silent for the rest of the prompt, so the others may speak
+  const asked = await start();
+  await asked.edit('/p/src/a.ts'); await asked.reply(); await asked.settle();
+  assert.equal(ev.checkGateCovers(), true);
+  await asked.reply('still not checked'); await asked.settle();
+  assert.equal(asked.sent.length, 1);
+  assert.equal(ev.checkGateCovers(), false, 'the gate does not ask twice');
+  // a failure the report already states is not asked again
+  const stated = await start();
+  await stated.edit('/p/src/a.ts'); await stated.run('npm test', { exitCode: 1, output: '2 failed' });
+  await stated.reply('The tests still fail: 2 failed, the cause is in a.ts.');
+  assert.equal(ev.checkGateCovers(), false, 'the report states the failure, the gate has nothing to add');
+});
+
+test('a user who says not to run anything gets no check ask and no push hold', async () => {
+  for (const text of ["Write the parser. Don't run tests.", 'do not run anything', 'sadece kodu yaz, çalıştırma', 'no builds please']) {
+    const h = harness(); await h.ready(); await h.prompt('interactive', text);
+    await h.edit('/p/src/a.ts');
+    assert.equal(await h.call('git push origin main'), undefined, `${text}: no hold`);
+    await h.reply(); assert.equal(ev.checkGateCovers(), false, `${text}: the older nudges are not muted`);
+    await h.settle();
+    assert.equal(h.sent.length, 0, text);
+  }
+  // the next prompt is the user's again: a plain mention keeps the gate on
+  const h = harness(); await h.ready(); await h.prompt('interactive', "Don't run tests.");
+  await h.edit('/p/src/a.ts'); await h.reply(); await h.settle();
+  assert.equal(h.sent.length, 0);
+  await h.prompt('interactive', 'Now run the tests and tell me what fails.');
+  await h.edit('/p/src/b.ts'); await h.reply(); await h.settle();
+  assert.equal(h.sent.length, 1);
+  // an extension's own message is not the user's
+  const e = harness(); await e.ready(); await e.prompt('interactive', "Don't run tests."); await e.prompt('extension', 'run the tests');
+  await e.edit('/p/src/a.ts'); await e.reply(); await e.settle();
+  assert.equal(e.sent.length, 0, 'the ban stands for the prompt');
+  // deferring work is not running anything: that ask stays
+  const d = harness(); await d.ready(); await d.prompt('interactive', "Don't run tests.");
+  await d.edit('/p/src/a.ts'); await d.reply('Done. The docs follow as its own small update.'); await d.settle();
+  assert.equal(d.sent.length, 1);
+  assert.doesNotMatch(d.sent[0].message.content, /Code changed after its last check/);
+  assert.match(d.sent[0].message.content, /puts off/);
+});
+
+test('the look follows a ban on browsers and screenshots, and the check part stays', async () => {
+  for (const text of ["Don't open a browser.", 'no screenshots', 'tarayıcı açma']) {
+    const h = harness(); await h.ready(); await h.prompt('interactive', text);
+    await h.edit('/p/site/index.html'); await h.edit('/p/src/a.ts');
+    await h.reply(); await h.settle();
+    assert.equal(h.sent.length, 1, text);
+    assert.match(h.sent[0].message.content, /Code changed after its last check/);
+    assert.doesNotMatch(h.sent[0].message.content, /not looked at/, text);
+  }
+  const quiet = harness(); await quiet.ready(); await quiet.prompt('interactive', 'do not run anything');
+  await quiet.edit('/p/site/index.html'); await quiet.reply(); await quiet.settle();
+  assert.equal(await quiet.call('git push'), undefined);
+  assert.equal(quiet.sent.length, 0);
+});
+
+test('fixtures and mail templates are not asked for a look', async () => {
+  const h = await start();
+  for (const file of ['/p/tests/fixtures/page.html', '/p/emails/welcome.html']) await h.edit(file);
+  await h.reply(); await h.settle();
+  assert.equal(h.sent.length, 0);
+  // the test file's own code is still checked, and a test page of it is not looked at
+  await h.edit('/p/src/Card.test.tsx'); await h.reply(); await h.settle();
+  assert.match(h.sent[0].message.content, /Card\.test\.tsx/);
+  assert.doesNotMatch(h.sent[0].message.content, /not looked at/);
 });
 
 // A project folder with real image files: whether a read image counts as a look depends on when the file was written.
@@ -442,4 +549,13 @@ test('a piped background check that printed a failure is a failure, read from it
     await h.reply(); await h.settle();
     assert.match(h.sent[0]?.message.content ?? '', /The last check failed/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('a docs site page is a page; the user ban on running reaches other owners', () => {
+  assert.equal(ev.isVisibleFile('/p/docs/index.html', '/p'), true);
+  const ledger = ev.createCheckLedger();
+  ledger.newPrompt("Write the parser, don't run the tests.");
+  assert.equal(ledger.checksForbidden(), true);
+  ledger.newPrompt('Write the parser and run the tests.');
+  assert.equal(ledger.checksForbidden(), false);
 });

@@ -54,7 +54,7 @@ import { currentTaskStateService } from "./lib/task-state/service.ts";
 import { completionClaimEvents } from "./lib/task-state/ingest.ts";
 import { collectVerificationReceipts } from "./lib/continuation-notice.ts";
 import { isDeployCommand } from "./lib/session-hooks.ts";
-import { checkGateCovers, heldByCheckGate, noteHeld } from "./lib/check-evidence.ts";
+import { checkGateCovers, heldByCheckGate, noteHeld, userForbidsChecks } from "./lib/check-evidence.ts";
 import {
 	emptyRequirementLedger,
 	foldRequirements,
@@ -737,7 +737,7 @@ export default function checkpointsExtension(pi: ExtensionAPI) {
 		// A child's caller checks its work; a test follow-up already asked for the same thing.
 		try {
 			const s = load(sidOf(ctx));
-			if (SHADOW || gateAsks || verifyNudged || process.env.PI_SUBAGENT_CHILD === "1" || runMutations === 0 || s.editsSinceCommand === 0) return;
+			if (SHADOW || gateAsks || verifyNudged || userForbidsChecks() || process.env.PI_SUBAGENT_CHILD === "1" || runMutations === 0 || s.editsSinceCommand === 0) return;
 			if (ctx?.signal?.aborted || ctx?.hasPendingMessages?.() || ctx?.isIdle?.() === false || isSessionStopped(ctx)) return;
 			verifyNudged = true;
 			await pi.sendMessage({

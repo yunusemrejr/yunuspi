@@ -1,3 +1,12 @@
+## 0.56.42 — Gates that listen to the user and to the request
+
+- "Don't run the tests", "do not run anything", "hiçbir şey çalıştırma" silence the check ask, the push hold and the "no check has passed" nudge for that prompt; "no screenshots" or "tarayıcı açma" silence the look ask. A plain mention ("run the tests and tell me") changes nothing.
+- Test fixtures, snapshots and mail templates are not asked for a look; product pages, components, stylesheets and docs-site pages still are.
+- The other check nudges are muted only when the check gate really asks at the same settle.
+- The detour check: a request that is itself a survey (audit, find all, go through, incele, tara) is not asked about reading across many places, and a brief that forbids one thing ("do not change the API") is no longer read as read-only.
+- The "still running" note names only workers that are still running when it is read, and is dropped when none are.
+- On quit, a background runner whose leader process died still has the rest of its process group ended (identity checked before any signal).
+
 ## 0.56.41 — Piped background checks read their output; a shorter head
 
 - A background check piped through `tail` or `head` is judged by the end of its own output file when it finishes, so a printed failure is a failure even when the exit code says 0.

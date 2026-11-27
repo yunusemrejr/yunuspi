@@ -187,6 +187,8 @@ export interface SignInput {
 	worker: boolean;
 	/** A worker whose brief says it only reads is never called dry; the main agent never is (`long` covers it). */
 	readsOnly: boolean;
+	/** The request is itself a survey: touching many places is the work, so `spread` stays quiet. */
+	survey: boolean;
 	/** Signs the decision model has just cleared. */
 	muted: ReadonlySet<SignName>;
 }
@@ -196,7 +198,7 @@ export function findSign(input: SignInput): Sign | undefined {
 	const candidates: Sign[] = [
 		{ sign: "failing", n: failingCount(input.steps) },
 		{ sign: "rerun", n: rerunCount(input.steps) },
-		{ sign: "spread", n: spreadCount(input.steps) },
+		{ sign: "spread", n: input.survey ? 0 : spreadCount(input.steps) },
 		{ sign: "dry", n: input.worker && !input.readsOnly ? input.sinceChange : 0 },
 		{ sign: "long", n: input.sinceJudged },
 	];
@@ -204,10 +206,25 @@ export function findSign(input: SignInput): Sign | undefined {
 	return candidates.find((candidate) => !input.muted.has(candidate.sign) && candidate.n >= at[candidate.sign]);
 }
 
-/** A brief that says the worker only reads, searches or reports. */
+/** What a brief can say it must not touch when it means the work as a whole, not one part of it. */
+const WHOLE_WORK = "(?:anything|any (?:files?|code)|files|the (?:code|codebase|repo|repository|project|files))";
+/** A prohibition on changing the work as a whole; "do not change the API" or "no changes to tests" is not one. */
+const NO_CHANGES_SOURCE =
+	`\\b(?:read[- ]only|(?:report|analysis|survey|audit|review)[- ]only|only (?:read|reads|reading|search|searches|report|reports)|(?:do not|don't|never|must not) (?:edit|modify|change|write(?: to)?|touch|alter) ${WHOLE_WORK}|no (?:edits|changes|writes|modifications)(?: (?:to|in) ${WHOLE_WORK}|(?! (?:to|in|of|on)\\b))|without (?:editing|modifying|changing|writing) ${WHOLE_WORK})\\b`;
+const NO_CHANGES = new RegExp(NO_CHANGES_SOURCE, "i");
+const EACH_NO_CHANGES = new RegExp(NO_CHANGES_SOURCE, "gi");
+/** A verb that asks for the work to be changed. */
+const WRITE_VERB = /\b(?:fix|implement|add|create|refactor|rename|rewrite|update|migrate|patch|build|change|modify|edit|write|remove|delete|replace)\b/i;
+
+/** A brief that as a whole says the worker only reads, searches or reports: it asks for no changes and names no change to make. */
 export function briefReadsOnly(brief: string): boolean {
-	return /\b(?:read[- ]only|only (?:read|reads|reading|search|searches|report|reports)|(?:do not|don't|never) (?:edit|modify|change|write)|no (?:edits|changes|writes)|without (?:editing|modifying|changing|writing))\b/i.test(brief);
+	return NO_CHANGES.test(brief) && !WRITE_VERB.test(brief.replace(EACH_NO_CHANGES, " "));
 }
+
+/** A request that is itself a survey of many places (audit, review, find all, explore, "incele", "tara"). */
+const SURVEY = /\b(?:audit|survey|review|find all|search (?:across|through|all)|explore|investigate|analy[sz]e (?:the )?(?:code|codebase|repo|repository|project)|compare (?:the )?files|go(?:ing)? through)\b|(?<!\p{L})(?:incele\p{L}*|hepsini bul|tara(?:yıp|yın|yarak|ma)?)(?!\p{L})/iu;
+
+export const isSurveyRequest = (request: string): boolean => SURVEY.test(request);
 
 const SIGN_WORDS: Record<SignName, (n: number) => string> = {
 	failing: (n) => `the same command has failed ${n} times`,
@@ -258,6 +275,7 @@ export class Needed {
 	private readonly ask: DetourAsk;
 	private readonly now: () => number;
 	private requestText = "";
+	private survey = false;
 	private steps: Step[] = [];
 	private count = 0;
 	private changedAt = 0;
@@ -281,6 +299,7 @@ export class Needed {
 		if (!request || isAcknowledgement(request) || (this.worker && this.requestText)) return;
 		this.reset();
 		this.requestText = request;
+		this.survey = isSurveyRequest(request);
 	}
 
 	/** Forget everything: the session ended or switched. */
@@ -290,6 +309,7 @@ export class Needed {
 
 	private reset(): void {
 		this.requestText = "";
+		this.survey = false;
 		this.steps = [];
 		this.count = 0;
 		this.changedAt = 0;
@@ -318,6 +338,7 @@ export class Needed {
 			sinceJudged: this.count - this.judgedAt,
 			worker: this.worker,
 			readsOnly: this.worker && briefReadsOnly(this.requestText),
+			survey: this.survey,
 			muted,
 		});
 		const now = this.now();

@@ -46,7 +46,7 @@ import { createAsyncJobTracker } from "../runs/background/async-job-tracker.ts";
 import { getActiveAsyncCapacitySnapshot, resolveAbandonedSlotReleaseAfterMs, resolveMaxActiveAsyncRunsPerSession } from "../runs/background/active-async-capacity.ts";
 import { cleanupResultIndexes, missionObserverResultCandidateFiles } from "../runs/background/result-files.ts";
 import { ASYNC_RETENTION_DELAY_MS, cleanupAsyncRetention } from "../runs/background/async-retention.ts";
-import { endOrphans, endOwnChildren, signalOwnChildrenAtExit, stillRunningNote } from "../runs/shared/nothing-left-running.ts";
+import { endOrphans, endOwnChildren, signalOwnChildrenAtExit, stillRunningNote, STILL_RUNNING_TYPE, keepStillRunningNote } from "../runs/shared/nothing-left-running.ts";
 import { createResultWatcher } from "../runs/background/result-watcher.ts";
 import { createResultDeliveryOwnership } from "../runs/background/result-delivery-ownership.ts";
 import { createScheduledRunManager } from "../runs/background/scheduled-runs.ts";
@@ -866,16 +866,31 @@ export default function registerSubagentExtension(pi: ExtensionAPI): void {
 
 	registerWaitTool(pi, state, waitToolConfig.enabled, waitSubscriptionManager, waitToolConfig.defaultTimeoutMs);
 
+	const isOut = (job: { status: string }) => job.status === "queued" || job.status === "running";
+	// The note is read in the next turn, possibly after the worker it names has finished: at every request it is cut down to the workers still out, and dropped when none are.
+	pi.on("context", (event) => {
+		let changed = false;
+		const messages: typeof event.messages = [];
+		for (const message of event.messages) {
+			const kept = keepStillRunningNote(message, (asyncId) => { const job = state.asyncJobs.get(asyncId); return job !== undefined && isOut(job); });
+			if (kept !== message) changed = true;
+			if (kept) messages.push(kept);
+		}
+		return changed ? { messages } : undefined;
+	});
+
 	pi.on("agent_end", async (event, ctx) => {
 		if (!ctx.hasUI && !event.aborted) await drainOutstandingWork({ state, events: pi.events, signal: ctx.signal });
 		try {
 			// A stop with workers still out is told once per worker; the completion wake brings the next turn.
-			const out = [...state.asyncJobs.values()].filter((job) => (job.status === "queued" || job.status === "running") && !notedStillRunning.has(job.asyncId));
+			const stillOut = [...state.asyncJobs.values()].filter(isOut);
+			for (const id of notedStillRunning) if (!stillOut.some((job) => job.asyncId === id)) notedStillRunning.delete(id);
+			const out = stillOut.filter((job) => !notedStillRunning.has(job.asyncId));
 			if (out.length > 0) {
 				for (const job of out) notedStillRunning.add(job.asyncId);
 				const now = Date.now();
-				const content = stillRunningNote(out.map((job) => ({ name: job.agents?.[0] ?? "subagent", startedAt: job.startedAt ?? now })), now);
-				pi.sendMessage({ customType: "subagents-still-running", content, display: false }, { deliverAs: "nextTurn" });
+				const jobs = out.map((job) => ({ asyncId: job.asyncId, name: job.agents?.[0] ?? "subagent", startedAt: job.startedAt ?? now }));
+				pi.sendMessage({ customType: STILL_RUNNING_TYPE, content: stillRunningNote(jobs, now), display: false, details: { jobs } }, { deliverAs: "nextTurn" });
 			}
 		} catch { /* the note is advisory */ }
 		const ownerSessionId = state.currentSessionId;

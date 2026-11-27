@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 
 const root = path.resolve(import.meta.dirname, '..');
 const sub = path.join(root, 'agent/extensions/pi-subagents/src');
-const { recordChild, endOwnChildren, endOrphans, signalOwnChildrenAtExit, stillRunningNote } = await import(pathToFileURL(path.join(sub, 'runs/shared/nothing-left-running.ts')).href);
+const { recordChild, endOwnChildren, endOrphans, signalOwnChildrenAtExit, stillRunningNote, keepStillRunningNote } = await import(pathToFileURL(path.join(sub, 'runs/shared/nothing-left-running.ts')).href);
 const { readProcessState } = await import(pathToFileURL(path.join(sub, 'shared/process-start-identity.ts')).href);
 
 const identityOf = (pid) => readProcessState(pid).startIdentity;
@@ -75,6 +75,29 @@ test('a child that leads a process group takes its own children with it', async 
 	await endOwnChildren('session-end', { dir });
 	await pause(100);
 	assert.throws(() => process.kill(-runner.pid, 0), { code: 'ESRCH' }, 'no member of the group is left');
+});
+
+test('a runner whose leader has exited still has its group ended', async (t) => {
+	const { dir, start } = rig(t);
+	const runner = await start(['sh', '-c', 'sleep 300 & sleep 1'], { detached: true });
+	await pause(200);
+	recordChild({ kind: 'runner', pid: runner.pid, group: true }, { dir });
+	await new Promise((resolve) => runner.once('exit', resolve));
+	assert.doesNotThrow(() => process.kill(-runner.pid, 0), 'the grandchild keeps the group alive');
+	assert.equal(await endOwnChildren('session-end', { dir }), 1);
+	await pause(100);
+	assert.throws(() => process.kill(-runner.pid, 0), { code: 'ESRCH' }, 'no member of the group is left');
+});
+
+test('a group whose leader pid now belongs to another process is not signalled', async (t) => {
+	const { dir, start, records } = rig(t);
+	const runner = await start(['sleep', '300'], { detached: true });
+	recordChild({ kind: 'runner', pid: runner.pid, group: true }, { dir });
+	const file = path.join(dir, records()[0]);
+	const record = JSON.parse(fs.readFileSync(file, 'utf-8'));
+	fs.writeFileSync(file, JSON.stringify({ ...record, startIdentity: 'linux:1' }));
+	assert.equal(await endOwnChildren('session-end', { dir }), 0);
+	assert.equal(isRunning(runner.pid), true, 'a process whose start time does not match is left alone');
 });
 
 test('each ending writes one log line with kind, pid, age and reason, and nothing else', async (t) => {
@@ -198,4 +221,19 @@ test('a malformed owner or an unreadable folder never throws', async (t) => {
 	assert.equal(await endOrphans({ dir: path.join(dir, 'missing') }), 0);
 	assert.equal(await endOwnChildren('session-end', { dir: path.join(dir, 'missing') }), 0);
 	assert.doesNotThrow(() => recordChild({ kind: 'foreground', pid: 999999999, group: false }, { dir }));
+});
+
+test('the still-running note read after a worker finished names only workers still out, or goes', () => {
+	const note = (jobs) => ({ role: 'custom', customType: 'subagents-still-running', content: stillRunningNote(jobs, 600_000), details: { jobs }, timestamp: 600_000 });
+	const a = { asyncId: 'a', name: 'scout', startedAt: 0 };
+	const b = { asyncId: 'b', name: 'builder', startedAt: 0 };
+	const user = { role: 'user', content: 'hi' };
+	assert.equal(keepStillRunningNote(user, () => false), user, 'other messages pass unchanged');
+	const both = note([a, b]);
+	assert.equal(keepStillRunningNote(both, () => true), both, 'nothing finished: the note is untouched');
+	const cut = keepStillRunningNote(both, (id) => id === 'b');
+	assert.match(cut.content, /builder/);
+	assert.doesNotMatch(cut.content, /scout/);
+	assert.deepEqual(cut.details.jobs, [b]);
+	assert.equal(keepStillRunningNote(both, () => false), undefined, 'every worker finished: no note is sent');
 });
