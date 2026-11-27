@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { execFileSync } from 'node:child_process';
 let agent = path.resolve(import.meta.dirname, '../agent');
 try { fs.accessSync(agent); } catch { agent = path.resolve(import.meta.dirname, '../..'); }
 const { relevant, clearRelevantTokenCache } = await import(pathToFileURL(path.join(agent, 'extensions/lib/session-observer.ts')));
@@ -81,6 +82,60 @@ test('checkout-root memoization survives reuse and clears for invalidation', () 
   } finally {
     clearCoordinationRootCache();
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('a linked git worktree shares the main checkout coordination root', () => {
+  clearCoordinationRootCache();
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'coord-worktree-')));
+  const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@example.test', ...args], { cwd, stdio: 'pipe' });
+  try {
+    const main = path.join(base, 'main'), linked = path.join(base, 'linked'), other = path.join(base, 'other');
+    fs.mkdirSync(main);
+    git(main, 'init', '-q', '-b', 'main');
+    git(main, 'commit', '-q', '--allow-empty', '-m', 'init');
+    git(main, 'worktree', 'add', '-q', '-b', 'side', linked);
+    fs.mkdirSync(path.join(linked, 'a', 'b'), { recursive: true });
+    fs.mkdirSync(path.join(main, 'a'), { recursive: true });
+    assert.equal(coordinationRoot(main), main, 'the main checkout keeps its own root');
+    assert.equal(coordinationRoot(path.join(main, 'a')), main);
+    assert.equal(coordinationRoot(linked), main, 'a worktree session is a sibling of the main checkout');
+    assert.equal(coordinationRoot(path.join(linked, 'a', 'b')), main);
+    // A link that the worktree git dir does not point back at cannot adopt the main root.
+    fs.mkdirSync(other);
+    const gitDir = fs.readFileSync(path.join(linked, '.git'), 'utf8');
+    fs.writeFileSync(path.join(other, '.git'), gitDir);
+    clearCoordinationRootCache();
+    assert.equal(coordinationRoot(other), other, 'a forged gitdir link keeps its own directory');
+    // A git dir outside <common>/worktrees cannot vouch for a checkout, even with matching back-pointers.
+    const forged = path.join(base, 'forged-gitdir'), victim = path.join(base, 'victim');
+    fs.mkdirSync(forged); fs.mkdirSync(victim);
+    fs.writeFileSync(path.join(forged, 'commondir'), path.join(main, '.git'));
+    fs.writeFileSync(path.join(forged, 'gitdir'), path.join(victim, '.git'));
+    fs.writeFileSync(path.join(victim, '.git'), `gitdir: ${forged}\n`);
+    clearCoordinationRootCache();
+    assert.equal(coordinationRoot(victim), victim, 'a git dir outside common/worktrees keeps its own root');
+    // A symlinked registration is not the registered directory.
+    const alias = path.join(base, 'alias'), aliased = path.join(base, 'aliased');
+    fs.symlinkSync(gitDir.replace(/^gitdir: /, '').trim(), alias, 'dir'); fs.mkdirSync(aliased);
+    fs.writeFileSync(path.join(aliased, '.git'), `gitdir: ${alias}\n`);
+    clearCoordinationRootCache();
+    assert.equal(coordinationRoot(aliased), aliased, 'a symlinked git dir keeps its own root');
+    // A FIFO where a link file belongs is rejected without blocking.
+    const registration = gitDir.replace(/^gitdir: /, '').trim();
+    fs.rmSync(path.join(registration, 'commondir'));
+    execFileSync('mkfifo', [path.join(registration, 'commondir')]);
+    clearCoordinationRootCache();
+    assert.equal(coordinationRoot(linked), linked, 'a FIFO link file is refused, not read');
+    // A submodule-style link has no commondir and stays its own repository.
+    const sub = path.join(base, 'sub');
+    fs.mkdirSync(path.join(base, 'modules', 'sub'), { recursive: true });
+    fs.mkdirSync(sub);
+    fs.writeFileSync(path.join(sub, '.git'), 'gitdir: ../modules/sub\n');
+    assert.equal(coordinationRoot(sub), sub);
+  } finally {
+    clearCoordinationRootCache();
+    fs.rmSync(base, { recursive: true, force: true });
   }
 });
 

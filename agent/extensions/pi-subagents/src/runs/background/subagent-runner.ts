@@ -95,7 +95,7 @@ import { collectDynamicResults, DynamicFanoutError, materializeDynamicParallelSt
 import { claimRunFanoutBatch, getRunFanoutBudgetSnapshot } from "../shared/run-fanout-budget.ts";
 import { nestedSummaryFromAsyncStatus, projectNestedEvents, resolveNestedAsyncDir, writeNestedEvent } from "../shared/nested-events.ts";
 import { beginFreeRun, recoveryRoutes, recoveryRoutesEnv } from "../../../../lib/free-models.ts";
-import { formatSubagentModelVerificationError, isContextOverflow } from "../shared/session-model.ts";
+import { childLaunchRole, formatSubagentModelVerificationError, isContextOverflow } from "../shared/session-model.ts";
 import {
 	INCOMPLETE_CHILD_ASSISTANT_RESPONSE,
 	SUBAGENT_STARTUP_RETRY_DELAYS_MS,
@@ -1813,6 +1813,7 @@ async function runSingleStepInner(
 				: undefined;
 			const { args, env, tempDir: launchTempDir, toolDiagnosticPath, runtimeAcknowledgedExtensionsPath, capabilityAudit: attemptCapabilityAudit, warnings } = buildPiArgs(omitUndefinedProperties({
 				parentSessionId: step.parentSessionId,
+				role: childLaunchRole({ name: step.agent }, step.cwd ?? ctx.cwd, step.role),
 				forkCacheKey: step.context === "fork" ? deriveForkPromptCacheKey(step.parentSessionId) : undefined,
 				baseArgs: ["--mode", "json", "-p"],
 				task: attemptTask,

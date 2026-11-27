@@ -237,7 +237,39 @@ const maintenanceSkill = [
   path.join(AGENT_ROOT, "skills/harness-self-maintenance/SKILL.md"),
   path.join(homedir(), "skills/harness-self-maintenance/SKILL.md"),
 ].find((candidate) => fs.existsSync(candidate));
-export const SELF_MUTATION_GUIDANCE = `Harness maintenance: inspect ${maintenanceSkill ? JSON.stringify(maintenanceSkill) : "the harness-self-maintenance skill"} and current maintenance map before changes. Preserve credentials and runtime state; make focused reversible edits, run relevant checks, and export only reviewed non-sensitive files. Child agents have no independent maintenance authority.`;
+/** The YunusPi source checkout (or one of its worktrees) is the nearest directory
+ * holding both the harness sources and the installer `yunuspi update --source`
+ * runs. The live install carries the sources but no root-level installer. */
+const SOURCE_CHECKOUT_MARKERS = ["agent/extensions/lib/self-mutation-guard.ts", "scripts/install.mjs"];
+export function harnessSourceRoot(cwd: string): string | undefined {
+  let dir = cwd;
+  for (let depth = 0; depth < 16; depth++) {
+    if (SOURCE_CHECKOUT_MARKERS.every((marker) => fs.existsSync(path.join(dir, marker)))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) return undefined;
+    dir = parent;
+  }
+}
+/** Where a session that maintains YunusPi edits, ships and verifies. The live
+ * install is edited only through a source checkout; a session in the checkout
+ * cannot write the install, so its deploy step belongs to a session launched in
+ * the install (or the user). Undefined when `cwd` is neither. */
+export function harnessMaintenanceNote(cwd: string, allowed: boolean, agentRoot = AGENT_ROOT, installRoot = HARNESS_ROOT): string | undefined {
+  const source = harnessSourceRoot(cwd);
+  // Allowed in a source checkout means the checkout is the running install: nothing to deploy.
+  if (allowed === (source !== undefined)) return undefined;
+  const deploy = `${path.join(agentRoot, "bin/yunuspi")} update --source ${source ?? "<checkout>"}`;
+  const verify = `node ${path.join(agentRoot, "scripts/verify-harness.mjs")}`;
+  const steps = "The operate skill's YunusPi self-maintenance section has the steps.";
+  return source
+    ? `This is the YunusPi source checkout: edit and test here, then commit and push main. This session cannot write the live install, so \`${deploy}\` runs from a session launched in ${installRoot} or by the user, and \`${verify}\` verifies it. ${steps}`
+    : `This is the live YunusPi install: edit and test in the YunusPi source checkout instead, then commit and push its main. Deploy with \`${deploy}\` and verify with \`${verify}\`. ${steps}`;
+}
+const maintenanceNote = harnessMaintenanceNote(INITIAL_CWD, SELF_MUTATION_ALLOWED);
+const MAINTENANCE_RULES = `Harness maintenance: inspect ${maintenanceSkill ? JSON.stringify(maintenanceSkill) : "the harness-self-maintenance skill"} and current maintenance map before changes. Preserve credentials and runtime state; make focused reversible edits, run relevant checks, and export only reviewed non-sensitive files. Child agents have no independent maintenance authority.`;
+export const SELF_MUTATION_GUIDANCE = SELF_MUTATION_ALLOWED && maintenanceNote ? `${MAINTENANCE_RULES} ${maintenanceNote}` : MAINTENANCE_RULES;
+/** A session that cannot write the install but runs in its source checkout still gets the maintenance note. Children never do: they have no maintenance authority. */
+export const HARNESS_SOURCE_GUIDANCE = SELF_MUTATION_ALLOWED || process.env.PI_SUBAGENT_CHILD === "1" ? undefined : maintenanceNote;
 export function selfMutationDenial(
   target: string,
   cwd: string,

@@ -85,7 +85,7 @@ import { formatMidToolExitError, formatProcessSignalError, isOrdinaryToolForMidT
 import { readChildToolDiagnosticError } from "../shared/tool-availability.ts";
 import { buildTimeoutRecoverySummary, collectTrackedMutationEvidence, snapshotTrackedMutations } from "../shared/mutation-evidence.ts";
 import { captureSingleOutputSnapshot, extractChildWrittenOutput, finalizeSingleOutput, formatSavedOutputReference, hasSingleOutputChangedSinceSnapshot, injectOutputPathSystemPrompt, resolveSingleOutput, validateFileOnlyOutputMode } from "../shared/single-output.ts";
-import { formatSubagentModelVerificationError, isContextOverflow } from "../shared/session-model.ts";
+import { childLaunchRole, formatSubagentModelVerificationError, isContextOverflow } from "../shared/session-model.ts";
 import { modelRouteCandidateAt, type ModelRouteCandidate } from "../../shared/model-route.ts";
 import { beginFreeRun, recoveryRoutes, recoveryRoutesEnv } from "../../../../lib/free-models.ts";
 import { recordModelRoutingAttempt } from "../../../../lib/model-routing-metrics.ts";
@@ -419,6 +419,7 @@ async function runSingleAttempt(
 		: undefined;
 	const { args, env: sharedEnv, tempDir, toolDiagnosticPath, runtimeAcknowledgedExtensionsPath, capabilityAudit, warnings } = buildPiArgs({
 		baseArgs: ["--mode", "json", "-p"],
+		role: childLaunchRole(agent, options.cwd ?? runtimeCwd, options.role),
 		task,
 		taskDelivery: shared.taskDelivery,
 		sessionEnabled: shared.sessionEnabled,

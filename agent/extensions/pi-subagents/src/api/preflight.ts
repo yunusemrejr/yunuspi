@@ -62,6 +62,8 @@ export interface SubagentLaunchContractInput {
 	thinkingCeiling?: ThinkingLevel;
 	inheritedThinkingCeiling?: ThinkingLevel;
 	parentModel?: ParentModel;
+	/** The session the launch belongs to: the quota fallback for helpers on the ChatGPT subscription counts per session. */
+	parentSessionId?: string;
 	preferredProvider?: string;
 	skill?: string | string[] | boolean;
 	output?: string | boolean;
@@ -198,7 +200,7 @@ function resolveLaunchContractContext(input: SubagentLaunchContractInput, agent:
 	// An explicit context never looks at the role's model, so it cannot fail here.
 	if (input.context === undefined && !externalRunner) {
 		try {
-			roleRunsElsewhere = resolveChildRoute({ agent, forked: false, parentModel: input.parentModel, cwd }).shownRole !== undefined;
+			roleRunsElsewhere = resolveChildRoute({ agent, forked: false, parentModel: input.parentModel, cwd, sessionId: input.parentSessionId }).shownRole !== undefined;
 		} catch {
 			// The launch fails on this route; it is no fork, so the route below reports it.
 			return "fresh";
@@ -330,7 +332,7 @@ export async function resolveSubagentLaunchContract(input: SubagentLaunchContrac
 	let route: ChildRoute | undefined;
 	if (!externalRunner) {
 		try {
-			route = resolveChildRoute({ agent, forked: context === "fork", parentModel: input.parentModel, cwd: effectiveCwd });
+			route = resolveChildRoute({ agent, forked: context === "fork", parentModel: input.parentModel, cwd: effectiveCwd, sessionId: input.parentSessionId });
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			const code = input.parentModel ? "invalid_team_settings" : "missing_session_model";

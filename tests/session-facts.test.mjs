@@ -11,7 +11,7 @@ process.env.PI_JEV = 'off';
 
 const root = path.resolve(import.meta.dirname, '..');
 const extensionUrl = pathToFileURL(path.join(root, 'agent/extensions/session-facts.ts')).href;
-const { default: registerSessionFacts, hurryRequested, HURRY_NOTE } = await import(extensionUrl);
+const { default: registerSessionFacts, hurryRequested, sessionFactsText, HURRY_NOTE } = await import(extensionUrl);
 
 /** An assistant message entry with usage, as the session file stores it. */
 const assistantEntry = ({ input = 4000, output = 200, cacheRead = 96000, total = 0.012 } = {}) => ({
@@ -588,4 +588,74 @@ test('a goal kickoff is matched on the goal sentence, not its criteria and stand
 	assert.doesNotMatch(matched, /motion-graphics-production/, 'the standards text about video does not pick a video guide');
 	const other = 'rename the uploader retry settings';
 	assert.doesNotMatch(await ask(kickoff(other, `${other}; a motion graphics video with kinetic typography`)), /Guides that match/, 'a criterion that mentions video is not the request');
+});
+
+// --- the ChatGPT quota --------------------------------------------------
+
+const codexToken = `e30.${Buffer.from(JSON.stringify({ 'https://api.openai.com/auth': { chatgpt_account_id: 'acct-facts' } })).toString('base64url')}.sig`;
+const codexModel = { provider: 'openai-codex', id: 'gpt-6-astra' };
+const quotaFile = () => path.join(process.env.PI_CODING_AGENT_DIR, 'codex-usage.json');
+/** The usage endpoint answers with `used` percent of the week; every request is counted. */
+function usageEndpoint(t, used) {
+	const saved = globalThis.fetch;
+	const requests = [];
+	globalThis.fetch = async (url) => {
+		requests.push(String(url));
+		return { ok: true, status: 200, text: async () => JSON.stringify({ rate_limit: { primary_window: { used_percent: used, limit_window_seconds: 604_800, reset_after_seconds: 100 } } }) };
+	};
+	t.after(() => { globalThis.fetch = saved; });
+	return requests;
+}
+const settle = () => new Promise((resolve) => setTimeout(resolve, 60));
+
+test('the facts line says how much of the ChatGPT week is used, and what this session added', () => {
+	const input = { now: new Date('2026-11-27T10:00:00Z'), zone: 'UTC', usd: 0.5, lastRun: { minutes: 3 }, quota: 'GPT quota: 18% of the week used, this session +2' };
+	assert.match(sessionFactsText(input), /Last run: 3 min\. GPT quota: 18% of the week used, this session \+2\.$/);
+	assert.doesNotMatch(sessionFactsText({ ...input, quota: undefined }), /GPT quota/);
+});
+
+test('a session on the subscription reads the week at its start and states it with each human message', async (t) => {
+	const requests = usageEndpoint(t, 12);
+	const f = fixture(t, { settings: { team: { helper: 'openai-codex/gpt-6-astra' } } });
+	f.ctx.modelRegistry = { getAvailable: () => [codexModel], getApiKeyAndHeaders: async () => ({ ok: true, apiKey: codexToken }), isUsingOAuth: () => true };
+	registerSessionFacts(f.pi);
+	await f.emit('session_start', { type: 'session_start', reason: 'startup' });
+	await settle();
+	assert.equal(requests.length, 1, 'one reading at the start');
+	const [first] = await f.humanMessage('Plan the migration.');
+	assert.match(first.message.content, /Now: .*\n?.*GPT quota: 12% of the week used\./s);
+	assert.doesNotMatch(first.message.content, /this session/, 'nothing added yet');
+
+	// Quota spent since the start: the next message states the session's share.
+	const written = JSON.parse(fs.readFileSync(quotaFile(), 'utf8'));
+	written.last = { ...written.last, weeklyPercent: 15, at: Date.now() };
+	fs.writeFileSync(quotaFile(), JSON.stringify(written));
+	const [second] = await f.humanMessage('Go on.');
+	assert.match(second.message.content, /GPT quota: 15% of the week used, this session \+3\./);
+	f.store(second.message);
+	assert.equal(sessionEntryToContextMessages(f.stored()[0])[0].content, second.message.content, 'stored once, replayed as written');
+});
+
+test('a session that never uses the subscription says nothing about it and asks no one', async (t) => {
+	const requests = usageEndpoint(t, 12);
+	const f = fixture(t, { settings: { team: { helper: 'deepseek/flash' } } });
+	f.ctx.modelRegistry = { getAvailable: () => [codexModel], getApiKeyAndHeaders: async () => ({ ok: true, apiKey: codexToken }), isUsingOAuth: () => true };
+	fs.writeFileSync(quotaFile(), JSON.stringify({ last: { weeklyPercent: 40, limitReached: false, at: Date.now() }, sessions: {} }));
+	registerSessionFacts(f.pi);
+	await f.emit('session_start', { type: 'session_start', reason: 'startup' });
+	const [first] = await f.humanMessage('Plan the migration.');
+	await settle();
+	assert.doesNotMatch(first.message.content, /GPT quota/);
+	assert.equal(requests.length, 0);
+});
+
+test('without a ChatGPT login the line stays quiet even when the team names a subscription model', async (t) => {
+	const requests = usageEndpoint(t, 12);
+	const f = fixture(t, { settings: { team: { advisor: 'openai-codex/gpt-6-astra' } } });
+	registerSessionFacts(f.pi);
+	await f.emit('session_start', { type: 'session_start', reason: 'startup' });
+	const [first] = await f.humanMessage('Plan the migration.');
+	await settle();
+	assert.doesNotMatch(first.message.content, /GPT quota/);
+	assert.equal(requests.length, 0);
 });

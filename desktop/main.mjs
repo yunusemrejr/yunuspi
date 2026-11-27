@@ -10,6 +10,7 @@ import { AgentWorker } from './agent-worker.mjs';
 import { readHistory, closeHistoryReaders, cancelPendingHistoryReads } from './history-reader.mjs';
 import { getRecoveredInput, listRecoveredInput, validateDesktopImages } from './recovered-input.mjs';
 import { applyTeamValue, readTeam } from './renderer/team-settings.mjs';
+import { teamCatalog } from './team-catalog.mjs';
 
 const directory = path.dirname(fileURLToPath(import.meta.url));
 const root = path.dirname(directory);
@@ -121,13 +122,19 @@ async function availableForTeam() {
     const started = signature;
     teamModelsRequest = liveModels()
       .then(models => {
-        const answer = models.map(model => ({ provider: model.provider, id: model.id, ...(typeof model.name === 'string' && model.name ? { name: model.name } : {}) }));
+        const answer = models.map(model => ({ provider: model.provider, id: model.id, ...(typeof model.name === 'string' && model.name ? { name: model.name } : {}), ...(typeof model.baseUrl === 'string' && model.baseUrl ? { baseUrl: model.baseUrl } : {}) }));
         if (teamModelsSignature() === started) teamModelsCache = { signature: started, at: Date.now(), models: answer };
         return answer;
       })
       .finally(() => { teamModelsRequest = null; });
   }
   return teamModelsRequest;
+}
+// Providers signed in with OAuth: a subscription login, which the vendor policy allows.
+async function oauthProviders() {
+  const { AuthStorage } = await coreModule('auth-storage.js');
+  const credentials = await AuthStorage.create(path.join(agentDir, 'auth.json')).list();
+  return new Set(credentials.filter(credential => credential.type === 'oauth').map(credential => credential.providerId));
 }
 async function teamSettingsManager() {
   const { SettingsManager } = await coreModule('settings-manager.js');
@@ -500,15 +507,17 @@ async function dispatch(action, input = {}) {
     }
     case 'teamSettings': {
       const manager = await teamSettingsManager();
-      return { team: readTeam(manager.getGlobalSettings().team), models: await availableForTeam() };
+      const team = readTeam(manager.getGlobalSettings().team);
+      const { models, selectors } = await teamCatalog({ libDirs: [path.join(agentDir, 'extensions/lib'), path.join(root, 'agent/extensions/lib')], models: await availableForTeam(), paidVendors: team.paidVendors, oauthProviders: await oauthProviders() });
+      return { team, models, selectors };
     }
     case 'setTeam': {
-      const role = text(input.role, 20), value = text(input.value, 300);
-      applyTeamValue(await teamSettingsManager(), role, value);
+      const key = text(input.role, 20), value = text(input.value, 300);
+      const stored = applyTeamValue(await teamSettingsManager(), key, value);
       // The writer reports storage failures instead of throwing; read the file
       // back so a change that did not land is never shown as saved.
       const saved = readTeam((await teamSettingsManager()).getGlobalSettings().team);
-      if (saved[role] !== value) throw Error('The team setting could not be saved. Check that the harness settings file is writable.');
+      if (saved[key] !== stored) throw Error('The team setting could not be saved. Check that the harness settings file is writable.');
       return saved;
     }
     default: throw Error('Unknown desktop action.');

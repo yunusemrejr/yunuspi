@@ -233,6 +233,82 @@ test("new targets resolve symlink ancestors and unrelated prefixes remain outsid
   f.close();
  }
 });
+test("a session in a YunusPi source checkout or the live install is told how maintenance ships", () => {
+ const f = fixture();
+ try {
+  const roots = ["yunuspi", "yunuspi-worktree"].map((name) => path.join(f.root, name));
+  for (const root of roots) {
+   fs.mkdirSync(path.join(root, "agent/extensions/lib"), { recursive: true });
+   fs.mkdirSync(path.join(root, "scripts"));
+   fs.mkdirSync(path.join(root, "src/deep"), { recursive: true });
+   fs.writeFileSync(path.join(root, "agent/extensions/lib/self-mutation-guard.ts"), "");
+   fs.writeFileSync(path.join(root, "scripts/install.mjs"), "");
+  }
+  // A look-alike without the installer is the live install's shape, not a checkout.
+  const lookalike = path.join(f.root, "install-copy");
+  fs.mkdirSync(path.join(lookalike, "agent/extensions/lib"), { recursive: true });
+  fs.writeFileSync(path.join(lookalike, "agent/extensions/lib/self-mutation-guard.ts"), "");
+  const probe = (cwd, extra = {}) => {
+   const result = node(cwd, `const g=await import(${JSON.stringify(moduleUrl)});console.log(JSON.stringify({source:g.harnessSourceRoot(process.cwd())??null,note:g.HARNESS_SOURCE_GUIDANCE??null,live:g.harnessMaintenanceNote(process.cwd(),true)??null,inCheckout:g.harnessMaintenanceNote(${JSON.stringify(roots[0])},true)??null,denied:g.harnessMaintenanceNote(process.cwd(),false)??null}));`, extra);
+   assert.equal(result.status, 0, result.stderr);
+   return JSON.parse(result.stdout);
+  };
+  for (const root of roots) {
+   const inside = probe(path.join(root, "src/deep"));
+   assert.equal(inside.source, fs.realpathSync(root));
+   assert.ok(inside.note.includes(`update --source ${fs.realpathSync(root)}`), "names the deploy command for this checkout");
+   assert.ok(inside.note.includes(path.join(agent, "bin/yunuspi")) && inside.note.includes(path.join(agent, "scripts/verify-harness.mjs")));
+   assert.match(inside.note, /source checkout: edit and test here, then commit and push main/);
+   assert.match(inside.note, /cannot write the live install/);
+   assert.match(inside.note, /operate skill/);
+   assert.ok(inside.note.split(/(?<=\.)\s+(?=[A-Z])/).length <= 3, "at most three sentences");
+   assert.equal(inside.denied, inside.note);
+   assert.equal(inside.live, null, "a launch with maintenance authority inside a checkout is that checkout's own install");
+  }
+  for (const cwd of [f.project, lookalike]) {
+   const outside = probe(cwd);
+   assert.equal(outside.source, null);
+   assert.equal(outside.note, null, "a plain project gets no maintenance note");
+   assert.equal(outside.denied, null);
+   assert.match(outside.live, /live YunusPi install: edit and test in the YunusPi source checkout instead, then commit and push its main/);
+   assert.match(outside.live, /update --source <checkout>/);
+   assert.match(outside.live, /operate skill/);
+   assert.ok(outside.live.split(/(?<=\.)\s+(?=[A-Z])/).length <= 3, "at most three sentences");
+  }
+  assert.equal(probe(path.join(roots[0], "src/deep"), { PI_SUBAGENT_CHILD: "1" }).note, null, "children get no maintenance note");
+ } finally {
+  f.close();
+ }
+});
+test("the maintenance note is injected once per session, only where it applies", () => {
+ const f = fixture();
+ try {
+  const checkout = path.join(f.root, "yunuspi");
+  fs.mkdirSync(path.join(checkout, "agent/extensions/lib"), { recursive: true });
+  fs.mkdirSync(path.join(checkout, "scripts"));
+  fs.writeFileSync(path.join(checkout, "agent/extensions/lib/self-mutation-guard.ts"), "");
+  fs.writeFileSync(path.join(checkout, "scripts/install.mjs"), "");
+  const run = (cwd) => {
+   const result = node(cwd, `const hooks=[];const pi=new Proxy({on:(name,fn)=>{if(name==='before_agent_start')hooks.push(fn);},events:{on:()=>()=>{},emit(){}}},{get:(target,key)=>key in target?target[key]:()=>{}});
+(await import(${JSON.stringify(pathToFileURL(path.join(agent, "extensions/filesystem-safety.ts")).href)})).default(pi);
+const notes=async(prompt)=>(await Promise.all(hooks.map((fn)=>fn({prompt},{})))).map((out)=>out?.message).filter(Boolean);
+const direct=await notes('Reply with exactly: OK'),first=await notes('Fix the failing tests'),second=await notes('And the next one');
+console.log(JSON.stringify({direct,first,second}));process.exit(0);`);
+   assert.equal(result.status, 0, result.stderr);
+   return JSON.parse(result.stdout);
+  };
+  const inCheckout = run(checkout);
+  assert.deepEqual(inCheckout.direct, [], "a reply-only prompt leaves the note for real work");
+  assert.equal(inCheckout.first.length, 1);
+  assert.equal(inCheckout.first[0].customType, "harness-maintenance-safety");
+  assert.match(inCheckout.first[0].content, /YunusPi source checkout/);
+  assert.deepEqual(inCheckout.second, [], "once per session");
+  const plain = run(f.project);
+  assert.deepEqual([plain.first, plain.second], [[], []], "a plain project repository gets no note");
+ } finally {
+  f.close();
+ }
+});
 test("unsupported namespace platform fails closed before launching a command", () => {
  const f = fixture();
  try {

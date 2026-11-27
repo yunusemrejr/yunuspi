@@ -3057,7 +3057,7 @@
       {
         "name": "team",
         "source": "agent/extensions/team-command.ts",
-        "line": 459
+        "line": 536
       },
       {
         "name": "used",
@@ -3112,7 +3112,7 @@
       {
         "name": "ask_advisor",
         "source": "agent/extensions/advisor.ts",
-        "line": 106,
+        "line": 263,
         "kind": "literal"
       },
       {
@@ -3421,7 +3421,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 824,
+        "line": 868,
         "kind": "literal"
       },
       {
@@ -3593,7 +3593,7 @@
       {
         "name": "ask_advisor",
         "source": "agent/extensions/advisor.ts",
-        "line": 106,
+        "line": 263,
         "kind": "literal"
       },
       {
@@ -3773,7 +3773,7 @@
       {
         "name": "session_coordinate",
         "source": "agent/extensions/siblings.ts",
-        "line": 824,
+        "line": 868,
         "kind": "literal"
       },
       {
@@ -4060,7 +4060,7 @@
       }
     ],
     "coverage": {
-      "sourceFiles": 671,
+      "sourceFiles": 674,
       "registrationSites": 62,
       "indirectRegistrationSites": 20,
       "stableRegistrationRows": 79,
@@ -4626,6 +4626,10 @@
         "exists": true
       },
       {
+        "path": "agent/extensions/lib/model-tiers.ts",
+        "exists": true
+      },
+      {
         "path": "agent/extensions/lib/music-score.ts",
         "exists": true
       },
@@ -4959,6 +4963,10 @@
       },
       {
         "path": "agent/extensions/lib/utility-client.ts",
+        "exists": true
+      },
+      {
+        "path": "agent/extensions/lib/vendor-policy.ts",
         "exists": true
       },
       {

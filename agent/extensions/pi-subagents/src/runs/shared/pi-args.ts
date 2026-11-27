@@ -63,6 +63,7 @@ import {
 	type PermissionRules,
 } from "./permissions.ts";
 import { PI_GIT_AUTHORITY_ENV } from "../../../../lib/git-authority.ts";
+import type { TeamRole } from "../../../../lib/team.ts";
 import { decodeSubagentModelRouteCandidate, encodeSubagentModelRouteCandidate, SUBAGENT_MODEL_ROUTE_CANDIDATE_ENV, type ModelRouteCandidate } from "../../shared/model-route.ts";
 import {
 	SUBAGENT_CAPABILITY_CEILING_ENV,
@@ -118,12 +119,15 @@ const FAST_MODE_EXTENSION_PATH = path.join(
 	path.dirname(fileURLToPath(import.meta.url)),
 	"fast-mode-extension.ts",
 );
-const FAST_MODE_ALLOWED_MODELS = new Set([
-	"openai-codex/gpt-5.6-luna",
-	"openai-codex/gpt-5.6-sol",
-]);
+/** Fast mode is the Codex service tier of the luna and sol models, of any version. */
+export function supportsFastMode(route: string): boolean {
+	const slash = route.indexOf("/");
+	return slash > 0 && route.slice(0, slash) === "openai-codex" && ["luna", "sol"].includes(route.slice(route.lastIndexOf("-") + 1).toLowerCase());
+}
 const OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH = 64;
 export const SUBAGENT_CHILD_ENV = "PI_SUBAGENT_CHILD";
+/** The role (main, helper, legwork) a child runs as; a child that launches children reads it to tell which tier it is. */
+export const SUBAGENT_ROLE_ENV = "PI_SUBAGENT_ROLE";
 export const SUBAGENT_ORCHESTRATOR_TARGET_ENV =
 	"PI_SUBAGENT_ORCHESTRATOR_TARGET";
 export const SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV =
@@ -194,6 +198,8 @@ export interface BuildPiArgsInput {
 	orchestratorIntercomTarget?: string;
 	runId?: string;
 	childAgentName?: string;
+	/** The role the child runs as, exported to it as PI_SUBAGENT_ROLE. */
+	role?: TeamRole;
 	childIndex?: number;
 	parentEventSink?: string;
 	parentControlInbox?: string;
@@ -315,9 +321,9 @@ function resolveFastModeExtension(input: Pick<ResolvePiLaunchToolPlanInput, "fas
 	if (candidates.length === 0) {
 		throw new Error(`fast mode requires an explicit supported native OpenAI-Codex model${input.agentName ? ` for agent '${input.agentName}'` : ""}.`);
 	}
-	const unsupported = candidates.filter((model) => !FAST_MODE_ALLOWED_MODELS.has(model));
+	const unsupported = candidates.filter((model) => !supportsFastMode(model));
 	if (unsupported.length > 0) {
-		throw new Error(`fast mode supports only ${[...FAST_MODE_ALLOWED_MODELS].join(", ")}; unsupported model${unsupported.length === 1 ? "" : "s"}: ${unsupported.join(", ")}.`);
+		throw new Error(`fast mode supports only openai-codex models ending in -luna or -sol; unsupported model${unsupported.length === 1 ? "" : "s"}: ${unsupported.join(", ")}.`);
 	}
 	return [FAST_MODE_EXTENSION_PATH];
 }
@@ -893,6 +899,7 @@ export function buildPiArgs(input: BuildPiArgsInput): BuildPiArgsResult {
 			? JSON.stringify(toolPlan.effectiveMcpTools)
 			: undefined;
 	env[SUBAGENT_CHILD_ENV] = "1";
+	env[SUBAGENT_ROLE_ENV] = input.role;
 	env[PI_GIT_AUTHORITY_ENV] = input.gitAuthority === true ? "delegate" : "read-only";
 	env[SUBAGENT_FANOUT_CHILD_ENV] = toolPlan.fanoutAuthorized ? "1" : "0";
 	if (input.waitToolEnabled !== undefined) {

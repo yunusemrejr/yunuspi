@@ -2593,12 +2593,13 @@ function agentsStartingFresh(
 	parentModel: ParentModel | undefined,
 	availableModels: () => ModelInfo[],
 	cwd: string,
+	sessionId?: string,
 ): Set<string> {
 	const fresh = new Set<string>();
 	const check = (agentName: string, role: TeamRole | undefined): void => {
 		const agent = agents.find((candidate) => candidate.name === agentName);
 		if (!agent || agent.runner?.type === "external-cli" || agent.runner?.type === "external-job") return;
-		if (resolveChildRoute({ agent, callRole: role, forked: false, parentModel, availableModels, cwd }).model !== sessionChildModel(parentModel)) fresh.add(agentName);
+		if (resolveChildRoute({ agent, callRole: role, forked: false, parentModel, availableModels, cwd, sessionId }).model !== sessionChildModel(parentModel)) fresh.add(agentName);
 	};
 	if (params.agent) check(params.agent, params.role);
 	for (const task of params.tasks ?? []) check(task.agent, task.role);
@@ -2955,6 +2956,7 @@ function childRouteResolver(data: Pick<ExecutionContextData, "ctx" | "parentMode
 		parentModel: data.parentModel,
 		availableModels: () => data.ctx.modelRegistry.getAvailable().map(toModelInfo),
 		cwd: data.effectiveCwd,
+		sessionId: data.ctx.sessionManager.getSessionId() ?? undefined,
 	});
 }
 
@@ -6422,7 +6424,7 @@ export function createSubagentExecutor(deps: ExecutorDeps): {
 		// An explicit fork keeps the session's model, so no role's model is looked at.
 		let freshAgents = new Set<string>();
 		try {
-			if (effectiveParams.context !== "fork") freshAgents = agentsStartingFresh(effectiveParams, discoveredAgents, requestParentModel, () => ctx.modelRegistry.getAvailable().map(toModelInfo), effectiveCwd);
+			if (effectiveParams.context !== "fork") freshAgents = agentsStartingFresh(effectiveParams, discoveredAgents, requestParentModel, () => ctx.modelRegistry.getAvailable().map(toModelInfo), effectiveCwd, ctx.sessionManager.getSessionId() ?? undefined);
 		} catch (error) {
 			return buildRequestedModeError(effectiveParams, error instanceof Error ? error.message : String(error));
 		}

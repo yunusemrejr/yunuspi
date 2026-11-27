@@ -214,6 +214,8 @@
     "adaptive-workflows-impl.ts",
     "task-pipelines.ts",
     "team.ts",
+    "model-tiers.ts",
+    "vendor-policy.ts",
     "free-models.ts",
     "audio-studio.ts",
     "assurance-output.ts",

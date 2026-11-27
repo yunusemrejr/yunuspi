@@ -49,7 +49,7 @@ const launched = (process.argv[process.argv.indexOf("--model") + 1] ?? "openrout
 const model = { provider: launched.split("/")[0], id: launched.split("/").slice(1).join("/") };
 const payload = { model: model.id, messages: [] };
 const request = handlers.get("before_provider_request")?.({ type: "before_provider_request", payload }, { model }) ?? payload;
-appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify({ candidate, provider: request.provider${captureNative ? ', argv:process.argv.slice(2), phase:"start", pid:process.pid, timestamp:Date.now()' : ''} }) + "\\n");
+appendFileSync(${JSON.stringify(recordPath)}, JSON.stringify({ candidate, provider: request.provider${captureNative ? ', argv:process.argv.slice(2), role:process.env.PI_SUBAGENT_ROLE, phase:"start", pid:process.pid, timestamp:Date.now()' : ''} }) + "\\n");
 if (candidate?.providerRouting?.only?.[0] === "together") { process.stderr.write("429 rate limit"); process.exit(1); }
 ${startBarrier ? `// Keep the first admitted wave alive until every native slot has started.
 // This proves capacity despite uneven local import/bootstrap times under CI.
@@ -450,6 +450,42 @@ test("an identical launch is refused once while its twin runs, and a child's bri
   // The two processes start together, so which record comes first is not fixed.
   const told = briefs.filter(brief => /Also at work in this session:\n- scout: Find where the loader reads its settings/.test(brief));
   assert.equal(told.length, 1, "the second child is told about the first, and the first had no one beside it");
+});
+
+const sublegworkRoute = "openrouter/org/sublegwork-fixture";
+const sublegworkModel = { ...model, id: "org/sublegwork-fixture", name: "Sublegwork fixture", fullId: sublegworkRoute, reasoning: true };
+
+test("each child launches with the role it resolved in PI_SUBAGENT_ROLE, foreground and background", { timeout: 60_000 }, async t => {
+  useTeam(t, { team: { legwork: legworkRoute } });
+  for (const [name, role] of [["scout", "legwork"], ["worker", "helper"], ["oracle", "main"]]) {
+    const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields: { name } });
+    await runCall(f, { ...scoutCall({ agent: name }), async: false });
+    assert.equal(lastStart(f).role, role, `${name} runs as ${role} in the foreground`);
+    await awaitNativeBackground(f, await runCall(f, { ...scoutCall({ agent: name }), async: true }));
+    assert.equal(lastStart(f).role, role, `${name} runs as ${role} in the background`);
+  }
+  const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel], agentFields: { name: "oracle" } });
+  await runCall(f, { ...scoutCall({ agent: "oracle" }), role: "legwork" });
+  assert.equal(lastStart(f).role, "legwork", "the call's role is the child's role");
+});
+
+test("a launch from a legwork process runs a legwork child on team.sublegwork, foreground and background; any other launch keeps the legwork model", { timeout: 60_000 }, async t => {
+  useTeam(t, { team: { legwork: legworkRoute, sublegwork: sublegworkRoute, free: "off" } });
+  const before = process.env.PI_SUBAGENT_ROLE;
+  t.after(() => { if (before === undefined) delete process.env.PI_SUBAGENT_ROLE; else process.env.PI_SUBAGENT_ROLE = before; });
+  const f = fixture(t, { reasoning: true, captureNative: true, sessionThinking: "high", models: [legworkModel, sublegworkModel], agentFields: { name: "scout" } });
+  delete process.env.PI_SUBAGENT_ROLE;
+  await runCall(f, scoutCall());
+  assert.equal(launchModel(lastStart(f)), legworkRoute, "launched by the main session");
+  process.env.PI_SUBAGENT_ROLE = "legwork";
+  await runCall(f, scoutCall());
+  assert.equal(launchModel(lastStart(f)), sublegworkRoute, "launched by a legwork child, in the foreground");
+  assert.equal(lastStart(f).role, "legwork", "and it is a legwork child itself");
+  await awaitNativeBackground(f, await runCall(f, scoutCall({ async: true })));
+  assert.equal(launchModel(lastStart(f)), sublegworkRoute, "launched by a legwork child, in the background");
+  process.env.PI_SUBAGENT_ROLE = "helper";
+  await runCall(f, scoutCall());
+  assert.equal(launchModel(lastStart(f)), legworkRoute, "launched by a helper");
 });
 
 test("the call's role is the default of every tasks item and chain step; an item's own role wins", { timeout: 60_000 }, async t => {

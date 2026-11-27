@@ -1,3 +1,14 @@
+## 0.57.0 — A team on the subscriptions you pay for
+
+- Model settings take `provider/latest-<tier>`, such as `openai-codex/latest-terra`: the newest model of that tier the ChatGPT catalog lists, picked up without editing settings. `/team` and desktop Settings offer one per tier, labelled with what it resolves to now.
+- A third tier: `team.sublegwork` runs legwork launched by a legwork child (for example DeepSeek Flash handing bulk reads to Qwen Flash). Nesting goes three deep, and the worker and delegate agents may launch children of their own.
+- `team.consultant` adds a second model to `ask_advisor` (`to: "consultant"`), 2 per run and 6 per session, next to the advisor. Calls are counted before they are sent, so a reload never hands out fresh budget.
+- The ChatGPT weekly quota is read from the subscription's own usage endpoint (at most once a minute across processes). The facts line shows it, helper children on the subscription fall back to the legwork model once a session has moved it `team.subscriptionPoints` points (default 3), and a spent week stops the consultant.
+- `team.paidVendors` (default `block`): any request for Claude, GPT or Gemini through OpenRouter, another aggregator or a paid API key is stopped before it is sent, main session and children alike. Subscription logins, open-weight models and local endpoints are not affected; only the global settings file can allow it.
+- Sessions in a git worktree and in its main checkout see each other as siblings; check receipts keep each session's own checkout as their boundary.
+- A session started in the YunusPi source checkout is told once how its changes reach the live install, and the operate guide has the steps.
+- Working notes: the user wins where notes conflict, the main agent owns orchestration and budget, a few hard questions go to the advisor and consultant each session, loose design requests are read dimension by dimension, and repositories and servers stay in step with verified work.
+
 ## 0.56.42 — Gates that listen to the user and to the request
 
 - "Don't run the tests", "do not run anything", "hiçbir şey çalıştırma" silence the check ask, the push hold and the "no check has passed" nudge for that prompt; "no screenshots" or "tarayıcı açma" silence the look ask. A plain mention ("run the tests and tell me") changes nothing.

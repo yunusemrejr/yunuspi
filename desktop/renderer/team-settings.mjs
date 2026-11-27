@@ -1,12 +1,27 @@
-// The Team block in Settings: which model takes each kind of delegated work. The
-// harness reads it from settings.json; a missing value means the session's own
-// model — or no advisor at all.
+// The Team block in Settings: which model takes each kind of delegated work, and
+// two switches. The harness reads it from settings.json; a missing value means the
+// session's own model — or no advisor or consultant at all.
 
 export const TEAM_ROLES = [
   { key: 'helper', title: 'Helper', hint: 'Long stretches that need judgment', fallback: 'inherit', first: { value: 'inherit', label: 'Same as the session' } },
   { key: 'legwork', title: 'Legwork', hint: 'Finding, reading, checks', fallback: 'inherit', first: { value: 'inherit', label: 'Same as the session' } },
+  { key: 'sublegwork', title: 'Sub-legwork', hint: 'Legwork launched by a legwork child', fallback: 'inherit', first: { value: 'inherit', label: 'Same as legwork' } },
   { key: 'advisor', title: 'Advisor', hint: 'One hard question at a time', fallback: 'off', first: { value: 'off', label: 'Off' } },
+  { key: 'consultant', title: 'Consultant', hint: 'A second model for one hard question', fallback: 'off', first: { value: 'off', label: 'Off' } },
 ];
+
+export const PAID_VENDOR_VALUES = ['block', 'allow'];
+
+/** A picker with two fixed options and no search: whether paid Claude, GPT and Gemini are blocked. */
+export const TEAM_VENDOR_PICKER = {
+  key: 'paidVendors',
+  title: 'Claude, GPT and Gemini on paid APIs',
+  hint: 'Block stops requests through OpenRouter or an API key. Subscription logins are not affected.',
+  fixed: true,
+  options: [{ value: 'block', label: 'Block' }, { value: 'allow', label: 'Allow' }],
+};
+export const DEFAULT_SUBSCRIPTION_POINTS = 3;
+const SWITCH_KEYS = ['paidVendors', 'subscriptionPoints'];
 
 const roleFor = key => TEAM_ROLES.find(role => role.key === key);
 
@@ -15,6 +30,8 @@ export function readTeam(team) {
   const stored = team && typeof team === 'object' && !Array.isArray(team) ? team : {};
   const values = {};
   for (const role of TEAM_ROLES) values[role.key] = typeof stored[role.key] === 'string' && stored[role.key].trim() ? stored[role.key] : role.fallback;
+  values.paidVendors = PAID_VENDOR_VALUES.includes(stored.paidVendors) ? stored.paidVendors : 'block';
+  values.subscriptionPoints = typeof stored.subscriptionPoints === 'number' && Number.isFinite(stored.subscriptionPoints) && stored.subscriptionPoints >= 0 ? stored.subscriptionPoints : DEFAULT_SUBSCRIPTION_POINTS;
   return values;
 }
 
@@ -22,13 +39,19 @@ export const teamValue = model => `${model.provider}/${model.id}`;
 export const teamLabel = model => `${model.provider} · ${model.id}`;
 
 /**
- * A role's choices: its own first option, then every available model, then a
+ * A role's choices: its own first option, the `latest-<tier>` selectors (each
+ * labelled with the model it stands for now), every available model, then a
  * value saved somewhere the current list does not reach (shown as its raw
  * provider/id so the choice stays visible rather than silently reset).
  */
-export function teamOptions(role, models = [], saved) {
+export function teamOptions(role, models = [], saved, selectors = []) {
   const options = [{ ...role.first }];
   const seen = new Set(options.map(option => option.value));
+  for (const selector of selectors) {
+    if (typeof selector?.setting !== 'string' || typeof selector?.label !== 'string' || seen.has(selector.setting)) continue;
+    seen.add(selector.setting);
+    options.push({ value: selector.setting, label: selector.setting.replace('/', ' · '), name: selector.label });
+  }
   for (const model of models) {
     if (typeof model?.provider !== 'string' || typeof model?.id !== 'string' || !model.provider || !model.id) continue;
     const value = teamValue(model);
@@ -94,26 +117,35 @@ export function rankModels(rows, query, current = '') {
     .map(entry => entry.row);
 }
 
-/** `inherit` and `off` only for the role that means them; anything else is provider/model-id. */
-export function validTeamValue(role, value) {
-  if (!roleFor(role) || typeof value !== 'string' || !value || value.length > 300) return false;
-  if (value === 'inherit') return roleFor(role).fallback === 'inherit';
-  if (value === 'off') return role === 'advisor';
+/**
+ * `inherit` and `off` only for the role that means them; a switch takes its own
+ * words or a number of 0 or more; anything else is provider/model-id (or provider/latest-tier).
+ */
+export function validTeamValue(key, value) {
+  if (typeof value !== 'string' || !value || value.length > 300) return false;
+  if (key === 'paidVendors') return PAID_VENDOR_VALUES.includes(value);
+  if (key === 'subscriptionPoints') return /^\d+(\.\d+)?$/.test(value) && Number.isFinite(Number(value));
+  const role = roleFor(key);
+  if (!role) return false;
+  if (value === 'inherit') return role.fallback === 'inherit';
+  if (value === 'off') return role.fallback === 'off';
   if (/\s/.test(value)) return false;
   const slash = value.indexOf('/');
   return slash > 0 && slash < value.length - 1;
 }
 
 /**
- * Writes one role through the harness settings owner: only this key is marked
+ * Writes one key through the harness settings owner: only this key is marked
  * modified, so the locked writer replaces it and keeps every other key of
- * "team" — and of the file — as it was on disk.
+ * "team" — and of the file — as it was on disk. Returns the value as stored.
  */
-export function applyTeamValue(manager, role, value) {
-  if (!roleFor(role)) throw Error('Unknown Team role.');
-  if (!validTeamValue(role, value)) throw Error('Choose a model for this role.');
+export function applyTeamValue(manager, key, value) {
+  if (!roleFor(key) && !SWITCH_KEYS.includes(key)) throw Error('Unknown Team setting.');
+  if (!validTeamValue(key, value)) throw Error(SWITCH_KEYS.includes(key) ? 'Enter a valid value for this setting.' : 'Choose a model for this role.');
+  const stored = key === 'subscriptionPoints' ? Number(value) : value;
   if (!manager.globalSettings.team || typeof manager.globalSettings.team !== 'object' || Array.isArray(manager.globalSettings.team)) manager.globalSettings.team = {};
-  manager.globalSettings.team[role] = value;
-  manager.markModified('team', role);
+  manager.globalSettings.team[key] = stored;
+  manager.markModified('team', key);
   manager.save();
+  return stored;
 }

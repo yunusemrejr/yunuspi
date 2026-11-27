@@ -9,6 +9,7 @@ Delegated work does not have to run on the model you chat with. Every subagent h
 | main | the session's own model | oracle, and any agent you add |
 | helper | long stretches that need judgment | worker, reviewer |
 | legwork | finding, reading, checks, mechanical edits | scout, researcher, delegate |
+| sublegwork | legwork launched by a legwork child | none; it is the tier a legwork child's own children use |
 
 An agent's role comes from, in order: `role` on the call, `team.roles` in settings, a `role:` line in the agent's own definition, the table above, then main. On a `tasks` or `chain` call, the call's `role` is the default for every item and an item's own `role` wins.
 
@@ -21,24 +22,41 @@ Put the block in the agent settings file (`settings.json`). A project's settings
   "team": {
     "helper": "provider-a/model-b",
     "legwork": "provider-a/model-c",
+    "sublegwork": "provider-a/model-f",
     "advisor": "provider-d/model-e",
+    "consultant": "openai-codex/latest-astra",
     "roles": { "reviewer": "main" },
     "maxThinking": { "helper": "xhigh", "legwork": "high" },
     "sideCalls": "legwork",
-    "free": "on"
+    "free": "on",
+    "subscriptionPoints": 3,
+    "paidVendors": "block"
   },
   "run": { "softMinutes": 60, "softUsd": 1 }
 }
 ```
 
-- `helper`, `legwork`: `"inherit"` (the session's model, the default) or `"provider/model-id"`.
-- `advisor`: `"off"` (the default) or a model.
+- `helper`, `legwork`: `"inherit"` (the session's model, the default) or a model, below.
+- `sublegwork`: `"inherit"` (the default: the same model as `legwork`) or a model. It applies to a child launched by a legwork child.
+- `advisor`, `consultant`: `"off"` (the default) or a model. The consultant is a second model for the same kind of question, below.
+- `subscriptionPoints`: how many points of the weekly ChatGPT quota one session may add before helpers on an `openai-codex` model run on the legwork model instead. `3` is the default; `0` never falls back.
+- `paidVendors`: `"block"` (the default) or `"allow"`, below.
 - `maxThinking`: the highest thinking level a helper or legwork child may use. It joins the session's own ceiling and the agent's caps; the lowest applies.
 - `sideCalls`: where the observer's notes and the memory summary at exit run, `"legwork"` or `"session"`. Calls that judge what you allowed always use the session's model.
 - `free`: `"on"` (the default) or `"off"`. With it on, legwork children use free OpenRouter models, below.
 - `run`: the soft budget of one run, below. `0` switches a limit off.
 
 A value the settings cannot accept stops the launch with one line naming the file and what is accepted. A model that is not available stops it with the setting and the model named. `/team` edits all of this.
+
+A model is `"provider/model-id"`, or `"provider/latest-<tier>"` for the newest model of a tier. A tier is the last word of a model id: `gpt-6.1-terra` is in tier `terra`. `openai-codex/latest-terra` runs `gpt-6.1-terra` today and the next terra model once it is listed, with no settings change. Pro and ultra variants are not part of a tier, so name them in full. A tier with no available model stops the launch with the setting named. `/team` shows what each selector resolves to now.
+
+## Nesting
+
+A child may launch children up to depth 3: the session is depth 0, a helper 1, a legwork child 2, a sublegwork child 3. A child at depth 3 cannot launch. The worker and delegate agents are allowed to nest; other agents are not, unless their definition says so. A child launched by a legwork child runs on `team.sublegwork`.
+
+## Paid vendors
+
+Claude, GPT and Gemini run only on a subscription login. With `paidVendors` on `"block"`, a request to them through OpenRouter, an API key or any other provider is stopped before it is sent, whoever makes it: the session, a side call, compaction or a child. The message names the route and the reason, and ends with "Set team.paidVendors to allow in /team to permit it." `openai-codex`, `google-gemini-cli` and `google-antigravity` are always subscriptions; `anthropic`, `google` and GitHub Copilot count as one only when the registry reports an OAuth login for them, never for an API key. Open-weight models (`gpt-oss`, `gemma`) and models served from this machine are not affected. A setting that names a blocked route stops the launch, and `/team` does not list blocked routes. Only the global settings file can set `"allow"`; a project file that does is refused.
 
 ## Thinking level
 
@@ -82,6 +100,8 @@ A run starts with a request sent while the session is idle. Passing `softMinutes
 
 When `team.advisor` names a model, the session has a tool `ask_advisor`. It sends one question of at most 1,500 characters, and nothing else, to that model and returns a few lines. Limits: 3 per run, 12 per session, one at a time. Each question is rated by the decision model: an easy one thinks at a lower level, and a question it cannot rate thinks at medium; never above the session's own level. Its cost is recorded under the advisor's model. The tool is added at the next message after an advisor is set and stays for the rest of the session; with the advisor off, a call is refused. Children never have it.
 
+`team.consultant` adds a second tool path for the same question: `ask_advisor` takes `to: "advisor"` or `to: "consultant"`. The consultant answers at most 2 questions per run and 6 per session. On a ChatGPT (`openai-codex`) model it is also refused once the weekly quota has moved `team.subscriptionPoints` points (3 by default) since the session began, and always once the weekly quota is spent. `0` switches the points check off; a spent quota still refuses.
+
 ## /team
 
-`/team` opens a picker for the values above, one row each, and saves to the global settings file. A change applies to children launched from now on. `/team show` prints the current values as plain text, which is also what a session without a screen gets.
+`/team` opens a picker for the values above, one row each, and saves to the global settings file. A model row lists one `openai-codex/latest-<tier>` entry per available tier first, labelled with what it resolves to, for example `latest terra → gpt-6.1-terra`, then the exact models. A change applies to children launched from now on. `/team show` prints the current values as plain text, which is also what a session without a screen gets.

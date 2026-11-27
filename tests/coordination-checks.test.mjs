@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {EventEmitter} from 'node:events';
 import {createHash} from 'node:crypto';
+import {execFileSync} from 'node:child_process';
 import {createBashToolDefinition} from '../core/coding-agent/src/core/tools/bash.js';
 import {createAgentSession} from '../core/coding-agent/src/core/sdk.js';
 import {DefaultResourceLoader} from '../core/coding-agent/src/core/resource-loader.js';
@@ -56,6 +57,26 @@ test('native check receipts share current source evidence without executing or c
   fs.writeFileSync(path.join(cwd,'source.js'),'export const value = 2;');
   assert.equal((await b.status()).peers[0].coordination.checks[0].sourceStatus,'changed');
   assert.match((await b.status()).policy,/required checks still apply/i);
+ }finally{await a.fire('session_shutdown');await b.fire('session_shutdown');}
+});
+
+test('a worktree session and a main-checkout session are siblings, and receipts are judged against the producing worktree',async()=>{
+ const base=fs.realpathSync(fs.mkdtempSync(path.join(scratch,'worktrees-')));
+ const git=(cwd,...args)=>execFileSync('git',['-c','user.name=t','-c','user.email=t@example.test',...args],{cwd,stdio:'pipe'});
+ const main=path.join(base,'main'),linked=path.join(base,'linked');fs.mkdirSync(main);
+ git(main,'init','-q','-b','main');git(main,'commit','-q','--allow-empty','-m','init');git(main,'worktree','add','-q','-b','side',linked);
+ fs.writeFileSync(path.join(linked,'source.js'),'export const value = 1;');
+ const a=fixture(linked,'wt-alpha'),b=fixture(main,'wt-bravo');await a.fire('session_start');await b.fire('session_start');
+ try{
+  const cmd=command("process.stdout.write('ok')");
+  assert.equal((await a.prepare(cmd)).details.prepared,true);
+  assert.equal((await runObserved(a,cmd)).isError,false);
+  const peers=(await b.status()).peers;assert.deepEqual(peers.map(peer=>peer.sid),['wt-alpha'],'the worktree session is visible from the main checkout');
+  assert.equal(peers[0].coordination.checks[0].sourceStatus,'current','a receipt inside its own worktree is verifiable from another checkout');
+  const summary=JSON.parse((await b.invoke({})).content[0].text);
+  assert.deepEqual(summary.peers[0].coordination.checks[0].sources,['source.js']);
+  assert.equal((await a.status()).coordination.checks[0].sourceStatus,'current');
+  assert.equal((await a.status()).root,main,'discovery scope is the shared main-checkout root');
  }finally{await a.fire('session_shutdown');await b.fire('session_shutdown');}
 });
 

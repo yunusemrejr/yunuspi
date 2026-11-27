@@ -1084,7 +1084,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 
 ### Stable extension tools
 
-- `ask_advisor` — [`agent/extensions/advisor.ts`](../agent/extensions/advisor.ts) (line 106; literal)
+- `ask_advisor` — [`agent/extensions/advisor.ts`](../agent/extensions/advisor.ts) (line 263; literal)
 - `asset_register` — [`agent/extensions/art-direction.ts`](../agent/extensions/art-direction.ts) (line 593; factory)
 - `audio_analyze` — [`agent/extensions/media-tools.ts`](../agent/extensions/media-tools.ts) (line 161; factory)
 - `audio_generate` — [`agent/extensions/video-studio.ts`](../agent/extensions/video-studio.ts) (line 101; factory)
@@ -1135,7 +1135,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - `sandbox_run` — [`agent/extensions/sandbox.ts`](../agent/extensions/sandbox.ts) (line 59; literal)
 - `scratchpad` — [`agent/extensions/pi-memory/index.ts`](../agent/extensions/pi-memory/index.ts) (line 2261; literal)
 - `seo_toolkit` — [`agent/extensions/pi-web-access/seo-toolkit.ts`](../agent/extensions/pi-web-access/seo-toolkit.ts) (line 45; literal)
-- `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 824; literal)
+- `session_coordinate` — [`agent/extensions/siblings.ts`](../agent/extensions/siblings.ts) (line 868; literal)
 - `session_self` — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1864; literal)
 - `session_stop` — [`agent/extensions/checkpoints.ts`](../agent/extensions/checkpoints.ts) (line 376; literal)
 - `skill_review` — [`agent/extensions/lib/skill-review.ts`](../agent/extensions/lib/skill-review.ts) (line 94; literal)
@@ -1239,7 +1239,7 @@ Tool names come from literal registrations and source-owned factory definitions,
 - /sys-prompt — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1743)
 - /task-state — [`agent/extensions/task-state.ts`](../agent/extensions/task-state.ts) (line 215)
 - /tasks — [`agent/extensions/pi-background-tasks/src/extension.ts`](../agent/extensions/pi-background-tasks/src/extension.ts) (line 655)
-- /team — [`agent/extensions/team-command.ts`](../agent/extensions/team-command.ts) (line 459)
+- /team — [`agent/extensions/team-command.ts`](../agent/extensions/team-command.ts) (line 536)
 - /used — [`agent/extensions/session-signals.ts`](../agent/extensions/session-signals.ts) (line 1762)
 - /websearch — [`agent/extensions/pi-web-access/index.ts`](../agent/extensions/pi-web-access/index.ts) (line 3041)
 
@@ -1462,6 +1462,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/model-directory.ts`](../agent/extensions/lib/model-directory.ts)
 - [`agent/extensions/lib/model-facts.ts`](../agent/extensions/lib/model-facts.ts)
 - [`agent/extensions/lib/model-routing-metrics.ts`](../agent/extensions/lib/model-routing-metrics.ts)
+- [`agent/extensions/lib/model-tiers.ts`](../agent/extensions/lib/model-tiers.ts)
 - [`agent/extensions/lib/music-score.ts`](../agent/extensions/lib/music-score.ts)
 - [`agent/extensions/lib/needed.ts`](../agent/extensions/lib/needed.ts)
 - [`agent/extensions/lib/needle-assets.mjs`](../agent/extensions/lib/needle-assets.mjs)
@@ -1546,6 +1547,7 @@ The manifest is the source of truth for the shipped extension, library, fork, su
 - [`agent/extensions/lib/tool-schema.ts`](../agent/extensions/lib/tool-schema.ts)
 - [`agent/extensions/lib/ui-doctrine.ts`](../agent/extensions/lib/ui-doctrine.ts)
 - [`agent/extensions/lib/utility-client.ts`](../agent/extensions/lib/utility-client.ts)
+- [`agent/extensions/lib/vendor-policy.ts`](../agent/extensions/lib/vendor-policy.ts)
 - [`agent/extensions/lib/video-art.ts`](../agent/extensions/lib/video-art.ts)
 - [`agent/extensions/lib/video-browser.ts`](../agent/extensions/lib/video-browser.ts)
 - [`agent/extensions/lib/video-color-evidence.ts`](../agent/extensions/lib/video-color-evidence.ts)

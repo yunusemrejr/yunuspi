@@ -1,11 +1,16 @@
 /** The model route of a child. Each agent has a role (main, helper or legwork);
  * a role runs on the model the user set for it in the `team` settings, and on
- * the session's own model unless set. A child that forks the conversation
+ * the session's own model unless set. A legwork child launched by a legwork
+ * child runs on `team.sublegwork`; a helper on the ChatGPT subscription falls
+ * back to the legwork model once the session has used up `team.subscriptionPoints`
+ * of the weekly quota. A child that forks the conversation
  * always runs on the session's model: the history it replays is cached only
  * there. Its effort controller (Jev) picks the thinking level at launch, from
  * the session's ceiling lowered by the caps and the role's own ceiling. */
-import { loadTeamConfig, resolveAgentRole, resolveRoleRoute, roleThinkingCeiling, TEAM_ROLES, type TeamRole, type TeamSettings } from "../../../../lib/team.ts";
+import { loadTeamConfig, resolveAgentRole, resolveRoleRoute, resolveTeamModel, roleThinkingCeiling, TEAM_ROLES, type TeamRole, type TeamSettings } from "../../../../lib/team.ts";
+import { codexSessionOverBudget } from "../../../../lib/codex-usage.ts";
 import { agentWritesFiles, pickFreeRoutes } from "../../../../lib/free-models.ts";
+import { SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV, SUBAGENT_ROLE_ENV } from "./pi-args.ts";
 import { mapChildren } from "./session-siblings.ts";
 import { splitKnownThinkingSuffix, type ModelInfo as AvailableModelInfo, type ThinkingLevel } from "../../shared/model-info.ts";
 
@@ -51,14 +56,28 @@ export function resolveChildRoute(input: {
 	availableModels?: AvailableModelInfo[] | (() => AvailableModelInfo[]);
 	cwd: string;
 	team?: TeamSettings;
+	/** The launching session's id; the orchestrator session of a nested launch (see SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV) takes precedence. */
+	sessionId?: string;
+	/** Whether the root session has used its `team.subscriptionPoints` of the ChatGPT subscription; reads the usage cache by default. */
+	overBudget?: (sessionId: string | undefined, points: number) => boolean;
 }): ChildRoute {
 	if (input.forked) return { model: sessionChildModel(input.parentModel) };
 	const team = input.team ?? loadTeamConfig(input.cwd).team;
 	const role = resolveAgentRole(input.agent, team, input.callRole);
 	const maxThinking = roleThinkingCeiling(role, team);
-	const roleModel = resolveRoleRoute(role, team, input.parentModel, input.availableModels);
+	// A legwork child launched by a legwork child is the nested tier; it never picks free models.
+	const nested = role === "legwork" && process.env[SUBAGENT_ROLE_ENV] === "legwork" && team.sublegwork !== undefined && team.sublegwork !== "inherit";
+	let roleModel = nested
+		? resolveTeamModel("sublegwork", team.sublegwork, typeof input.availableModels === "function" ? input.availableModels() : input.availableModels)
+		: resolveRoleRoute(role, team, input.parentModel, input.availableModels);
+	if (role === "helper" && roleModel.startsWith("openai-codex/") && team.subscriptionPoints > 0) {
+		const overBudget = input.overBudget ?? codexSessionOverBudget;
+		if (overBudget(process.env[SUBAGENT_ORCHESTRATOR_SESSION_ID_ENV] || input.sessionId, team.subscriptionPoints)) {
+			roleModel = resolveRoleRoute("legwork", team, input.parentModel, input.availableModels);
+		}
+	}
 	// Legwork runs on the best measured free OpenRouter model while the day's free requests last, and falls back through the next ones to the role's own model.
-	const free = role === "legwork" && team.free === "on" ? pickFreeRoutes({ writes: agentWritesFiles(input.agent.tools) }).map((pick) => pick.route) : [];
+	const free = role === "legwork" && !nested && team.free === "on" ? pickFreeRoutes({ writes: agentWritesFiles(input.agent.tools) }).map((pick) => pick.route) : [];
 	const routes = [...new Set([...free, roleModel])];
 	const model = routes[0]!;
 	// A configured role model needs no session model; only the comparison with it does.
@@ -69,6 +88,21 @@ export function resolveChildRoute(input: {
 		...(!onSessionModel ? { shownRole: role } : {}),
 		...(maxThinking ? { maxThinking } : {}),
 	};
+}
+
+/**
+ * The role a launched child runs as, exported to it as PI_SUBAGENT_ROLE. `shownRole`
+ * is the role the route resolved (set whenever the child runs on another model than
+ * the session's); without it the role comes from the team settings and the agent. Undefined
+ * when the settings or the agent's role line cannot be read: the route check at launch reports that.
+ */
+export function childLaunchRole(agent: { name: string; extraFields?: Record<string, string> }, cwd: string, shownRole?: string): TeamRole | undefined {
+	try {
+		const callRole = (TEAM_ROLES as readonly string[]).includes(shownRole ?? "") ? (shownRole as TeamRole) : undefined;
+		return resolveAgentRole(agent, loadTeamConfig(cwd).team, callRole);
+	} catch {
+		return undefined;
+	}
 }
 
 /** The call's `role` as the default of every `tasks` item and `chain` step that has none of its own. */

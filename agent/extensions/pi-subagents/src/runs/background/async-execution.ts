@@ -878,7 +878,7 @@ export function buildAsyncRunnerSteps(id: string, params: AsyncRunnerStepBuildPa
 		let shownRole: string | undefined;
 		let freeRoutes: string[] | undefined;
 		try {
-			const route = externalRunner ? undefined : resolveChildRoute({ agent: a, callRole: s.role, forked: params.contextForAgent?.(s.agent) === "fork", parentModel: ctx.currentModel, availableModels, cwd: runnerCwd });
+			const route = externalRunner ? undefined : resolveChildRoute({ agent: a, callRole: s.role, forked: params.contextForAgent?.(s.agent) === "fork", parentModel: ctx.currentModel, availableModels, cwd: runnerCwd, sessionId: ctx.parentSessionId ?? ctx.currentSessionId });
 			primaryModel = route?.model;
 			shownRole = route?.shownRole;
 			freeRoutes = route?.routes;
@@ -1626,7 +1626,7 @@ export async function executeAsyncSingle(
 			primaryModel = params.modelOverride;
 			shownRole = params.role;
 		} else {
-			const route = resolveChildRoute({ agent: agentConfig, forked: params.context === "fork", parentModel: ctx.currentModel, availableModels, cwd: runnerCwd });
+			const route = resolveChildRoute({ agent: agentConfig, forked: params.context === "fork", parentModel: ctx.currentModel, availableModels, cwd: runnerCwd, sessionId: ctx.parentSessionId ?? ctx.currentSessionId });
 			primaryModel = route.model;
 			shownRole = route.shownRole;
 			freeRoutes = route.routes;

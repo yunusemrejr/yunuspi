@@ -102,7 +102,7 @@ export type ExampleScale = (typeof EXAMPLE_SCALE_CHOICES)[number];
 export const EXAMPLE_SCALE_DESCRIPTIONS: Record<ExampleScale, string> = {
   "keep-design": "a small fix inside an existing design",
   polish: "spacing, type, contrast and states; layout and palette stay",
-  improve: "visible gains; structure recognizable; colors may change",
+  improve: "visible gains at first glance in layout, color tones, type, icons and assets; structure recognizable; brand (name, logo, color identity, voice) stays when asked, otherwise colors may change",
   redesign: "a big, complete or tremendous improvement of the UI/UX, design or aesthetic: bold changes are the default, layout and flow may change, and each existing part stays only if it is good",
   "fresh-build": "new, no existing design",
 };

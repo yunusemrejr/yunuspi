@@ -6,6 +6,10 @@
  * A change is written only to the global file, through the settings owner's
  * locked writer, and keeps every key it does not touch. `/team show` prints
  * the same values as text; without a UI that is all the command can do.
+ *
+ * The extension also guards every model request: while `team.paidVendors` is
+ * "block", a request to Claude, GPT or Gemini outside a subscription is stopped
+ * before it is sent (see lib/vendor-policy.ts).
  */
 import {
 	DynamicBorder,
@@ -20,6 +24,7 @@ import { Container, Input, SelectList, Spacer, Text, fuzzyFilter, getKeybindings
 import {
 	BUILTIN_AGENT_ROLES,
 	FREE_SETTINGS,
+	PAID_VENDOR_SETTINGS,
 	SIDE_CALL_PLACES,
 	TEAM_ROLES,
 	loadTeamConfig,
@@ -29,6 +34,8 @@ import {
 	type TeamRole,
 } from "./lib/team.ts";
 import { freeSummary } from "./lib/free-models.ts";
+import { tierOptions, type TierOption } from "./lib/model-tiers.ts";
+import { paidRouteRefusal, type PolicyModel } from "./lib/vendor-policy.ts";
 import { getProjectAgentSettingsPath, getUserAgentSettingsPath } from "./pi-subagents/src/agents/agents.ts";
 import { THINKING_LEVELS } from "./pi-subagents/src/shared/model-info.ts";
 
@@ -37,11 +44,15 @@ export const USAGE = "Usage: /team [show]";
 export const ROW_LABELS = {
 	helper: "Helper model: long stretches that need judgment (worker, reviewer)",
 	legwork: "Legwork model: finding, reading, checks, mechanical edits (scout, researcher, delegate)",
+	sublegwork: "Sub-legwork model: legwork children launched by a legwork child",
 	advisor: "Advisor model: answers one hard question",
+	consultant: "Consultant model: a second model that answers one hard question",
 	helperThinking: "Helper thinking ceiling",
 	legworkThinking: "Legwork thinking ceiling",
 	sideCalls: "Side calls (observer notes, memory summaries) run on",
 	free: "Free models: legwork children use OpenRouter's free models while the day's free requests last",
+	subscriptionPoints: "ChatGPT quota points one session may add before helpers fall back to legwork",
+	paidVendors: "Claude, GPT and Gemini outside a subscription (OpenRouter, API keys)",
 	minutes: "Run budget: minutes",
 	usd: "Run budget: dollars",
 	roles: "Agent roles",
@@ -51,11 +62,15 @@ export type TeamRowId = keyof typeof ROW_LABELS;
 export const ROW_ORDER: readonly TeamRowId[] = [
 	"helper",
 	"legwork",
+	"sublegwork",
 	"advisor",
+	"consultant",
 	"helperThinking",
 	"legworkThinking",
 	"sideCalls",
 	"free",
+	"subscriptionPoints",
+	"paidVendors",
 	"minutes",
 	"usd",
 	"roles",
@@ -74,8 +89,8 @@ export interface TeamChange {
 	agent?: string;
 }
 
-const ROLE_MODEL_ROW = { helper: "helper", legwork: "legwork", advisor: "advisor" } as const;
-const modelText = (setting: string): string => (setting === "inherit" ? "same as the session" : setting);
+export type ModelRowId = "helper" | "legwork" | "sublegwork" | "advisor" | "consultant";
+const modelText = (setting: string, inheritText = "same as the session"): string => (setting === "inherit" ? inheritText : setting);
 const budgetText = (value: number): string => (value === 0 ? "off" : String(value));
 
 /** Agents whose role can be set here: the built-in six, then any agent the settings already name. */
@@ -102,7 +117,10 @@ export function teamRows(config: TeamConfig, freeText: string = config.team.free
 			case "helper":
 			case "legwork":
 			case "advisor":
+			case "consultant":
 				return { id, label, value: modelText(team[id]) };
+			case "sublegwork":
+				return { id, label, value: modelText(team.sublegwork, "same as legwork") };
 			case "helperThinking":
 				return { id, label, value: team.maxThinking.helper };
 			case "legworkThinking":
@@ -111,6 +129,10 @@ export function teamRows(config: TeamConfig, freeText: string = config.team.free
 				return { id, label, value: team.sideCalls };
 			case "free":
 				return { id, label, value: freeText };
+			case "subscriptionPoints":
+				return { id, label, value: budgetText(team.subscriptionPoints) };
+			case "paidVendors":
+				return { id, label, value: team.paidVendors };
 			case "minutes":
 				return { id, label, value: budgetText(run.softMinutes) };
 			case "usd":
@@ -136,11 +158,15 @@ export function showText(config: TeamConfig, freeText: string = config.team.free
 	const rows: [string, string][] = [
 		["Helper model", modelText(team.helper)],
 		["Legwork model", modelText(team.legwork)],
+		["Sub-legwork model", modelText(team.sublegwork, "same as legwork")],
 		["Advisor model", team.advisor],
+		["Consultant model", team.consultant],
 		["Helper thinking ceiling", team.maxThinking.helper],
 		["Legwork thinking ceiling", team.maxThinking.legwork],
 		["Side calls", team.sideCalls],
 		["Free models", freeText],
+		["ChatGPT quota points per session", budgetText(team.subscriptionPoints)],
+		["Paid Claude, GPT, Gemini", team.paidVendors],
 		["Run budget minutes", budgetText(run.softMinutes)],
 		["Run budget dollars", budgetText(run.softUsd)],
 	];
@@ -150,18 +176,18 @@ export function showText(config: TeamConfig, freeText: string = config.team.free
 	return [aligned(rows), "Agent roles", ...roleLines].join("\n");
 }
 
-/** Options for a model row: the role's own first choice, every available model, then the stored one. */
-export function modelChoices(role: TeamRole, current: string, models: readonly string[]): string[] {
-	const first = role === "advisor" ? "Off" : "Same as the session";
+/** Options for a model row: the row's own first choice, the tier selectors, every available model, then the stored one. */
+export function modelChoices(row: ModelRowId, current: string, models: readonly string[], selectors: readonly string[] = []): string[] {
+	const first = row === "advisor" || row === "consultant" ? "Off" : row === "sublegwork" ? "Same as legwork" : "Same as the session";
 	const options = [first];
-	for (const route of models) if (!options.includes(route)) options.push(route);
+	for (const route of [...selectors, ...models]) if (!options.includes(route)) options.push(route);
 	if (current !== "inherit" && current !== "off" && !options.includes(current)) options.push(current);
 	return options;
 }
 
 /** The stored value an option stands for. */
 export function modelChoiceValue(option: string): string {
-	if (option === "Same as the session") return "inherit";
+	if (option === "Same as the session" || option === "Same as legwork") return "inherit";
 	if (option === "Off") return "off";
 	return option;
 }
@@ -268,7 +294,9 @@ export function withTeamChange(patch: TeamPatch, change: TeamChange): TeamPatch 
 	switch (change.row) {
 		case "helper":
 		case "legwork":
+		case "sublegwork":
 		case "advisor":
+		case "consultant":
 			next.team[change.row] = String(change.value);
 			return next;
 		case "helperThinking":
@@ -282,6 +310,12 @@ export function withTeamChange(patch: TeamPatch, change: TeamChange): TeamPatch 
 			return next;
 		case "free":
 			next.team.free = String(change.value) as TeamConfig["team"]["free"];
+			return next;
+		case "paidVendors":
+			next.team.paidVendors = String(change.value) as TeamConfig["team"]["paidVendors"];
+			return next;
+		case "subscriptionPoints":
+			next.team.subscriptionPoints = Number(change.value);
 			return next;
 		case "minutes":
 			next.run.softMinutes = Number(change.value);
@@ -338,14 +372,18 @@ async function chooseChange(
 	row: TeamRow,
 	config: TeamConfig,
 	models: readonly ModelEntry[],
+	selectors: readonly TierOption[] = [],
 ): Promise<TeamChange | undefined> {
 	switch (row.id) {
 		case "helper":
 		case "legwork":
-		case "advisor": {
+		case "sublegwork":
+		case "advisor":
+		case "consultant": {
 			const current = config.team[row.id];
-			const options = modelChoices(row.id, current, models.map((model) => model.route));
+			const options = modelChoices(row.id, current, models.map((model) => model.route), selectors.map((selector) => selector.setting));
 			const names = new Map(models.filter((model) => model.name && model.name !== model.route).map((model) => [model.route, model.name as string]));
+			for (const selector of selectors) names.set(selector.setting, selector.label);
 			// RPC clients (the desktop app) draw their own pickers and only answer plain selects.
 			const shownCurrent = current === "inherit" || current === "off" ? options[0] : current;
 			const picked =
@@ -371,9 +409,16 @@ async function chooseChange(
 			if (!picked || !(FREE_SETTINGS as readonly string[]).includes(picked)) return undefined;
 			return { row: row.id, value: picked };
 		}
+		case "paidVendors": {
+			const picked = await ctx.ui.select(row.label, [...PAID_VENDOR_SETTINGS]);
+			if (!picked || !(PAID_VENDOR_SETTINGS as readonly string[]).includes(picked)) return undefined;
+			return { row: row.id, value: picked };
+		}
 		case "minutes":
-		case "usd": {
-			const hint = row.id === "minutes" ? "minutes, 0 switches the limit off" : "dollars, 0 switches the limit off";
+		case "usd":
+		case "subscriptionPoints": {
+			const hint =
+				row.id === "minutes" ? "minutes, 0 switches the limit off" : row.id === "usd" ? "dollars, 0 switches the limit off" : "percentage points of the weekly quota, 0 never falls back";
 			const answer = await ctx.ui.input(row.label, hint);
 			if (answer === undefined) return undefined;
 			const value = parseBudgetValue(answer);
@@ -438,8 +483,11 @@ async function openPicker(ctx: ExtensionCommandContext): Promise<void> {
 		if (!picked || picked === done) return;
 		const row = rows[rowTexts.indexOf(picked)];
 		if (!row) return;
-		const models: ModelEntry[] = (ctx.modelRegistry?.getAvailable() ?? []).map((model) => ({ route: `${model.provider}/${model.id}`, name: model.name }));
-		const change = await chooseChange(ctx, row, config, models);
+		// A route the request guard would refuse is not offered while paid vendors are blocked.
+		const available = (ctx.modelRegistry?.getAvailable() ?? []).filter((model) => config.team.paidVendors === "allow" || !paidRouteRefusal(model, ctx.modelRegistry));
+		const models: ModelEntry[] = available.map((model) => ({ route: `${model.provider}/${model.id}`, name: model.name }));
+		const selectors = tierOptions(available);
+		const change = await chooseChange(ctx, row, config, models, selectors);
 		if (!change) continue;
 		try {
 			await writeChange(ctx, change);
@@ -455,9 +503,38 @@ async function openPicker(ctx: ExtensionCommandContext): Promise<void> {
 	}
 }
 
+/** Whether `team.paidVendors` lets requests to paid Claude, GPT and Gemini through; an unreadable setting blocks. */
+function paidVendorsAllowed(cwd: string): boolean {
+	try {
+		return loadTeamConfig(cwd).team.paidVendors === "allow";
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * Stops a request to a route the vendor policy refuses before it is sent. Both request
+ * hooks (the main loop, continuations and children; compaction and other auxiliary
+ * calls) end here, so a side call or a child cannot reach a paid vendor either.
+ */
+function guardPaidVendors(model: PolicyModel | undefined, ctx: { cwd: string; modelRegistry?: { isUsingOAuth?(model: PolicyModel): boolean } }): void {
+	if (!model) return;
+	const reason = paidRouteRefusal(model, ctx.modelRegistry);
+	if (!reason || paidVendorsAllowed(ctx.cwd)) return;
+	// The same denial code the provider gate uses: the hook runner re-throws it, so the request is never sent.
+	throw Object.assign(new Error(`Blocked: ${model.provider}/${model.id} ${reason}. Set team.paidVendors to allow in /team to permit it.`), { code: "PI_AUTONOMOUS_REQUEST_DENIED" });
+}
+
 export default function teamCommand(pi: ExtensionAPI) {
+	pi.on("before_provider_request", (event, ctx) => {
+		guardPaidVendors(event.model ?? ctx.model, ctx);
+		return undefined;
+	});
+	pi.on("before_auxiliary_provider_request", (event, ctx) => {
+		guardPaidVendors(event.model, ctx);
+	});
 	pi.registerCommand("team", {
-		description: "Which model takes each kind of delegated work, and the soft budget of one run",
+		description: "Which model takes each kind of delegated work, the soft budget of one run, and whether paid Claude, GPT and Gemini are blocked",
 		argumentHint: "[show]",
 		async handler(args, ctx) {
 			const verb = args.trim().toLowerCase();

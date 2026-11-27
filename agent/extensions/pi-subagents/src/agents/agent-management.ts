@@ -665,7 +665,7 @@ function agentRoleNote(agent: AgentConfig, ctx: ManagementContext): string | und
 	const parentModel = normalizeParentModel(ctx.model);
 	if (!parentModel || agent.runner?.type === "external-cli" || agent.runner?.type === "external-job") return undefined;
 	try {
-		const { shownRole, model } = resolveChildRoute({ agent, forked: false, parentModel, cwd: ctx.cwd });
+		const { shownRole, model } = resolveChildRoute({ agent, forked: false, parentModel, cwd: ctx.cwd, sessionId: ctx.currentSessionId });
 		return shownRole ? `${shownRole} on ${model}` : undefined;
 	} catch {
 		return undefined;

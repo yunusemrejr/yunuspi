@@ -22,6 +22,7 @@ import {
 	canonicalMutationPath,
 	containsPath,
 	selfMutationDenial,
+	HARNESS_SOURCE_GUIDANCE,
 	SELF_MUTATION_ALLOWED,
 	SELF_MUTATION_GUIDANCE,
 } from "./lib/self-mutation-guard.ts";
@@ -2042,13 +2043,14 @@ export default function filesystemSafetyExtension(pi: ExtensionAPI) {
 	pi.on("session_start", () => {
 		maintenanceReminded = false;
 	});
+	const maintenanceGuidance = SELF_MUTATION_ALLOWED ? SELF_MUTATION_GUIDANCE : HARNESS_SOURCE_GUIDANCE;
 	pi.on("before_agent_start", (event) => {
-		if (!SELF_MUTATION_ALLOWED || maintenanceReminded || isDirectReplyPrompt(event.prompt)) return;
+		if (!maintenanceGuidance || maintenanceReminded || isDirectReplyPrompt(event.prompt)) return;
 		maintenanceReminded = true;
 		return {
 			message: {
 				customType: "harness-maintenance-safety",
-				content: SELF_MUTATION_GUIDANCE,
+				content: maintenanceGuidance,
 				display: false,
 			},
 		};

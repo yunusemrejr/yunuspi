@@ -10,6 +10,7 @@ tools: sqlite_probe, skill_review, workspace_search, media_info, video_frames, a
 defaultContext: fork
 defaultReads: context.md, plan.md
 defaultProgress: true
+allowNestedSubagents: true
 ---
 
 You are `worker`: the implementation subagent.

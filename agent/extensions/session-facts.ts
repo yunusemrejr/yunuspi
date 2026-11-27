@@ -1,7 +1,10 @@
 /**
  * Session facts — one stored, model-only line at each human message: local
- * time, session spend, context occupancy, prompt-cache hits and the last run's
- * time and cost. A message that
+ * time, session spend, context occupancy, prompt-cache hits, the last run's
+ * time and cost and, for a session that may run on the ChatGPT subscription,
+ * the week's quota used and what this session added (read from the shared
+ * reading in lib/codex-usage.ts; the network is asked about it at session
+ * start and, in the background, at each human message). A message that
  * asks for speed adds the haste sentence to that same line, once; a request that
  * names a subject adds the installed guides that match it (at most three).
  *
@@ -27,7 +30,8 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { collectSessionCost, collectSessionMetrics } from "@yunuspi/coding-agent/session-accounting";
-import { DEFAULT_TEAM_CONFIG, loadTeamConfig, type RunBudget } from "./lib/team.ts";
+import { DEFAULT_TEAM_CONFIG, loadTeamConfig, type RunBudget, type TeamSettings } from "./lib/team.ts";
+import { codexQuotaText, readCodexUsageFor, sessionIdOf, usesCodex } from "./lib/codex-usage.ts";
 import { resolveTimeZone } from "./lib/session-signals.ts";
 import { goalUserWords } from "./lib/goal-state.ts";
 import { goalAssignment } from "./lib/presets.ts";
@@ -250,6 +254,8 @@ export interface SessionFactsInput {
 	guides?: readonly CatalogSkill[];
 	/** The picked example libraries for visual work, as one complete sentence. */
 	examples?: string;
+	/** `GPT quota: 18% of the week used`, for a session on the ChatGPT subscription. */
+	quota?: string;
 }
 
 /** `name: description clipped at a word (file)`, as the facts line lists a guide. */
@@ -272,6 +278,7 @@ export function sessionFactsText(input: SessionFactsInput): string {
 		const spend = input.lastRun.usd === undefined ? "" : money(input.lastRun.usd);
 		line += ` Last run: ${input.lastRun.minutes} min${spend ? `, ${spend}` : ""}.`;
 	}
+	if (input.quota) line += ` ${input.quota}.`;
 	if (input.where) line += `\n${input.where}`;
 	const guides = input.guides?.length
 		? `\nGuides that match this request (read the ones that bear on it before choosing the approach): ${input.guides.map(guideText).join("; ")}`
@@ -665,6 +672,31 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 	pi.on("session_start", reset);
 	pi.on("session_switch", reset);
 	pi.on("session_tree", reset);
+	/**
+	 * A session that may run on the ChatGPT subscription refreshes the shared
+	 * quota reading in the background: at its start, where the first reading is
+	 * its baseline ("this session +N" counts from there), and at each human
+	 * message. Without a credential nothing is asked. True when the session
+	 * uses the subscription.
+	 */
+	const refreshQuota = (ctx: any, team: Parameters<typeof usesCodex>[0] | undefined): boolean => {
+		try {
+			if (!team || !usesCodex(team, ctx?.model)) return false;
+			void readCodexUsageFor(ctx);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+	const baselineQuota = (_event: any, ctx: any): void => {
+		try {
+			refreshQuota(ctx, loadTeamConfig(ctx?.cwd ?? process.cwd()).team);
+		} catch {
+			/* invalid team settings are reported where they are edited */
+		}
+	};
+	pi.on("session_start", baselineQuota);
+	pi.on("session_switch", baselineQuota);
 	// A compacted history may no longer hold the line that was sent.
 	pi.on("session_compact", () => { whereSent = undefined; });
 	pi.on("session_shutdown", () => {
@@ -749,7 +781,12 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 				lastRun = { minutes: wholeMinutes(run.activeMs), ...(lastSpend === undefined ? {} : { usd: lastSpend }) };
 			}
 			let limits: RunBudget = DEFAULT_TEAM_CONFIG.run;
-			try { limits = loadTeamConfig(ctx?.cwd ?? process.cwd()).run; } catch { /* use defaults */ }
+			let team: TeamSettings | undefined;
+			try {
+				const config = loadTeamConfig(ctx?.cwd ?? process.cwd());
+				limits = config.run;
+				team = config.team;
+			} catch { /* use defaults */ }
 			hurrySent = false;
 			run = { startedUsd: ctx?.sessionManager?.isAccountingIncomplete?.() ? undefined : spend ?? 0, limits, activeMs: 0, lastEventAt: Date.now(), usd: undefined, noted: 0, resting: false };
 			runOwner = ctx?.sessionManager;
@@ -782,6 +819,7 @@ export default function sessionFacts(pi: ExtensionAPI): void {
 				where: whereFor(ctx?.cwd ?? process.cwd()),
 				guides: matchingGuidesFor(event),
 				examples,
+				quota: refreshQuota(ctx, team) ? codexQuotaText(sessionIdOf(ctx)) : undefined,
 			});
 			const hurry = hurryRequested(event?.prompt) ? `\n${HURRY_NOTE}` : "";
 			if (hurry) hurrySent = true;

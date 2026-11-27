@@ -1,7 +1,7 @@
 import { createConversation, prependConversation, recentTools, stagePendingInput, settlePendingInput, applyAgentEvent, messageText, imageParts, toolIcon, toolLine, toolTrouble, duration, workSummary, workBlocks, filesChanged } from './conversation.mjs';
 import { element, icon, markdown } from './markdown.mjs';
 import { readCommand, goalFromStatus } from './command-lens.mjs';
-import { PICKER_LIMIT, TEAM_ROLES, modelRow, rankModels, readTeam, teamOptions } from './team-settings.mjs';
+import { PICKER_LIMIT, TEAM_ROLES, TEAM_VENDOR_PICKER, modelRow, rankModels, readTeam, teamOptions } from './team-settings.mjs';
 
 const api = window.yunuspi;
 const $ = id => document.getElementById(id);
@@ -924,7 +924,7 @@ function teamSection() {
   const pickers = new Map();
   let open = null;
   const close = () => { if (!open) return; open.panel.hidden = true; open.toggle.setAttribute('aria-expanded', 'false'); open = null; };
-  for (const role of TEAM_ROLES) {
+  for (const role of [...TEAM_ROLES, TEAM_VENDOR_PICKER]) {
     const label = element('label', '', role.title), toggle = element('button', 'team-picker'), current = element('span', '', 'Loading…'), hint = element('small', 'team-hint', role.hint);
     toggle.type = 'button'; toggle.id = `team-${role.key}`; toggle.disabled = true; label.htmlFor = toggle.id;
     hint.id = `${toggle.id}-hint`; toggle.setAttribute('aria-describedby', hint.id); toggle.setAttribute('aria-expanded', 'false');
@@ -932,7 +932,9 @@ function teamSection() {
     const panel = element('div', 'team-panel'), search = element('input', 'dialog-search'), list = element('div', 'dialog-list');
     panel.hidden = true; search.type = 'search'; search.placeholder = 'Search: a model, openrouter, codex…'; search.setAttribute('aria-label', `Search models for ${role.title}`);
     panel.append(search, list);
-    const picker = { role, toggle, current, panel, search, list, options: [], rows: [], saved: role.first.value };
+    // A fixed picker (two options) has no search; its options are tabbable buttons.
+    search.hidden = Boolean(role.fixed);
+    const picker = { role, toggle, current, panel, search, list, options: [], rows: [], saved: role.fixed ? role.options[0].value : role.first.value };
     const draw = () => {
       list.replaceChildren();
       const ranked = rankModels(picker.rows, search.value, picker.saved);
@@ -949,14 +951,17 @@ function teamSection() {
     };
     picker.draw = draw;
     search.oninput = draw;
-    search.onkeydown = event => {
+    panel.onkeydown = event => {
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); toggle.focus(); }
+    };
+    search.onkeydown = event => {
       if (event.key === 'Enter') { event.preventDefault(); list.querySelector('button')?.click(); }
     };
     toggle.onclick = () => {
       if (open === picker) { close(); return; }
       close(); open = picker; panel.hidden = false; toggle.setAttribute('aria-expanded', 'true');
-      search.value = ''; draw(); search.focus();
+      search.value = ''; draw();
+      (role.fixed ? list.querySelector('button') : search).focus();
     };
     pickers.set(role.key, picker); section.append(label, toggle, hint, panel);
   }
@@ -970,15 +975,31 @@ function teamSection() {
       .catch(error => { if (picker.saved === option.value) { picker.saved = before; show(picker); } toast(safeError(error), 'error'); })
       .finally(() => picker.toggle.removeAttribute('aria-busy'));
   };
+  // The quota points: a number field shaped like the pickers. Saved when it changes; on failure the earlier value returns.
+  const points = element('input', 'team-number'), pointsLabel = element('label', '', 'ChatGPT quota per session'), pointsHint = element('small', 'team-hint', 'Weekly quota points one session may use before helpers switch to legwork. 0 means never.');
+  points.type = 'number'; points.min = '0'; points.step = '1'; points.id = 'team-subscriptionPoints'; points.disabled = true; pointsLabel.htmlFor = points.id;
+  pointsHint.id = `${points.id}-hint`; points.setAttribute('aria-describedby', pointsHint.id);
+  points.onchange = () => {
+    const before = points.dataset.saved;
+    if (!points.validity.valid || points.value === '') { points.value = before; return; }
+    points.setAttribute('aria-busy', 'true');
+    void api.setTeam('subscriptionPoints', points.value)
+      .then(saved => { points.dataset.saved = points.value = String(saved.subscriptionPoints); })
+      .catch(error => { points.value = before; toast(safeError(error), 'error'); })
+      .finally(() => points.removeAttribute('aria-busy'));
+  };
+  section.append(pointsLabel, points, pointsHint);
   // A saved value the list does not reach stays chosen, shown as its raw provider/id.
-  api.teamSettings().then(({ team, models }) => {
+  api.teamSettings().then(({ team, models, selectors }) => {
     if (!$('dialog').open) return;
-    for (const role of TEAM_ROLES) {
+    for (const role of [...TEAM_ROLES, TEAM_VENDOR_PICKER]) {
       const picker = pickers.get(role.key);
-      picker.saved = team[role.key]; picker.options = teamOptions(role, models, picker.saved);
+      picker.saved = team[role.key];
+      picker.options = role.fixed ? role.options.map(option => ({ ...option, selected: option.value === picker.saved })) : teamOptions(role, models, picker.saved, selectors);
       picker.rows = picker.options.map(option => ({ ...modelRow(option.value, { name: option.name || option.label, label: option.label }), option }));
       show(picker); picker.toggle.disabled = false;
     }
+    points.dataset.saved = points.value = String(team.subscriptionPoints); points.disabled = false;
   }).catch(error => { if ($('dialog').open) toast(safeError(error), 'error'); });
   return section;
 }

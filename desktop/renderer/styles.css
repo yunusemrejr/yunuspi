@@ -1670,6 +1670,21 @@ kbd {
 .team-picker[aria-busy="true"] {
   opacity:.7
 }
+.dialog input.team-number {
+  min-height:40px;
+  appearance:textfield;
+  -moz-appearance:textfield
+}
+.dialog input.team-number::-webkit-inner-spin-button,.dialog input.team-number::-webkit-outer-spin-button {
+  appearance:none;
+  margin:0
+}
+.dialog input.team-number:hover:not(:disabled) {
+  background:var(--surface-hover)
+}
+.dialog input.team-number[aria-busy="true"] {
+  opacity:.7
+}
 .team-panel {
   margin-top:6px;
   padding:8px;

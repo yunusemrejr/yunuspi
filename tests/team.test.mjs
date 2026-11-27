@@ -35,8 +35,8 @@ test('no block resolves to today: every role inherits the session model', () => 
   const cwd = reset();
   const config = team.loadTeamConfig(cwd);
   assert.deepEqual(config.team, {
-    helper: 'inherit', legwork: 'inherit', advisor: 'off', roles: {},
-    maxThinking: { helper: 'xhigh', legwork: 'high' }, sideCalls: 'legwork', free: 'on',
+    helper: 'inherit', legwork: 'inherit', sublegwork: 'inherit', advisor: 'off', consultant: 'off', subscriptionPoints: 3, roles: {},
+    maxThinking: { helper: 'xhigh', legwork: 'high' }, sideCalls: 'legwork', free: 'on', paidVendors: 'block',
   });
   assert.deepEqual(config.run, { softMinutes: 60, softUsd: 1 });
   for (const role of team.TEAM_ROLES) assert.equal(team.resolveRoleRoute(role, config.team, session), 'test/main-model');
@@ -64,7 +64,14 @@ test('invalid values fail loudly with the file and what is accepted', () => {
     [{ team: { roles: { scout: 'boss' } } }, /invalid 'team\.roles\.scout'; expected "main", "helper", "legwork"/],
     [{ team: { maxThinking: { helper: 'extreme' } } }, /invalid 'team\.maxThinking\.helper'; expected one of/],
     [{ team: { maxThinking: { main: 'high' } } }, /invalid 'team\.maxThinking\.main'; expected helper or legwork/],
-    [{ team: { colour: 'red' } }, /invalid 'team\.colour'; expected one of helper, legwork, advisor, roles, maxThinking, sideCalls/],
+    [{ team: { colour: 'red' } }, /invalid 'team\.colour'; expected one of helper, legwork, advisor, roles, maxThinking, sideCalls, free, consultant, sublegwork, subscriptionPoints, paidVendors/],
+    [{ team: { paidVendors: 'yes' } }, /invalid 'team\.paidVendors'; expected "block" or "allow"/],
+    [{ team: { consultant: 'inherit' } }, /invalid 'team\.consultant'; expected "off" or a model as "provider\/model-id", or "provider\/latest-<tier>"/],
+    [{ team: { consultant: 'luna' } }, /invalid 'team\.consultant'/],
+    [{ team: { sublegwork: 'off' } }, /invalid 'team\.sublegwork'; expected "inherit" or a model/],
+    [{ team: { sublegwork: 3 } }, /invalid 'team\.sublegwork'/],
+    [{ team: { subscriptionPoints: -1 } }, /invalid 'team\.subscriptionPoints'; expected a number of 0 or more \(0 never falls back\)/],
+    [{ team: { subscriptionPoints: '3' } }, /invalid 'team\.subscriptionPoints'/],
     [{ team: [] }, /invalid 'team'; expected an object/],
     [{ run: { softMinutes: -1 } }, /invalid 'run\.softMinutes'; expected a number of 0 or more/],
     [{ run: { softUsd: '1' } }, /invalid 'run\.softUsd'/],

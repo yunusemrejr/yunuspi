@@ -12,6 +12,7 @@ after(() => fs.rmSync(root, { recursive: true, force: true }));
 
 const jiti = createJiti(import.meta.dirname);
 const team = await jiti.import('../agent/extensions/team-command.ts');
+const tiers = await jiti.import('../agent/extensions/lib/model-tiers.ts');
 const { ROW_LABELS } = team;
 
 const models = [
@@ -51,10 +52,11 @@ function fixture(cwd, { hasUI = true, selects = [], inputs = [] } = {}) {
     setStatus() {},
     setWidget() {},
   };
-  const pi = { registerCommand: (name, command) => commands.set(name, command) };
+  const hooks = new Map();
+  const pi = { registerCommand: (name, command) => commands.set(name, command), on: (event, handler) => hooks.set(event, handler) };
   team.default(pi);
   const ctx = { cwd, hasUI, mode: hasUI ? 'tui' : 'print', modelRegistry: { getAvailable: () => models }, ui };
-  return { command: commands.get('team'), ctx, notices, asked };
+  return { command: commands.get('team'), ctx, notices, asked, hooks };
 }
 
 const rowOption = (options, label) => options.find((option) => option.startsWith(label));
@@ -195,11 +197,15 @@ test('the picker shows every row with its exact label and current value', async 
   assert.deepEqual(options.slice(0, -1), [
     `${ROW_LABELS.helper} — test/model-a`,
     `${ROW_LABELS.legwork} — same as the session`,
+    `${ROW_LABELS.sublegwork} — same as legwork`,
     `${ROW_LABELS.advisor} — off`,
+    `${ROW_LABELS.consultant} — off`,
     `${ROW_LABELS.helperThinking} — xhigh`,
     `${ROW_LABELS.legworkThinking} — high`,
     `${ROW_LABELS.sideCalls} — legwork`,
     `${ROW_LABELS.free} — on · quota not read yet · no model measured yet`,
+    `${ROW_LABELS.subscriptionPoints} — 3`,
+    `${ROW_LABELS.paidVendors} — block`,
     `${ROW_LABELS.minutes} — 60`,
     `${ROW_LABELS.usd} — 1`,
     `${ROW_LABELS.roles} — built-in`,
@@ -259,4 +265,136 @@ test('G: a query that begins a route lists that provider first, every other matc
   const options = ['Same as the session', 'deepinfra/deepseek-ai/DeepSeek-V4-Flash', 'deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro', 'openrouter/deepseek/deepseek-v4-flash'];
   assert.deepEqual(team.filterModelOptions(options, 'deepseek'), ['deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro', 'deepinfra/deepseek-ai/DeepSeek-V4-Flash', 'openrouter/deepseek/deepseek-v4-flash']);
   assert.deepEqual(team.filterModelOptions(options, 'deeps').slice(0, 2), ['deepseek/deepseek-flash', 'deepseek/deepseek-v4-pro']);
+});
+
+const codexModels = ['gpt-5.6-terra', 'gpt-6-terra', 'gpt-6.1-terra', 'gpt-6.1-terra-pro', 'gpt-5.9-sol', 'gpt-5.10-sol', 'gpt-6-astra'].map((id) => ({ provider: 'openai-codex', id }));
+
+test('each model picker offers a latest-<tier> selector per openai-codex tier, labelled with what it resolves to, before the exact ids', async () => {
+  const cwd = reset(undefined);
+  const f = fixture(cwd, { selects: [(title, options) => rowOption(options, ROW_LABELS.consultant), () => undefined, () => 'Done'] });
+  f.ctx.modelRegistry = { getAvailable: () => [...models, ...codexModels] };
+  await f.command.handler('', f.ctx);
+  const options = f.asked[1].options;
+  assert.deepEqual(options.slice(0, 4), ['Off', 'openai-codex/latest-astra', 'openai-codex/latest-sol', 'openai-codex/latest-terra']);
+  assert.ok(options.indexOf('openai-codex/latest-terra') < options.indexOf('test/model-a'), 'selectors come before the exact ids');
+  assert.equal(options.length, 4 + models.length + codexModels.length);
+  assert.deepEqual(tiers.tierOptions(codexModels), [
+    { setting: 'openai-codex/latest-astra', label: 'latest astra → gpt-6-astra' },
+    { setting: 'openai-codex/latest-sol', label: 'latest sol → gpt-5.10-sol' },
+    { setting: 'openai-codex/latest-terra', label: 'latest terra → gpt-6.1-terra' },
+  ]);
+  assert.deepEqual(tiers.tierOptions(models), [], 'no codex model, no selector');
+});
+
+test('the sublegwork row starts with "Same as legwork" and stores inherit; the consultant row starts with Off; a selector is stored as it is', async () => {
+  const cwd = reset({ team: { legwork: 'test/model-a' } });
+  const sub = fixture(cwd, { selects: [(title, options) => rowOption(options, ROW_LABELS.sublegwork), (title, options) => { assert.equal(options[0], 'Same as legwork'); return 'test/model-b'; }, () => 'Done'] });
+  await sub.command.handler('', sub.ctx);
+  assert.equal(readAgentSettings().team.sublegwork, 'test/model-b');
+  const back = fixture(cwd, { selects: [(title, options) => rowOption(options, ROW_LABELS.sublegwork), () => 'Same as legwork', () => 'Done'] });
+  await back.command.handler('', back.ctx);
+  assert.equal(readAgentSettings().team.sublegwork, 'inherit');
+  const consultant = fixture(cwd, { selects: [(title, options) => rowOption(options, ROW_LABELS.consultant), () => 'openai-codex/latest-astra', () => 'Done'] });
+  consultant.ctx.modelRegistry = { getAvailable: () => codexModels };
+  await consultant.command.handler('', consultant.ctx);
+  assert.equal(readAgentSettings().team.consultant, 'openai-codex/latest-astra');
+  assert.equal(readAgentSettings().team.legwork, 'test/model-a', 'the other keys stay');
+  const off = fixture(cwd, { selects: [(title, options) => rowOption(options, ROW_LABELS.consultant), () => 'Off', () => 'Done'] });
+  await off.command.handler('', off.ctx);
+  assert.equal(readAgentSettings().team.consultant, 'off');
+});
+
+test('a model picker hides the routes the vendor policy refuses, until paid vendors are allowed', async () => {
+  const forbidden = [{ provider: 'openrouter', id: 'anthropic/claude-x' }, { provider: 'openai', id: 'gpt-6' }, { provider: 'anthropic', id: 'claude-y' }];
+  const open = [{ provider: 'openrouter', id: 'qwen/qwen3.8-flash' }, { provider: 'openrouter', id: 'openai/gpt-oss-120b' }, { provider: 'openai-codex', id: 'gpt-6-terra' }];
+  const listed = async (settings, registry) => {
+    const f = fixture(reset(settings), { selects: [(title, options) => rowOption(options, ROW_LABELS.helper), () => undefined, () => 'Done'] });
+    f.ctx.modelRegistry = { getAvailable: () => [...forbidden, ...open], ...registry };
+    await f.command.handler('', f.ctx);
+    return f.asked[1].options;
+  };
+  const blocked = await listed(undefined);
+  assert.deepEqual(blocked.filter((option) => option.includes('/')).sort(), ['openai-codex/gpt-6-terra', 'openai-codex/latest-terra', 'openrouter/openai/gpt-oss-120b', 'openrouter/qwen/qwen3.8-flash']);
+  const allowed = await listed({ team: { paidVendors: 'allow' } });
+  assert.ok(allowed.includes('openrouter/anthropic/claude-x') && allowed.includes('openai/gpt-6'));
+  const oauth = await listed(undefined, { isUsingOAuth: (model) => model.provider === 'anthropic' });
+  assert.ok(oauth.includes('anthropic/claude-y'), 'an OAuth login is a subscription');
+  assert.ok(!oauth.includes('openai/gpt-6') && !oauth.includes('openrouter/anthropic/claude-x'));
+});
+
+test('the quota-points row takes a number of 0 or more, and paid vendors is block or allow', async () => {
+  const cwd = reset(undefined);
+  const points = fixture(cwd, { selects: [(title, options) => rowOption(options, ROW_LABELS.subscriptionPoints), () => 'Done'], inputs: ['5'] });
+  await points.command.handler('', points.ctx);
+  assert.equal(readAgentSettings().team.subscriptionPoints, 5);
+  assert.match(points.asked.find((item) => item.kind === 'input').placeholder, /0 never falls back/);
+  const zero = fixture(cwd, { selects: [(title, options) => rowOption(options, ROW_LABELS.subscriptionPoints), (title, options) => { assert.ok(rowOption(options, ROW_LABELS.subscriptionPoints).endsWith('— off'), '0 reads as off'); return 'Done'; }], inputs: ['0'] });
+  await zero.command.handler('', zero.ctx);
+  assert.equal(readAgentSettings().team.subscriptionPoints, 0);
+  const bad = fixture(cwd, { selects: [(title, options) => rowOption(options, ROW_LABELS.subscriptionPoints), () => 'Done'], inputs: ['-2'] });
+  await bad.command.handler('', bad.ctx);
+  assert.equal(readAgentSettings().team.subscriptionPoints, 0, 'a refused answer changes nothing');
+  assert.equal(bad.notices.at(-1).type, 'error');
+  const vendors = fixture(cwd, { selects: [(title, options) => rowOption(options, ROW_LABELS.paidVendors), (title, options) => { assert.deepEqual(options, ['block', 'allow']); return 'allow'; }, () => 'Done'] });
+  await vendors.command.handler('', vendors.ctx);
+  assert.equal(readAgentSettings().team.paidVendors, 'allow');
+});
+
+test('/team show prints the new keys', async () => {
+  const cwd = reset({ team: { sublegwork: 'openrouter/qwen/qwen3.8-flash', consultant: 'openai-codex/latest-astra', subscriptionPoints: 0, paidVendors: 'allow' } });
+  const f = fixture(cwd);
+  await f.command.handler('show', f.ctx);
+  const text = f.notices[0].message;
+  assert.match(text, /^Sub-legwork model\s+openrouter\/qwen\/qwen3\.8-flash$/m);
+  assert.match(text, /^Consultant model\s+openai-codex\/latest-astra$/m);
+  assert.match(text, /^ChatGPT quota points per session\s+off$/m);
+  assert.match(text, /^Paid Claude, GPT, Gemini\s+allow$/m);
+  const defaults = fixture(reset(undefined));
+  await defaults.command.handler('show', defaults.ctx);
+  assert.match(defaults.notices[0].message, /^Sub-legwork model\s+same as legwork$/m);
+  assert.match(defaults.notices[0].message, /^Consultant model\s+off$/m);
+  assert.match(defaults.notices[0].message, /^ChatGPT quota points per session\s+3$/m);
+  assert.match(defaults.notices[0].message, /^Paid Claude, GPT, Gemini\s+block$/m);
+});
+
+test('while paid vendors are blocked a request to Claude, GPT or Gemini outside a subscription is stopped before it is sent', async () => {
+  const claude = { provider: 'openrouter', id: 'anthropic/claude-x' };
+  const runHooks = (f, model, ctxExtra = {}) => {
+    const ctx = { ...f.ctx, ...ctxExtra };
+    return [f.hooks.get('before_provider_request')({ type: 'before_provider_request', payload: {}, model }, ctx), f.hooks.get('before_auxiliary_provider_request')({ type: 'before_auxiliary_provider_request', payload: {}, model }, ctx)];
+  };
+  const f = fixture(reset(undefined));
+  assert.deepEqual([...f.hooks.keys()].sort(), ['before_auxiliary_provider_request', 'before_provider_request']);
+  const refuse = (model, ctxExtra) => assert.throws(() => runHooks(f, model, ctxExtra), (error) => error.code === 'PI_AUTONOMOUS_REQUEST_DENIED' && !error.message.includes('\n')
+    && error.message.startsWith(`Blocked: ${model.provider}/${model.id} reaches `) && /Set team\.paidVendors to allow in \/team to permit it\.$/.test(error.message));
+  refuse(claude);
+  refuse({ provider: 'openai', id: 'gpt-6' });
+  refuse({ provider: 'amazon-bedrock', id: 'anthropic.claude-3' });
+  assert.throws(() => f.hooks.get('before_auxiliary_provider_request')({ model: claude }, f.ctx), /Blocked: openrouter\/anthropic\/claude-x reaches Claude/, 'side calls and compaction are covered');
+  assert.throws(() => f.hooks.get('before_provider_request')({ payload: {} }, { ...f.ctx, model: claude }), /Blocked/, 'a request with no route metadata uses the session model');
+  for (const model of [{ provider: 'openrouter', id: 'qwen/qwen3.8-flash' }, { provider: 'openai-codex', id: 'gpt-6.1-sol' }, { provider: 'openrouter', id: 'openai/gpt-oss-120b' }, { provider: 'openai', id: 'gpt-6', baseUrl: 'http://127.0.0.1:8123/v1' }]) {
+    assert.deepEqual(runHooks(f, model), [undefined, undefined], `${model.provider}/${model.id} goes through`);
+  }
+  assert.deepEqual(runHooks(f, { provider: 'anthropic', id: 'claude-y' }, { modelRegistry: { isUsingOAuth: () => true } }), [undefined, undefined], 'an OAuth login is a subscription');
+  refuse({ provider: 'anthropic', id: 'claude-y' }, { modelRegistry: { isUsingOAuth: () => false } });
+  assert.deepEqual(f.hooks.get('before_provider_request')({ payload: {} }, { ...f.ctx, model: undefined }), undefined, 'nothing to judge, nothing stopped');
+  const allow = fixture(reset({ team: { paidVendors: 'allow' } }));
+  assert.deepEqual(runHooks(allow, claude), [undefined, undefined], 'allow lets it through');
+  const broken = fixture(reset({ team: { paidVendors: 7 } }));
+  assert.throws(() => runHooks(broken, claude), /Blocked/, 'an unreadable setting blocks');
+});
+
+test('a project file cannot allow paid vendors: only the global file can', async () => {
+  const cwd = reset({ team: { paidVendors: 'allow' } });
+  fs.mkdirSync(path.join(cwd, '.pi'));
+  fs.writeFileSync(path.join(cwd, '.pi', 'settings.json'), JSON.stringify({ team: { paidVendors: 'allow' } }));
+  const f = fixture(cwd);
+  await f.command.handler('show', f.ctx);
+  assert.equal(f.notices[0].type, 'error');
+  assert.match(f.notices[0].message, new RegExp(`invalid 'team\\.paidVendors'; expected "block"; "allow" is accepted only in the global settings file`));
+  assert.ok(f.notices[0].message.includes(path.join(cwd, '.pi', 'settings.json')));
+  assert.throws(() => f.hooks.get('before_provider_request')({ payload: {}, model: { provider: 'openrouter', id: 'anthropic/claude-x' } }, f.ctx), /Blocked/, 'the guard fails closed');
+  fs.writeFileSync(path.join(cwd, '.pi', 'settings.json'), JSON.stringify({ team: { paidVendors: 'block' } }));
+  const tight = fixture(cwd);
+  assert.throws(() => tight.hooks.get('before_provider_request')({ payload: {}, model: { provider: 'openrouter', id: 'anthropic/claude-x' } }, tight.ctx), /Blocked/, 'a project may tighten the global allow');
 });

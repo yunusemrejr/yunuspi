@@ -519,6 +519,20 @@ try {
   await page.locator('#settings').click(); await ready();
   await page.locator('#team-helper').scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(output, 'desktop-settings-team.png') }); report.screenshots.push('desktop-settings-team.png');
+  // The two non-model controls look like the pickers: same height, fill and border, and nothing is cut off at the bottom.
+  const teamControls = () => page.evaluate(() => ['team-helper', 'team-paidVendors', 'team-subscriptionPoints'].map(id => {
+    const node = document.getElementById(id), style = getComputedStyle(node), box = node.getBoundingClientRect(), content = document.getElementById('dialog-content').getBoundingClientRect();
+    return { id, height: Math.round(box.height), background: style.backgroundColor, border: style.borderTopColor, radius: style.borderTopLeftRadius, inside: box.left >= content.left - 1 && box.right <= content.right + 1 };
+  }));
+  const matching = async label => {
+    const [picker, ...others] = await teamControls();
+    for (const control of others) assert.deepEqual({ ...control, id: picker.id }, picker, `${control.id} matches the model pickers at ${label}`);
+    assert.equal(picker.inside, true, `the Team controls fit at ${label}`);
+  };
+  await page.locator('#team-subscriptionPoints').scrollIntoViewIfNeeded();
+  await matching('desktop width');
+  await page.screenshot({ path: path.join(output, 'desktop-settings-team-bottom.png') }); report.screenshots.push('desktop-settings-team-bottom.png');
+  await page.locator('#team-helper').scrollIntoViewIfNeeded();
   await page.locator('#team-helper').focus(); await page.keyboard.press('Tab');
   assert.equal(await page.evaluate(() => document.activeElement.id), 'team-legwork');
   const focusRing = await page.locator('#team-legwork').evaluate(node => { const style = getComputedStyle(node); return { style: style.outlineStyle, width: parseFloat(style.outlineWidth) }; });
@@ -558,6 +572,9 @@ try {
   });
   assert.ok(fit.overflow <= 1 && fit.outside === 0, `the Team section fits a ${fit.width}px window without sideways scrolling`);
   await page.screenshot({ path: path.join(output, 'desktop-settings-team-narrow.png') }); report.screenshots.push('desktop-settings-team-narrow.png');
+  await page.locator('#team-subscriptionPoints').scrollIntoViewIfNeeded();
+  await matching('400 px');
+  await page.screenshot({ path: path.join(output, 'desktop-settings-team-narrow-bottom.png') }); report.screenshots.push('desktop-settings-team-narrow-bottom.png');
   await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setMinimumSize(560, 420));
   await resizeViewport(...teamWindow);
   // Escape inside an open picker closes only the picker; the next one closes the dialog.
