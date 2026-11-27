@@ -135,6 +135,14 @@ test('the attempt is recorded before the request goes out, so a second process w
 	assert.equal(seenDuringRequest, 123_456_789);
 });
 
+test('no credential yet is not an attempt, so the next reading is not held back', async (t) => {
+	const file = agentDir(t);
+	assert.equal(await readCodexUsage({ credential: async () => undefined, now: () => 1_000_000 }), undefined);
+	assert.equal(fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')).lastAttemptAt : undefined, undefined);
+	const answering = fakeFetch(payload(7));
+	assert.equal((await readCodexUsage({ credential, fetchImpl: answering.impl, now: () => 1_005_000 }))?.weeklyPercent, 7);
+});
+
 test('credential, request and body share one deadline and the caller signal', async (t) => {
 	agentDir(t);
 	const controller = new AbortController();

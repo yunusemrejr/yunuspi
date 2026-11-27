@@ -280,11 +280,12 @@ export async function readCodexUsage(options: CodexUsageOptions): Promise<CodexU
 			if (reading && options.sessionId) noteSessionBaseline(options.sessionId, reading);
 			return reading;
 		}
-		updateState(now(), (state) => { state.lastAttemptAt = now(); });
 		const timeout = AbortSignal.timeout(TIMEOUT_MS);
 		const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
 		const credential = await until(options.credential(), signal);
 		if (!credential || signal.aborted) return undefined;
+		// An attempt is a request about to leave: a session whose ChatGPT models have not loaded yet must not hold the next reading back.
+		updateState(now(), (state) => { state.lastAttemptAt = now(); });
 		const response = await (options.fetchImpl ?? fetch)(USAGE_URL, {
 			headers: {
 				accept: "application/json",
